@@ -61,6 +61,19 @@ aplikacji (Sharing) można ograniczyć dostęp do wskazanych adresów e-mail.
    prędkość dla każdego kierowcy (dojazd dokładnie, gdy koparka będzie wolna) i komunikaty dla operatora koparki
    („WZ-03 za 1:40 → nabierz łyżkę i czekaj”). Wynik vs dziś, krzywa uczenia, animacja z ekranami operatorów.
 
+### Drogi, trasy dedykowane, miejsca postoju, plik scenariusza
+
+- **Kierunek rysowania drogi**: przy rysowaniu wybierasz ⬇ w dół / ⬆ pod górę / ➡ płasko i nachylenie; na mapie
+  strzałka pokazuje kierunek rysowania (zielona = wznosi się, pomarańczowa = opada). Rzędne liczone są z faktycznego
+  przebiegu dróg – droga od kruszarki może też iść pod górę. Stare mapy są przeliczane automatycznie.
+- **Trasy dedykowane** (tryb „Trasa dedykowana”): dla ekipy strzałowej, sztygara, cysterny albo przejazdu koparki.
+  Bez trasy pojazd jedzie najkrótszą drogą po sieci. Tam, gdzie trasa biegnie po drodze wozideł, obowiązuje mijanie.
+- **Miejsce postoju koparki** (znacznik 🅿️): tu koparka zjeżdża na strzelanie (opcjonalnie też na tankowanie) –
+  trasą dedykowaną, najkrótszą drogą albo na wprost; bez znacznika cofa się o zadaną odległość swoją trasą.
+  Czas przejazdu wydłuża postój; wozidła przestają zjeżdżać, zanim pierwsza koparka ruszy na postój.
+- **📁 Mój scenariusz** (panel boczny): „Zapisz scenariusz do pliku” / „Wczytaj scenariusz z pliku” – cała kopalnia,
+  zdarzenia, wariant i nauczona polityka w jednym pliku `.kruszyk.yaml`.
+
 ### Zdarzenia na zmianie
 
 | Zdarzenie | Jak działa w symulacji |

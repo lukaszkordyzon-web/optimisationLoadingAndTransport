@@ -132,11 +132,15 @@ def network(sc) -> dict:
     levels = info.get("levels", {})
     return {
         "roads": [{"coords": r["coords"], "kind": r.get("kind", "droga"), "name": r.get("name", ""),
-                   "grade": r.get("grade_pct", 0), "active": r.get("active", True)} for r in site.get("roads", [])],
+                   "grade": r.get("grade_draw_pct", r.get("grade_pct", 0)), "active": r.get("active", True)}
+                  for r in site.get("roads", [])],
         "piles": [{"polygon": p["polygon"], "id": p["id"], "material": p.get("material", "")} for p in site.get("piles", [])],
         "excavators": [{"id": e["id"], "lat": e["lat"], "lon": e["lon"],
                         "elev": (levels.get(e["id"]) or {}).get("elev_m")} for e in site.get("excavators", [])],
         "crusher": site.get("crusher"),
+        "blast": site.get("blast"),
+        "parking": site.get("parking", []),
+        "dedicated": site.get("dedicated", []),
         "junctions": nodes,
         "center": site.get("center"), "zoom": site.get("zoom", 15),
     }
@@ -212,6 +216,7 @@ def animation_payload(res, baseline=None, label: str = "", baseline_label: str =
         "hopper_cap": sc.crusher.hopper_t,
         "excavators": [{"id": e.id, "blast": e.blast, "material": sc.blast(e.blast).material} for e in sc.excavators],
         "light": res.light_vehicles,
+        "excavator_tracks": res.excavator_tracks,
         "closure": list(res.closure) if res.closure else None,
         "breaks": [list(b) for b in res.breaks],
         "advice": excavator_advice(res),

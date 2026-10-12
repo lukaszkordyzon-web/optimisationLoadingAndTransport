@@ -16,7 +16,7 @@ from kruszyk.psd import PRESETS, preset_of
 from kruszyk.rl import POLICIES
 from kruszyk.rl import train as rl_train
 from kruszyk.sim import simulate
-from kruszyk.site import site_to_scenario
+from kruszyk.site import normalize_roads, site_to_scenario
 
 DEMO = Path(__file__).parent / "scenarios" / "kruszyk_mapa_demo.yaml"
 
@@ -216,17 +216,20 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
 
     site = var.get("site")
     if site:
+        normalize_roads(site)
         st.markdown("**🛣️ Drogi** – odznacz „w użyciu”, żeby zamknąć drogę; zaznacz przy drodze planowanej, żeby ją otworzyć.")
         ed = _snapshot_editor(
             f"vroads_{vv}",
             lambda: pd.DataFrame([{"name": r.get("name", ""), "kind": r.get("kind", "droga"),
-                                   "grade_pct": float(r.get("grade_pct", 0)), "speed_limit_kmh": float(r.get("speed_limit_kmh", 30)),
+                                   "grade_draw_pct": float(r.get("grade_draw_pct", 0)),
+                                   "speed_limit_kmh": float(r.get("speed_limit_kmh", 30)),
                                    "active": bool(r.get("active", True))} for r in site["roads"]]),
             hide_index=True, width="stretch", disabled=["name", "kind"],
-            column_config={"name": "droga", "kind": "rodzaj", "grade_pct": "nachylenie [%]",
+            column_config={"name": "droga", "kind": "rodzaj", "grade_draw_pct": "nachylenie wzdłuż rysowania [%]",
                            "speed_limit_kmh": "limit [km/h]", "active": st.column_config.CheckboxColumn("w użyciu")})
         for r, (_, row) in zip(site["roads"], ed.iterrows()):
-            r["grade_pct"], r["speed_limit_kmh"], r["active"] = float(row["grade_pct"]), float(row["speed_limit_kmh"]), bool(row["active"])
+            r["grade_draw_pct"], r["speed_limit_kmh"], r["active"] = (float(row["grade_draw_pct"]), float(row["speed_limit_kmh"]),
+                                                                      bool(row["active"]))
         st.markdown("**⛰️ Usypy** – ilość i uziarnienie.")
         ed = _snapshot_editor(
             f"vpiles_{vv}",

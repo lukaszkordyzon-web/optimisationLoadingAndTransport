@@ -102,3 +102,18 @@ def test_simple_mode_variant_compares_with_today():
     assert not at.exception, at.exception
     assert at.session_state["variant_yaml"]
     assert any("vs dziś" in (m.delta or "") for m in at.metric)
+
+
+def test_scenario_file_roundtrip():
+    import yaml
+
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
+    at.sidebar.selectbox[0].select(name).run()
+    at.sidebar.button[0].click().run()
+    raw = at.session_state["raw"]
+    # the same data the download button produces, loaded back as a new mine
+    text = yaml.safe_dump({**raw, "variant": raw, "_plik": {"format": "kruszyk-1"}}, allow_unicode=True)
+    data = yaml.safe_load(text)
+    assert data["site"]["roads"] and data["variant"]["name"] == raw["name"]
+    assert any("Zapisz scenariusz" in b.proto.label for b in at.get("download_button"))

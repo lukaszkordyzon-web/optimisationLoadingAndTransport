@@ -13,8 +13,9 @@ Stored in the scenario YAML under `site`:
       roads:       # haul roads and ramps, drawn as polylines
         - {id, name, kind: droga|rampa, grade_pct, speed_limit_kmh, coords: [[lat, lon], ...]}
 
-`grade_pct` of a road is the grade in the direction TOWARDS THE CRUSHER (+ = uphill when loaded),
-so the drawing direction does not matter. Roads form a network: an end of a road placed on another
+`grade_draw_pct` of a road is its grade IN THE DIRECTION IT WAS DRAWN (+ = the road climbs from its first
+to its last point, - = it descends). Older maps used `grade_pct` = grade towards the crusher; they are
+converted by `normalize_roads`. Roads form a network: an end of a road placed on another
 road (≤ SNAP_M) – also in the middle of it – becomes a junction. Elevations of all junctions are
 computed from the crusher (crusher.elev_m, default 0) along the grades, so a branch half-way down
 a ramp starts at the right level and every excavator knows its level.
@@ -112,10 +113,12 @@ class RoadGraph:
     * extra points (excavators, crusher) are attached to the closest point of the network.
     """
 
-    def __init__(self, roads: list[dict]):
-        roads = [r for r in roads if r.get("active", True)]  # planned / closed roads are not driven on
+    def __init__(self, roads: list[dict], include_planned: bool = False):
+        if not include_planned:
+            roads = [r for r in roads if r.get("active", True)]  # planned / closed roads are not driven on
         self.nodes: list[tuple[float, float]] = []
         self.edges: dict[tuple[int, int], tuple[float, int]] = {}  # (u<v) -> (length, road index)
+        self.first: dict[tuple[int, int], int] = {}  # edge -> its node that comes first in the drawing
         self.roads = roads
         for ri, road in enumerate(roads):
             ids = [self._node(tuple(c)) for c in road["coords"]]
@@ -133,15 +136,28 @@ class RoadGraph:
         return len(self.nodes) - 1
 
     def _add_edge(self, a: int, b: int, ri: int):
-        self.edges[(min(a, b), max(a, b))] = (haversine_m(self.nodes[a], self.nodes[b]), ri)
+        """Edge drawn from a to b."""
+        key = (min(a, b), max(a, b))
+        self.edges[key] = (haversine_m(self.nodes[a], self.nodes[b]), ri)
+        self.first[key] = a
 
     def degree(self, n: int) -> int:
         return sum(1 for (a, b) in self.edges if n in (a, b))
 
     def _split(self, edge: tuple[int, int], n: int):
         _, ri = self.edges.pop(edge)
-        self._add_edge(edge[0], n, ri)
-        self._add_edge(n, edge[1], ri)
+        a = self.first.pop(edge)
+        b = edge[1] if a == edge[0] else edge[0]
+        self._add_edge(a, n, ri)  # keep the drawing direction on both halves
+        self._add_edge(n, b, ri)
+
+    def dz(self, u: int, v: int, w: float, ri: int) -> float:
+        """Height change driving u -> v along a road edge of length w."""
+        road = self.roads[ri]
+        if "grade_draw_pct" in road:
+            g = float(road.get("grade_draw_pct") or 0.0) * w / 100
+            return g if self.first.get((min(u, v), max(u, v)), u) == u else -g
+        return -float(road.get("grade_pct", 0.0)) * w / 100  # legacy: grade towards the crusher
 
     def _nearest_edge(self, p, exclude_node: int | None = None):
         best = None
@@ -221,17 +237,52 @@ class RoadGraph:
             for v, w, ri in adj.get(u, []):
                 if d + w < dist.get(v, math.inf):
                     dist[v] = d + w
-                    elev[v] = elev[u] - float(self.roads[ri].get("grade_pct", 0.0)) * w / 100
+                    elev[v] = elev[u] + self.dz(u, v, w, ri)
                     heapq.heappush(pq, (d + w, v))
         warnings = []
         for (a, b), (w, ri) in self.edges.items():
             if a in elev and b in elev:
-                g = float(self.roads[ri].get("grade_pct", 0.0))
+                g = self.dz(a, b, w, ri)
                 if g == 0 and abs(elev[a] - elev[b]) > 3:
                     name = self.roads[ri].get("name") or self.roads[ri].get("id")
                     warnings.append(f"Droga „{name}”: płaska, a jej końce wyszły na różnych wysokościach "
                                     f"({elev[a]:.0f} / {elev[b]:.0f} m) – sprawdź nachylenia w pętli")
         return elev, sorted(set(warnings))
+
+
+def normalize_roads(site: dict) -> dict:
+    """Give every road `grade_draw_pct` (grade along its drawing direction). Old roads stored `grade_pct`
+    = grade towards the crusher: the magnitude is kept, the sign follows whether the road was drawn
+    towards the crusher (its last point is nearer the crusher along the network) or away from it."""
+    roads = site.get("roads", [])
+    legacy = [r for r in roads if "grade_draw_pct" not in r]
+    if not legacy:
+        return site
+    dist = {}
+    if site.get("crusher"):
+        g = RoadGraph(roads, include_planned=True)
+        c = site["crusher"]
+        root, _ = g.attach((c["lat"], c["lon"]))
+        adj = g.adj()
+        dist, pq = {root: 0.0}, [(0.0, root)]
+        while pq:
+            d, u = heapq.heappop(pq)
+            if d > dist.get(u, math.inf):
+                continue
+            for v, w, _ in adj.get(u, []):
+                if d + w < dist.get(v, math.inf):
+                    dist[v] = d + w
+                    heapq.heappush(pq, (d + w, v))
+
+    def node(p):
+        return next((n for n, q in enumerate(g.nodes) if haversine_m(p, q) < SNAP_M), None) if dist else None
+
+    for r in legacy:
+        a, b = node(tuple(r["coords"][0])), node(tuple(r["coords"][-1]))
+        towards = a in dist and b in dist and dist[b] < dist[a]
+        r["grade_draw_pct"] = float(r.get("grade_pct", 0.0)) * (1 if towards else -1) + 0.0
+        r.pop("grade_pct", None)
+    return site
 
 
 def _grade(dz: float, length: float) -> float:
@@ -279,6 +330,7 @@ def path_between(g: RoadGraph, start, end, elev: dict[int, float],
 
 def analyze_site(site: dict) -> dict:
     """Network built from the drawing: graph, elevations, levels of excavators/piles, warnings."""
+    normalize_roads(site)
     roads = site.get("roads", [])
     out = {"graph": None, "elev": {}, "warnings": [], "levels": {}, "junctions": [], "dead_ends": []}
     if not roads:
@@ -319,6 +371,7 @@ def analyze_site(site: dict) -> dict:
 
 def build_route(site: dict, start: tuple[float, float], route_id: str, end=None, end_name="plac_kruszarki") -> dict:
     """Route from a loading point to the crusher (or to `end`)."""
+    normalize_roads(site)
     roads = site.get("roads", [])
     if not roads:
         raise ValueError("Na mapie nie ma dróg")
@@ -343,6 +396,7 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
     """Replace blasts/excavators/routes of a raw scenario with what is drawn on the map.
     Trucks, crusher parameters, costs etc. stay as they are. Also builds links between every pair
     of excavators (for trucks that load at two piles in one trip)."""
+    normalize_roads(site)
     piles = site.get("piles", [])
     excavators = site.get("excavators", [])
     if not piles:
@@ -388,3 +442,161 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
             f["blend"] = {k: v for k, v in f["blend"].items() if k in ex_ids}
     new["site"] = site
     return new
+
+
+# ---------------------------------------------------------------- dedicated routes, excavator moves
+LIGHT_ROLES = {"ekipa": "ekipa strzałowa", "sztygar": "sztygar", "cysterna": "cysterna"}
+ON_ROAD_M = 20.0  # a dedicated route closer than this to a haul road shares that road (meets trucks there)
+
+
+def _network(site: dict):
+    """Graph of the roads in use with elevations from the crusher (None when not drawable yet)."""
+    if not site.get("roads") or not site.get("crusher"):
+        return None, {}
+    normalize_roads(site)
+    g = RoadGraph(site["roads"])
+    c = site["crusher"]
+    c_node, _ = g.attach((c["lat"], c["lon"]))
+    elev, _ = g.elevations(c_node, float(c.get("elev_m", 0.0)))
+    return g, elev
+
+
+def _reverse_route(r: dict) -> dict:
+    return {**r, "path": list(reversed(r["path"])),
+            "segments": [{**s, "grade_pct": -s["grade_pct"]} for s in reversed(r["segments"])]}
+
+
+def polyline_route(site: dict, coords: list, name: str = "trasa dedykowana", step_m: float = 15.0,
+                   break_points: list | None = None) -> dict:
+    """A route along a drawn polyline. Parts lying on haul roads take that road's name, limit and
+    grade (from the elevations), so light vehicles meet trucks there; parts off the roads keep `name`.
+    `break_points` – points where a segment must end (stops of a round)."""
+    g, elev = _network(site)
+    samples = []  # (point, road index or None)
+    for a, b in zip(coords, coords[1:]):
+        d = haversine_m(a, b)
+        n = max(1, int(d // step_m))
+        for i in range(n):
+            f = i / n
+            samples.append((a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])))
+    samples.append(tuple(coords[-1]))
+    info = []
+    last_z = 0.0
+    for p in samples:
+        ri, z = None, None
+        if g is not None and g.edges:
+            edge, q, t, d = g._nearest_edge(p)
+            if d < ON_ROAD_M:
+                ri = g.edges[edge][1]
+                if edge[0] in elev and edge[1] in elev:
+                    z = elev[edge[0]] + t * (elev[edge[1]] - elev[edge[0]])
+        last_z = z if z is not None else last_z
+        info.append((p, ri, last_z))
+    # forced breaks at the samples closest to the stop points
+    forced = set()
+    for bp in break_points or []:
+        forced.add(min(range(len(info)), key=lambda i: haversine_m(info[i][0], bp)))
+    segments, cur = [], None
+    for i in range(1, len(info)):
+        (p0, ri0, z0), (p1, ri1, z1) = info[i - 1], info[i]
+        road = g.roads[ri1] if (g is not None and ri1 is not None) else None
+        nm = (road.get("name") or road.get("id")) if road else name
+        limit = float(road.get("speed_limit_kmh", 30)) if road else 20.0
+        w = haversine_m(p0, p1)
+        if cur and cur["name"] == nm and (i - 1) not in forced:
+            cur["length_m"] += w
+            cur["_dz"] += z1 - z0
+        else:
+            cur = {"name": nm, "length_m": w, "_dz": z1 - z0, "speed_limit_kmh": limit}
+            segments.append(cur)
+    for sgm in segments:
+        sgm["grade_pct"] = _grade(sgm.pop("_dz"), sgm["length_m"])
+        sgm["length_m"] = round(sgm["length_m"], 1)
+    route = {"segments": [s for s in segments if s["length_m"] > 0.5], "path": [list(c) for c in coords]}
+    if break_points:
+        # stop after the segment whose end is nearest to each break point (in order along the route)
+        cum, ends = 0.0, []
+        for sgm in route["segments"]:
+            cum += sgm["length_m"]
+            ends.append(cum)
+        total = cum
+        geo = polyline_length_m(coords)
+        stops = []
+        for bp in break_points:
+            j = min(range(len(info)), key=lambda i: haversine_m(info[i][0], bp))
+            d_along = sum(haversine_m(info[i - 1][0], info[i][0]) for i in range(1, j + 1)) * (total / geo if geo else 1)
+            stops.append(min(range(len(ends)), key=lambda k: abs(ends[k] - d_along)))
+        route["stop_after"] = stops
+    return route
+
+
+def dedicated(site: dict, role: str) -> list | None:
+    """Coordinates of the route drawn for a role ('ekipa', 'sztygar', 'cysterna' or an excavator id)."""
+    for d in site.get("dedicated", []):
+        if d.get("for") == role and len(d.get("coords", [])) >= 2:
+            return d["coords"]
+    return None
+
+
+def crew_route(site: dict) -> dict | None:
+    """Blasting crew: blast point -> exit (driven backwards when arriving). Dedicated route if drawn."""
+    if not site.get("blast"):
+        return None
+    bp = (site["blast"]["lat"], site["blast"]["lon"])
+    coords = dedicated(site, "ekipa")
+    if coords:
+        # orient: start at the blast point
+        if haversine_m(coords[-1], bp) < haversine_m(coords[0], bp):
+            coords = list(reversed(coords))
+        return polyline_route(site, coords, "trasa ekipy")
+    try:
+        return build_route(site, bp, "strzelanie")
+    except ValueError:
+        return None
+
+
+def round_route(site: dict, role: str, stops: list[tuple[float, float]]) -> dict | None:
+    """Dedicated round (foreman / tanker) with stops at the points closest to the given excavators."""
+    coords = dedicated(site, role)
+    if not coords:
+        return None
+    return polyline_route(site, coords, f"trasa: {LIGHT_ROLES.get(role, role)}", break_points=stops)
+
+
+def excavator_move(site: dict, ex: dict, route_to_crusher_path: list | None, retreat_m: float = 200.0) -> dict | None:
+    """How an excavator gets to its place for blasting/refuelling.
+    Parking marker -> dedicated route if drawn, else shortest road path, else straight line.
+    No marker -> it backs off `retreat_m` along its own route towards the crusher."""
+    pos = (ex["lat"], ex["lon"])
+    park = next((p for p in site.get("parking", []) if p.get("excavator") == ex["id"]), None)
+    if park:
+        target = (park["lat"], park["lon"])
+        coords = dedicated(site, ex["id"])
+        if coords:
+            if haversine_m(coords[-1], pos) < haversine_m(coords[0], pos):
+                coords = list(reversed(coords))
+            r = polyline_route(site, coords, f"przejazd {ex['id']}")
+        else:
+            try:
+                r = build_route(site, pos, ex["id"], end=target, end_name="miejsce postoju")
+            except ValueError:
+                d = haversine_m(pos, target)
+                r = {"segments": [{"name": f"przejazd {ex['id']}", "length_m": round(d, 1), "grade_pct": 0.0,
+                                   "speed_limit_kmh": 5.0}], "path": [list(pos), list(target)]}
+        r["parking"] = True
+        return r
+    if not route_to_crusher_path or len(route_to_crusher_path) < 2:
+        return None
+    # back off along the route towards the crusher
+    path, acc = [list(route_to_crusher_path[0])], 0.0
+    for a, b in zip(route_to_crusher_path, route_to_crusher_path[1:]):
+        d = haversine_m(a, b)
+        if acc + d >= retreat_m:
+            f = (retreat_m - acc) / d if d else 0
+            path.append([a[0] + f * (b[0] - a[0]), a[1] + f * (b[1] - a[1])])
+            acc = retreat_m
+            break
+        path.append(list(b))
+        acc += d
+    return {"segments": [{"name": "odjazd z frontu", "length_m": round(acc, 1), "grade_pct": 0.0,
+                          "speed_limit_kmh": 5.0}], "path": path, "parking": False}

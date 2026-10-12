@@ -109,8 +109,17 @@ N.piles.forEach(p => {
 });
 N.junctions.forEach(j => L.circleMarker([j.lat, j.lon], { radius: 5, color: '#000', weight: 1, fillColor: '#fff', fillOpacity: 1 })
   .bindTooltip(`węzeł · rzędna ${j.elev} m`).addTo(map));
-N.excavators.forEach(e => L.marker([e.lat, e.lon], { icon: L.divIcon({ className: '',
-  html: `<div class="tag" style="transform:translate(-50%,-30px)">⛏️ ${e.id}${e.elev !== null && e.elev !== undefined ? ' · ' + e.elev + ' m' : ''}</div>` }) }).addTo(map));
+const DED_COLOR = { 'ekipa': '#ff006e', 'sztygar': '#3a86ff', 'cysterna': '#8338ec' };
+(N.dedicated || []).forEach(d => L.polyline(d.coords, { color: DED_COLOR[d.for] || '#ffbe0b', weight: 3, dashArray: '6 6' })
+  .bindTooltip(`trasa dedykowana: ${d.for}`).addTo(map));
+(N.parking || []).forEach(p => L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '',
+  html: `<div class="tag">🅿️ ${p.excavator}</div>` }) }).addTo(map));
+if (N.blast) L.marker([N.blast.lat, N.blast.lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:20px">💥</div>' }) })
+  .bindTooltip('miejsce strzelania').addTo(map);
+const exMarkers = {};
+N.excavators.forEach(e => { exMarkers[e.id] = L.marker([e.lat, e.lon], { icon: L.divIcon({ className: '',
+  html: `<div class="tag" style="transform:translate(-50%,-30px)">⛏️ ${e.id}${e.elev !== null && e.elev !== undefined ? ' · ' + e.elev + ' m' : ''}</div>` }) }).addTo(map); });
+const exTracks = Object.entries(D.excavator_tracks || {}).filter(([id]) => exMarkers[id]).map(([id, f]) => ({ v: { frames: f }, m: exMarkers[id], i: 0 }));
 N.excavators.forEach(e => bounds.push([e.lat, e.lon]));
 if (N.crusher) bounds.push([N.crusher.lat, N.crusher.lon]);
 if (N.crusher) L.marker([N.crusher.lat, N.crusher.lon], { icon: L.divIcon({ className: '', html: '<div class="tag" style="transform:translate(-50%,-30px)">🏭 kruszarka</div>' }) }).addTo(map);
@@ -190,6 +199,7 @@ function draw() {
     if (c !== tr.code) { tr.code = c; tr.m.setStyle({ fillColor: D.colors[D.states[c]] }); }
     if (queues.has(c)) q++; else if (drive.has(c)) nd++; else if (load.has(c)) nl++;
   });
+  exTracks.forEach(o => { const p = locateLight(o, t); if (p) o.m.setLatLng(p); });
   lights.forEach(o => {
     const p = locateLight(o, t);
     if (p) { o.m.setLatLng(p); if (!o.on) { o.m.addTo(map); o.on = true; } }

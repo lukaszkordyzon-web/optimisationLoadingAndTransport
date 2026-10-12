@@ -14,6 +14,7 @@ import pandas as pd
 import simpy
 
 from .config import Excavator, Scenario, TruckFleet, clock_to_s
+from .site import haversine_m
 from .physics import (crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_t, load_time_s,
                       route_time_s, segment_time_s)
 
@@ -124,11 +125,21 @@ class Simulation:
         if bl.enabled:
             a = clock_to_s(bl.fire_from, plan.start_time) - bl.evacuation_min * 60
             self.closure = (max(0.0, a), clock_to_s(bl.fire_to, plan.start_time))
+        self.excavator_moves = self._excavator_moves()  # ex id -> (Route, travel time s)
+        self.excavator_tracks: dict[str, list] = {}
         for ex in self.excavators.values():
             ex.last_end = self.t_start
             ex.down += [(a, b, "przerwa") for a, b in self.breaks]
             if self.closure:
-                ex.down.append((*self.closure, "strzelanie"))
+                move_t = self.excavator_moves.get(ex.cfg.id, (None, 0.0))[1]
+                # the excavator leaves before the evacuation and comes back after the opening
+                ex.down.append((max(0.0, self.closure[0] - move_t), self.closure[1] + move_t, "strzelanie"))
+                self._track_move(ex.cfg.id, self.closure[0] - move_t, self.closure[1] + move_t)
+        # trucks stop going down when the first excavator starts driving away to its parking place
+        self.truck_closure = None
+        if self.closure:
+            starts = [w[0] for ex in self.excavators.values() for w in ex.down if w[2] == "strzelanie"]
+            self.truck_closure = (min(starts + [self.closure[0]]), self.closure[1])
         self.light_vehicles: list[dict] = []   # for the animation
         self.light_passages: dict[str, list] = {}  # road name -> [(t0, t1, going_up)]
         self._schedule_light_vehicles()
@@ -224,7 +235,7 @@ class Simulation:
                     t = self._light_trip(name, sc.routes[self.excavators[prev].cfg.route], True, t, frames)
                     t = self._light_trip(name, sc.routes[ex.cfg.route], False, t, frames)
             if refuel:
-                ex.down.append((t, t + stop_s, "tankowanie"))
+                self._refuel_window(ex, t, stop_s)
             if frames:
                 frames.append([round(t + stop_s, 1), frames[-1][1], frames[-1][2]])
             t += stop_s
@@ -239,10 +250,12 @@ class Simulation:
         site = sc.site or {}
         if bl.enabled and site.get("blast") and site.get("roads") and site.get("crusher"):
             from .config import _routes
-            from .site import build_route
+            from .site import crew_route
 
             try:
-                r = build_route(site, (site["blast"]["lat"], site["blast"]["lon"]), "strzelanie")
+                r = crew_route(site)  # dedicated crew route if drawn, else the shortest road path
+                if r is None:
+                    raise ValueError("brak trasy")
                 route = _routes({"strzelanie": r})["strzelanie"]
                 frames: list = []
                 down = self._light_trip("ekipa strzałowa", route, False, 0.0, [], record=False)  # duration only
@@ -257,10 +270,117 @@ class Simulation:
                 pass  # blast point not connected to the roads: the closure still applies
         ins = sc.inspection
         if ins.enabled and ins.stops:
-            self._visit_round("sztygar", "objazd", clock_to_s(ins.start, start), list(ins.stops), ins.stop_min * 60)
+            if not self._dedicated_round("sztygar", "objazd", "sztygar", clock_to_s(ins.start, start), list(ins.stops),
+                                         ins.stop_min * 60):
+                self._visit_round("sztygar", "objazd", clock_to_s(ins.start, start), list(ins.stops), ins.stop_min * 60)
         for i, tt in enumerate(sc.refueling.tanker_times or []):
-            self._visit_round(f"cysterna {i + 1}", "cysterna", clock_to_s(tt, start), [e.id for e in sc.excavators],
-                              sc.refueling.excavator_refuel_min * 60, refuel=True)
+            ids = [e.id for e in sc.excavators]
+            if not self._dedicated_round(f"cysterna {i + 1}", "cysterna", "cysterna", clock_to_s(tt, start), ids,
+                                         sc.refueling.excavator_refuel_min * 60, refuel=True):
+                self._visit_round(f"cysterna {i + 1}", "cysterna", clock_to_s(tt, start), ids,
+                                  sc.refueling.excavator_refuel_min * 60, refuel=True)
+
+    def _dedicated_round(self, name: str, kind: str, role: str, start: float, stops: list[str], stop_s: float,
+                         refuel: bool = False) -> bool:
+        """Round along a route drawn for this role, stopping at the points nearest the excavators.
+        Returns False when no dedicated route is drawn (the caller falls back to the roads)."""
+        from .config import _routes
+        from .site import round_route
+
+        site = self.sc.site or {}
+        stops = [x for x in stops if x in self.excavators]
+        pos = {e["id"]: (e["lat"], e["lon"]) for e in site.get("excavators", [])}
+        r = round_route(site, role, [pos[x] for x in stops if x in pos]) if site else None
+        if r is None:
+            return False
+        route = _routes({role: r})[role]
+        stop_after = r.get("stop_after", [])
+        frames: list = []
+        t = start
+        for k, seg in enumerate(route.segments):
+            t = self._light_segment(name, route, k, t, frames)
+            for j, sk in enumerate(stop_after):
+                if sk == k:
+                    if refuel and j < len(stops):
+                        self._refuel_window(self.excavators[stops[j]], t, stop_s)
+                    if frames:
+                        frames.append([round(t + stop_s, 1), frames[-1][1], frames[-1][2]])
+                    t += stop_s
+        path = route.path
+        if path and haversine_m(path[0], path[-1]) > 50:  # not a loop: drive back the same way
+            t = self._light_trip(name, route, False, t, frames)
+        self.light_vehicles.append({"name": name, "kind": kind, "frames": frames})
+        return True
+
+    def _light_segment(self, name: str, route, k: int, t: float, frames: list) -> float:
+        """One segment k of a route driven forward by a light vehicle."""
+        from .anim import _at, _cum
+
+        seg = route.segments[k]
+        v = max(5.0, min(self.sc.traffic.light_speed_kmh, seg.speed_limit_kmh))
+        dt = seg.length_m / (v / 3.6)
+        if seg.name not in CONNECTORS:
+            self.light_passages.setdefault(seg.name, []).append((t, t + dt, seg.grade_pct > 0.5, name))
+        if route.path:
+            cum = _cum(route.path)
+            seg_len = [x.length_m for x in route.segments]
+            scale = cum[-1] / sum(seg_len) if sum(seg_len) else 1.0
+            d0, d1 = sum(seg_len[:k]) * scale, sum(seg_len[:k + 1]) * scale
+            for d, tt in ((d0, t), (d1, t + dt)):
+                lat, lon = _at(route.path, cum, d)
+                frames.append([round(tt, 1), round(lat, 7), round(lon, 7)])
+        return t + dt
+
+    # ------------------------------------------------------------ excavator moves
+    def _excavator_moves(self) -> dict:
+        """Where each excavator goes for blasting/refuelling and how long it drives there."""
+        from .config import _routes
+        from .site import excavator_move
+
+        site = self.sc.site or {}
+        out = {}
+        if not site.get("excavators"):
+            return out
+        for e in site["excavators"]:
+            if e["id"] not in self.excavators:
+                continue
+            ex = self.excavators[e["id"]]
+            r_cr = self.sc.routes.get(ex.cfg.route)
+            m = excavator_move(site, e, r_cr.path if r_cr else None, self.sc.blasting.retreat_m)
+            if m is None:
+                continue
+            route = _routes({"m": m})["m"]
+            t = route.length_m / (self.sc.traffic.excavator_move_kmh / 3.6)
+            out[e["id"]] = (route, t, bool(m.get("parking")))
+        return out
+
+    def _refuel_window(self, ex: ExcavatorState, t: float, stop_s: float) -> None:
+        move = self.excavator_moves.get(ex.cfg.id)
+        if self.sc.refueling.at_parking and move and move[2]:
+            a, b = t - move[1], t + stop_s + move[1]
+            self._track_move(ex.cfg.id, a, b)
+        else:
+            a, b = t, t + stop_s
+        ex.down.append((max(0.0, a), b, "tankowanie"))
+
+    def _track_move(self, ex_id: str, a: float, b: float) -> None:
+        """Animation keyframes: drive to the place, stay, drive back."""
+        from .anim import _at, _cum
+
+        move = self.excavator_moves.get(ex_id)
+        if not move or not move[0].path:
+            return
+        route, t_move = move[0], move[1]
+        path = route.path
+        cum = _cum(path)
+        fr = self.excavator_tracks.setdefault(ex_id, [[0.0, *path[0]]])
+        n = 8
+        for i in range(n + 1):  # out
+            lat, lon = _at(path, cum, cum[-1] * i / n)
+            fr.append([round(a + t_move * i / n, 1), lat, lon])
+        for i in range(n + 1):  # back
+            lat, lon = _at(path, cum, cum[-1] * (1 - i / n))
+            fr.append([round(b - t_move + t_move * i / n, 1), lat, lon])
 
     def _yield_delay(self, road: str, t0: float, t1: float, truck_going_up: bool) -> tuple[int, float]:
         """Giving way: a vehicle going DOWN gives way to one coming UP. So a truck driving down loses time
@@ -410,6 +530,10 @@ class Simulation:
             yield env.timeout(ex.cfg.spot_time_s * self._noise(0.2))
             ex.spotting_s += env.now - t0
             self._log_state(truck, "podstawienie", t0, ex.cfg.id)
+            t0 = env.now
+            yield from self._excavator_wait(ex)  # the window may have started while the truck was spotting
+            if env.now > t0:
+                self._log_state(truck, "postoj_koparki", t0, ex.cfg.id)
 
             blast = sc.blast(ex.cfg.blast)
             full_load = load_time_s(ex.cfg, fleet, blast, sc.loose_density_t_m3)
@@ -466,8 +590,9 @@ class Simulation:
                 continue
             to_loaded, cycle = self._est_cycle(truck)
             # safety margin: queues at the excavator can make the stay in the pit longer than expected
-            if self.closure and now < self.closure[1] and now + 1.3 * to_loaded + 120 > self.closure[0]:
-                yield env.timeout(self.closure[1] - now)  # nobody goes down before the blast is over
+            tc = self.truck_closure
+            if tc and now < tc[1] and now + 1.3 * to_loaded + 120 > tc[0]:
+                yield env.timeout(tc[1] - now)  # nobody goes down before the blast is over
                 self._log_state(truck, "postoj_strzelanie", now)
                 continue
             if now + cycle > self.work_end:
@@ -637,6 +762,7 @@ class SimResult:
         self.truck_ids = [t.id for t in sim.trucks]
         self.light_vehicles = sim.light_vehicles
         self.excavator_down = {e.cfg.id: list(e.down) for e in sim.excavators.values()}
+        self.excavator_tracks = {k: sorted(v) for k, v in sim.excavator_tracks.items()}
         self.closure = sim.closure
         self.breaks = sim.breaks
         self.t_start, self.work_end = sim.t_start, sim.work_end

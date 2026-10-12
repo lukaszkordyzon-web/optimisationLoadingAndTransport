@@ -10,7 +10,7 @@ from folium.plugins import Draw
 from streamlit_folium import st_folium
 
 from kruszyk.psd import DEFAULT_PRESET, PRESETS, SIEVES_MM, clean, preset_of, rosin_rammler, summary
-from kruszyk.site import (analyze_site, centroid, parse_coords, polygon_area_m2, polyline_length_m,
+from kruszyk.site import (analyze_site, normalize_roads, centroid, parse_coords, polygon_area_m2, polyline_length_m,
                           site_to_scenario)
 
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -25,7 +25,11 @@ MODES = {
     "Koparka": "marker",
     "Kruszarka": "marker",
     "Miejsce strzelania": "marker",
+    "Miejsce postoju koparki": "marker",
+    "Trasa dedykowana": "polyline",
 }
+DEDICATED_FOR = {"ekipa": "🧨 ekipa strzałowa", "sztygar": "👷 sztygar", "cysterna": "⛽ cysterna"}
+DIRECTIONS = {"⬇ w dół": -1, "⬆ pod górę": 1, "➡ płasko": 0}
 
 
 def empty_site() -> dict:
@@ -36,6 +40,7 @@ def get_site(raw: dict) -> dict:
     if "site" not in st.session_state or st.session_state.get("site_ver") != st.session_state.ver:
         old = st.session_state.get("site")
         new = copy.deepcopy(raw.get("site") or empty_site())
+        normalize_roads(new)
         st.session_state.site = new
         st.session_state.site_ver = st.session_state.ver
         # rebuild the map only when the view really changes (another scenario), not after "build routes"
@@ -67,16 +72,50 @@ def draw_network(m, info: dict) -> None:
                                                     "drogi tworzy węzeł)").add_to(m)
 
 
+def _direction_arrow(m, pts: list, grade: float, tip: str) -> None:
+    """Arrow in the middle of a road showing the drawing direction; ↗ green = climbs that way, ↘ orange = descends."""
+    import math
+
+    if len(pts) < 2:
+        return
+    i = max(0, len(pts) // 2 - 1)
+    a, b = pts[i], pts[i + 1]
+    mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+    ang = math.degrees(math.atan2((b[0] - a[0]), (b[1] - a[1]) * math.cos(math.radians(a[0]))))
+    color = "#2a9d8f" if grade > 0.05 else ("#f77f00" if grade < -0.05 else "#555")
+    label = f"{grade:+g}%" if abs(grade) >= 0.05 else ""
+    folium.Marker(mid, tooltip=tip, icon=folium.DivIcon(
+        icon_size=(60, 24), icon_anchor=(12, 12),
+        html=f"<div style='display:flex;align-items:center;gap:2px;white-space:nowrap'>"
+             f"<span style='display:inline-block;transform:rotate({-ang:.0f}deg);font-size:20px;color:{color};"
+             f"text-shadow:0 0 3px #fff,0 0 3px #fff'>➤</span>"
+             f"<span style='font-size:11px;font-weight:700;color:#fff;text-shadow:0 0 3px #000'>{label}</span></div>")
+    ).add_to(m)
+
+
 def draw_site(m, site: dict) -> None:
     """Add site objects to a map or a FeatureGroup."""
     for r in site.get("roads", []):
         pts = [tuple(c) for c in r["coords"]]
         active = r.get("active", True)
-        tip = (f"{r['name']} · {r.get('kind')} · nachylenie {r.get('grade_pct', 0)} % · "
+        g = float(r.get("grade_draw_pct", 0.0))
+        slope = "płasko" if abs(g) < 0.05 else (f"w górę {g:g} %" if g > 0 else f"w dół {-g:g} %")
+        tip = (f"{r['name']} · {r.get('kind')} · wzdłuż strzałki: {slope} · limit {r.get('speed_limit_kmh', '?')} km/h · "
                f"{polyline_length_m(r['coords']):.0f} m" + ("" if active else " · PLANOWANA (dziś nieużywana)"))
         folium.PolyLine(pts, color="#000000", weight=10, opacity=0.55).add_to(m)  # dark casing
         folium.PolyLine(pts, color=ROAD_COLORS.get(r.get("kind"), "#ffffff") if active else PLANNED_COLOR, weight=6,
                         dash_array=None if active else "10 8", tooltip=tip).add_to(m)
+        _direction_arrow(m, pts, g, tip)
+    for d in site.get("dedicated", []):
+        colors = {"ekipa": "#ff006e", "sztygar": "#3a86ff", "cysterna": "#8338ec"}
+        folium.PolyLine([tuple(c) for c in d["coords"]], color=colors.get(d.get("for"), "#ffbe0b"), weight=4,
+                        dash_array="6 6", tooltip=f"trasa dedykowana: {DEDICATED_FOR.get(d.get('for'), 'koparka ' + str(d.get('for')))}"
+                        ).add_to(m)
+    for p in site.get("parking", []):
+        folium.Marker((p["lat"], p["lon"]), tooltip=f"miejsce postoju koparki {p.get('excavator')}",
+                      icon=folium.DivIcon(html=f"<div style='font-size:13px;font-weight:700;color:#fff;"
+                                               f"text-shadow:0 0 3px #000;white-space:nowrap'>🅿️ {p.get('excavator')}</div>")
+                      ).add_to(m)
     for p in site.get("piles", []):
         folium.Polygon([tuple(c) for c in p["polygon"]], color="#00e5ff", fill=True, fill_opacity=0.25,
                        tooltip=f"Usyp {p['id']}: {p.get('material', '')} · {p.get('tonnage_t', 0):,.0f} t").add_to(m)
@@ -101,7 +140,7 @@ def _latlon(coords: list) -> list:
 
 
 DEFAULTS = {
-    "Droga / rampa": {"kind": "droga", "grade_pct": 0.0, "speed_limit_kmh": 40.0},
+    "Droga / rampa": {"kind": "droga", "grade_draw_pct": 0.0, "speed_limit_kmh": 40.0},
     "Usyp (materiał)": {"material": "inny", "tonnage_t": 10_000.0, "psd": PRESETS[DEFAULT_PRESET],
                         "loose_density_t_m3": 1.75},
     "Koparka": {"pile": "(najbliższy)", "bucket_m3": 5.0, "swing_cycle_s": 30.0},
@@ -114,7 +153,24 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
     are used when they belong to that type, otherwise defaults (editable later in the tables)."""
     target = GEOM_MODE.get(g["type"])
     if g["type"] == "Point":
-        target = mode if mode in ("Kruszarka", "Miejsce strzelania") else "Koparka"
+        target = mode if mode in ("Kruszarka", "Miejsce strzelania", "Miejsce postoju koparki") else "Koparka"
+    if g["type"] == "LineString" and mode == "Trasa dedykowana":
+        target = mode
+    if target == "Trasa dedykowana":
+        who = attrs.get("for", "sztygar")
+        site.setdefault("dedicated", [])
+        site["dedicated"] = [d for d in site["dedicated"] if d.get("for") != who]  # one route per role
+        site["dedicated"].append({"for": who, "coords": _latlon(g["coordinates"])})
+        return f"✅ Dodano trasę dedykowaną: {DEDICATED_FOR.get(who, 'przejazd koparki ' + who)}"
+    if target == "Miejsce postoju koparki":
+        lon, lat = g["coordinates"]
+        who = attrs.get("excavator")
+        if not who:
+            return "⚠️ Najpierw dodaj koparkę, potem jej miejsce postoju"
+        site.setdefault("parking", [])
+        site["parking"] = [p for p in site["parking"] if p.get("excavator") != who]
+        site["parking"].append({"excavator": who, "lat": lat, "lon": lon})
+        return f"✅ Ustawiono miejsce postoju koparki {who} (strzelanie / tankowanie)"
     if target is None:
         return f"⚠️ Nieobsługiwany kształt: {g['type']}"
     a = dict(attrs) if target == mode else dict(DEFAULTS.get(target, {}))
@@ -157,8 +213,9 @@ def editing_map(site: dict) -> folium.Map:
 
 
 ROAD_COLS = {"id": "id", "name": "nazwa", "kind": st.column_config.SelectboxColumn("rodzaj", options=["droga", "rampa"]),
-             "grade_pct": st.column_config.NumberColumn("nachylenie [%]", help="+ = droga wznosi się w stronę kruszarki",
-                                                        min_value=-25.0, max_value=25.0, step=0.5),
+             "grade_draw_pct": st.column_config.NumberColumn(
+                 "nachylenie wzdłuż rysowania [%]", help="+ = droga wznosi się w kierunku rysowania (strzałka na mapie), "
+                                                        "− = opada", min_value=-25.0, max_value=25.0, step=0.5),
              "speed_limit_kmh": "limit [km/h]",
              "active": st.column_config.CheckboxColumn("w użyciu", help="odznacz = droga planowana / zamknięta")}
 PILE_COLS = {"id": "usyp", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
@@ -308,11 +365,15 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
         if mode == "Droga / rampa":
             attrs["kind"] = st.selectbox("Rodzaj", ["droga", "rampa"])
             attrs["name"] = st.text_input("Nazwa", f"{attrs['kind']} {len(site['roads']) + 1}")
-            attrs["grade_pct"] = st.number_input(
-                "📐 Nachylenie [%] – wpisz przed narysowaniem", -20.0, 20.0, 8.0 if attrs["kind"] == "rampa" else 0.0, 0.5,
-                help="O ile procent droga wznosi się w stronę kruszarki. Rampa z wyrobiska: zwykle 8–10 %. "
-                     "Droga płaska: 0–2 %. Jeśli droga w stronę kruszarki opada – wpisz wartość ujemną. "
-                     "Można to też poprawić później w tabeli „Drogi i rampy”.")
+            direction = st.radio("📐 Rysuję drogę…", list(DIRECTIONS), horizontal=True,
+                                 index=0 if attrs["kind"] == "rampa" else 2,
+                                 help="Kierunek, w którym będziesz klikać punkty: zaczynasz na górze i idziesz w dół "
+                                      "(⬇), zaczynasz na dole i idziesz w górę (⬆) albo droga jest płaska (➡). "
+                                      "Na mapie strzałka pokaże kierunek rysowania.")
+            grade = st.number_input("Nachylenie [%]", 0.0, 25.0, 9.0 if attrs["kind"] == "rampa" else 1.0, 0.5,
+                                    disabled=DIRECTIONS[direction] == 0,
+                                    help="Rampa: zwykle 8–10 %. Droga technologiczna: 0–3 %.")
+            attrs["grade_draw_pct"] = DIRECTIONS[direction] * grade + 0.0
             attrs["speed_limit_kmh"] = st.number_input("Limit prędkości [km/h]", 5.0, 80.0,
                                                        25.0 if attrs["kind"] == "rampa" else 40.0, 5.0)
             attrs["active"] = not st.checkbox("Droga planowana (dziś nieużywana)",
@@ -335,6 +396,20 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
             attrs["bucket_m3"] = st.number_input("Łyżka [m³]", 0.5, 30.0, 5.0, 0.5)
             attrs["swing_cycle_s"] = st.number_input("Cykl łyżki [s]", 10.0, 90.0, 30.0, 1.0)
             st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu pracy koparki.")
+        elif mode == "Trasa dedykowana":
+            ex_ids = [e["id"] for e in site["excavators"]]
+            options = list(DEDICATED_FOR) + ex_ids
+            attrs["for"] = st.selectbox("Dla kogo?", options, format_func=lambda x: DEDICATED_FOR.get(x, f"⛏️ przejazd koparki {x}"))
+            st.caption("Narzędzie „linia” (/). Trasa, którą jeździ tylko ten pojazd. **Ekipa:** od wjazdu do miejsca "
+                       "strzelania. **Sztygar / cysterna:** cała runda – postoje przy koparkach ustawią się same "
+                       "w najbliższych punktach trasy. **Koparka:** od koparki do jej miejsca postoju. Bez trasy "
+                       "dedykowanej pojazd jedzie najkrótszą drogą po sieci.")
+        elif mode == "Miejsce postoju koparki":
+            ex_ids = [e["id"] for e in site["excavators"]]
+            attrs["excavator"] = st.selectbox("Której koparki?", ex_ids) if ex_ids else None
+            st.caption("Narzędzie „znacznik” (📍). Tu koparka zjeżdża na czas strzelania (i tankowania, jeśli tak "
+                       "ustawisz). Dojedzie trasą dedykowaną, a gdy jej nie ma – najkrótszą drogą; bez połączenia "
+                       "drogowego – na wprost. Bez znacznika koparka cofa się o kilkaset metrów swoją trasą.")
         elif mode == "Kruszarka":
             st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku).")
         else:
@@ -390,7 +465,20 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
             _sync(site, "excavators", ed, "lat")
         else:
             st.caption("brak")
-        st.markdown(f"**Kruszarka:** {'✅ ustawiona' if site.get('crusher') else '❌ brak'}")
+        st.markdown(f"**Kruszarka:** {'✅ ustawiona' if site.get('crusher') else '❌ brak'} · "
+                    f"**Miejsce strzelania:** {'✅' if site.get('blast') else '—'}")
+        items = ([f"trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}"
+                  for d in site.get("dedicated", [])] +
+                 [f"miejsce postoju: {p['excavator']}" for p in site.get("parking", [])])
+        if items:
+            st.markdown("**Trasy dedykowane i miejsca postoju koparek**  \n" + "  \n".join(f"• {x}" for x in items))
+            rm = st.multiselect("Usuń", items, key=f"rm_{st.session_state.obj_ver}")
+            if rm and st.button("🗑️ Usuń zaznaczone", key=f"rmb_{st.session_state.obj_ver}"):
+                site["dedicated"] = [d for d in site.get("dedicated", [])
+                                     if f"trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}" not in rm]
+                site["parking"] = [p for p in site.get("parking", []) if f"miejsce postoju: {p['excavator']}" not in rm]
+                st.session_state.obj_ver += 1
+                st.rerun()
     with c2:
         st.markdown("**Usypy**")
         if site["piles"]:
@@ -463,7 +551,8 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
         st.success("✅ Kopalnia zapisana. Przejdź do kroku **② Jak jest dziś**." if simple else
                    "Scenariusz zaktualizowany z mapy – zobacz zakładki „Scenariusz” i „Wyniki zmiany”.")
     if raw_for_build.get("site") and any("path" in r for r in raw_for_build["routes"].values()):
-        rows = [{"trasa": rid, "odcinek": s["name"], "długość [m]": s["length_m"], "nachylenie [%]": s["grade_pct"],
+        rows = [{"trasa": rid, "odcinek": s["name"], "długość [m]": s["length_m"],
+                 "nachylenie w stronę kruszarki [%]": s["grade_pct"],
                  "limit [km/h]": s.get("speed_limit_kmh")}
                 for rid, r in raw_for_build["routes"].items() for s in r["segments"]]
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")

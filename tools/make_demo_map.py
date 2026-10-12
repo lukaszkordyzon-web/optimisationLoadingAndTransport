@@ -22,16 +22,16 @@ site = {
     "center": [49.9975, 20.0100], "zoom": 15,
     "crusher": {"lat": C[0], "lon": C[1], "elev_m": 0.0},
     "roads": [
-        {"id": "R1", "name": "droga główna", "kind": "droga", "grade_pct": 1.0, "speed_limit_kmh": 40,
+        {"id": "R1", "name": "droga główna", "kind": "droga", "grade_draw_pct": -1.0, "speed_limit_kmh": 40,
          "coords": [C, [50.0003, 20.0060], J1]},
-        {"id": "R2", "name": "rampa główna", "kind": "rampa", "grade_pct": 9.0, "speed_limit_kmh": 25,
+        {"id": "R2", "name": "rampa główna", "kind": "rampa", "grade_draw_pct": -9.0, "speed_limit_kmh": 25,
          "coords": [J1, B]},
-        {"id": "R3", "name": "zjazd na poziom pośredni", "kind": "droga", "grade_pct": 0.0, "speed_limit_kmh": 30,
+        {"id": "R3", "name": "zjazd na poziom pośredni", "kind": "droga", "grade_draw_pct": 0.0, "speed_limit_kmh": 30,
          "coords": [MID, [49.9972, 20.0110], [49.9968, 20.0085]]},
-        {"id": "R4", "name": "poziom dolny", "kind": "droga", "grade_pct": 0.0, "speed_limit_kmh": 30,
+        {"id": "R4", "name": "poziom dolny", "kind": "droga", "grade_draw_pct": 0.0, "speed_limit_kmh": 30,
          "coords": [B, [49.9950, 20.0225], [49.9945, 20.0270]]},
         # planned: a gentler exit from the east end of the bottom level straight to the crusher (off today)
-        {"id": "R5", "name": "planowany wyjazd wschodni", "kind": "rampa", "grade_pct": 3.3, "speed_limit_kmh": 35,
+        {"id": "R5", "name": "planowany wyjazd wschodni", "kind": "rampa", "grade_draw_pct": 3.3, "speed_limit_kmh": 35,
          "active": False, "coords": [[49.9945, 20.0270], [49.9975, 20.0200], C]},
     ],
     "piles": [
@@ -60,6 +60,11 @@ raw["trucks"] = [
      "blend": {"K-1": 0.5, "K-2": 0.5}},
 ]
 site["blast"] = {"lat": 49.99405, "lon": 20.0262}  # next blast: on the bottom level, east of U-03
+# where excavators go for blasting / refuelling (K-1 has no marker: it backs off along its route)
+site["parking"] = [{"excavator": "K-2", "lat": 49.9953, "lon": 20.0195},
+                   {"excavator": "K-3", "lat": 49.99515, "lon": 20.0200}]
+# foreman's own route: main road, ramp, intermediate level and back
+site["dedicated"] = [{"for": "sztygar", "coords": [C, [50.0003, 20.0060], J1, MID, [49.9972, 20.0110], [49.9968, 20.0085]]}]
 raw["blasting"] = {"enabled": True, "crew_arrive": "09:00", "fire_from": "11:00", "fire_to": "11:20",
                    "evacuation_min": 10, "crew_leave": "11:40"}
 raw["inspection"] = {"enabled": True, "start": "09:30", "stops": ["K-1", "K-2", "K-3"], "stop_min": 10}

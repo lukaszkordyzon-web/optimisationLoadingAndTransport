@@ -131,6 +131,7 @@ class Blasting:
     fire_to: str = "11:20"
     evacuation_min: float = 10.0   # trucks must leave the pit this long before firing
     crew_leave: str = "11:40"
+    retreat_m: float = 200.0       # without a parking marker the excavator backs off this far along its route
 
 
 @dataclass
@@ -148,11 +149,13 @@ class Refueling:
     truck_refuel_min: float = 12.0
     tanker_times: list = field(default_factory=list)  # fuel tanker rounds to the excavators, e.g. ["13:00"]
     excavator_refuel_min: float = 20.0
+    at_parking: bool = False       # excavators drive to their parking place to be refuelled
 
 
 @dataclass
 class Traffic:
     yield_s: float = 30.0          # time a truck loses giving way to a light vehicle coming up
+    excavator_move_kmh: float = 2.5  # tracked excavator driving to its parking place and back
     light_speed_kmh: float = 30.0  # light vehicles (crew, foreman, tanker) – never above the road limit
 
 
@@ -352,8 +355,19 @@ def scenario_to_dict(sc: Scenario) -> dict:
     return d
 
 
+class _NoAliasDumper(yaml.SafeDumper):
+    """Writes repeated lists (e.g. the same grading curve) in full instead of &id/*id references."""
+
+    def ignore_aliases(self, data):
+        return True
+
+
+def yaml_dump(data) -> str:
+    return yaml.dump(data, Dumper=_NoAliasDumper, allow_unicode=True, sort_keys=False)
+
+
 def dump_scenario(sc: Scenario) -> str:
-    return yaml.safe_dump(scenario_to_dict(sc), allow_unicode=True, sort_keys=False)
+    return yaml_dump(scenario_to_dict(sc))
 
 
 def clock_to_s(hhmm: str, start: str = "06:00") -> float:

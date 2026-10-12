@@ -527,7 +527,7 @@ site:
   - id: R1
     name: droga główna
     kind: droga
-    grade_pct: 1.0
+    grade_draw_pct: -1.0
     speed_limit_kmh: 40
     coords:
     - &id003
@@ -541,7 +541,7 @@ site:
   - id: R2
     name: rampa główna
     kind: rampa
-    grade_pct: 9.0
+    grade_draw_pct: -9.0
     speed_limit_kmh: 25
     coords:
     - *id001
@@ -551,10 +551,11 @@ site:
   - id: R3
     name: zjazd na poziom pośredni
     kind: droga
-    grade_pct: 0.0
+    grade_draw_pct: 0.0
     speed_limit_kmh: 30
     coords:
-    - - 49.997749999999996
+    - &id007
+      - 49.997749999999996
       - 20.01525
     - - 49.9972
       - 20.011
@@ -563,7 +564,7 @@ site:
   - id: R4
     name: poziom dolny
     kind: droga
-    grade_pct: 0.0
+    grade_draw_pct: 0.0
     speed_limit_kmh: 30
     coords:
     - *id002
@@ -574,7 +575,7 @@ site:
   - id: R5
     name: planowany wyjazd wschodni
     kind: rampa
-    grade_pct: 3.3
+    grade_draw_pct: 3.3
     speed_limit_kmh: 35
     active: false
     coords:
@@ -648,3 +649,22 @@ site:
   blast:
     lat: 49.99405
     lon: 20.0262
+  parking:
+  - excavator: K-2
+    lat: 49.9953
+    lon: 20.0195
+  - excavator: K-3
+    lat: 49.99515
+    lon: 20.02
+  dedicated:
+  - for: sztygar
+    coords:
+    - *id003
+    - - 50.0003
+      - 20.006
+    - *id001
+    - *id007
+    - - 49.9972
+      - 20.011
+    - - 49.9968
+      - 20.0085

@@ -62,6 +62,15 @@ def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict |
                                                    5.0, key=k("bl_e"), help="tyle wcześniej wozidła i koparki muszą zjechać")
         with c[4]:
             bl["crew_leave"] = _time("Wyjazd ekipy", bl.get("crew_leave", "11:40"), k("bl_l"))
+        c = st.columns(2)
+        bl["retreat_m"] = c[0].number_input("Bez miejsca postoju koparka cofa się o [m]", 0.0, 2000.0,
+                                            float(bl.get("retreat_m", 200)), 50.0, key=k("bl_r"))
+        tr0 = raw.setdefault("traffic", {})
+        tr0["excavator_move_kmh"] = c[1].number_input("Prędkość przejazdu koparki [km/h]", 0.5, 15.0,
+                                                      float(tr0.get("excavator_move_kmh", 2.5)), 0.5, key=k("bl_v"))
+        st.caption("Koparka zjeżdża przed ewakuacją na **miejsce postoju** (znacznik 🅿️ na mapie; trasą dedykowaną, "
+                   "a gdy jej nie ma – najkrótszą drogą) i wraca po otwarciu – ten czas wydłuża jej postój. "
+                   "Ekipa jedzie swoją trasą dedykowaną albo najkrótszą drogą.")
         st.caption("Ekipa jedzie samochodem po drogach do miejsca strzelania. **Mijanie:** jadący w dół ustępuje "
                    "jadącemu w górę – gdy ekipa wyjeżdża pod górę, wozidło zjeżdżające w dół musi jej ustąpić. "
                    "Od „ewakuacji” do „otwarcia” żadne wozidło nie wjeżdża do wyrobiska, koparki stoją.")
@@ -100,6 +109,8 @@ def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict |
         rf["tanker_times"] = [x.strip() for x in times.split(",") if ":" in x]
         rf["excavator_refuel_min"] = c[1].number_input("Tankowanie koparki [min]", 1.0, 120.0,
                                                        float(rf.get("excavator_refuel_min", 20)), 5.0, key=k("rf_emin"))
+        rf["at_parking"] = st.checkbox("Koparki zjeżdżają do tankowania na swoje miejsce postoju (🅿️)",
+                                       bool(rf.get("at_parking", False)), key=k("rf_park"))
 
     with tabs[4]:
         v = raw.setdefault("variability", {})

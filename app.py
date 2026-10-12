@@ -52,6 +52,43 @@ def set_raw(raw: dict, new_mine: bool = False):
             st.session_state.pop(key, None)
 
 
+def slug(name: str) -> str:
+    import re
+    import unicodedata
+
+    s_ = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Za-z0-9]+", "_", s_).strip("_").lower() or "kopalnia"
+
+
+def export_scenario() -> str:
+    """Everything needed to restore the work: scenario + current map (also unsaved changes) + variant."""
+    from kruszyk.site import site_to_scenario
+
+    data = copy.deepcopy(st.session_state.raw)
+    site = st.session_state.get("site")
+    if site and site != data.get("site"):
+        try:  # unsaved map changes: build the routes so the file is complete
+            data = site_to_scenario(copy.deepcopy(site), data)
+        except ValueError:
+            data["site"] = copy.deepcopy(site)  # incomplete map – keep the drawing anyway
+    if st.session_state.get("variant_raw") is not None:
+        data["variant"] = copy.deepcopy(st.session_state.variant_raw)
+    data["_plik"] = {"format": "kruszyk-1", "zapisano": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")}
+    from kruszyk.config import yaml_dump
+
+    return yaml_dump(data)
+
+
+def import_scenario(text: str) -> None:
+    data = yaml.safe_load(text) or {}
+    variant = data.pop("variant", None)
+    data.pop("_plik", None)
+    set_raw(data, new_mine=True)
+    if variant:
+        st.session_state.variant_raw = variant
+        st.session_state.variant_ver = st.session_state.get("variant_ver", 0) + 1
+
+
 if "raw" not in st.session_state:
     p = presets()
     first = next((k for k, v in p.items() if v.stem == "kruszyk_bazowy"), next(iter(p)))
@@ -115,10 +152,16 @@ with st.sidebar:
     if st.button("Wczytaj scenariusz", width="stretch"):
         set_raw(yaml.safe_load(p[choice].read_text(encoding="utf-8")), new_mine=True)
         st.rerun()
-    up = st.file_uploader("…albo wczytaj własny plik YAML", type=["yaml", "yml"])
+    st.divider()
+    st.markdown("**📁 Mój scenariusz**")
+    st.caption("Zapisz ustawioną kopalnię do pliku i wczytaj ją następnym razem – bez wyklikiwania od nowa. "
+               "Plik zawiera mapę, drogi, usypy, wozidła, zdarzenia, wariant i nauczoną politykę.")
+    st.download_button("💾 Zapisz scenariusz do pliku", export_scenario(), width="stretch",
+                       file_name=f"{slug(raw.get('name', 'kopalnia'))}.kruszyk.yaml", mime="text/yaml")
+    up = st.file_uploader("📂 Wczytaj scenariusz z pliku", type=["yaml", "yml"])
     if up is not None and st.session_state.get("uploaded") != up.file_id:
         st.session_state.uploaded = up.file_id
-        set_raw(yaml.safe_load(up.getvalue().decode("utf-8")), new_mine=True)
+        import_scenario(up.getvalue().decode("utf-8"))
         st.rerun()
     st.divider()
     advanced = st.toggle("🔧 Tryb zaawansowany", value=False, key="advanced",
