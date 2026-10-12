@@ -623,7 +623,7 @@ with tabs[1]:
         options = ["natural", "fixed", "dynamic"] + (["rl"] if sc.rl_weights else [])
         c1, c2 = st.columns([3, 2])
         policy = c1.radio("Przydział wozideł w animacji", options, horizontal=True, format_func=POLICIES.get,
-                          index=options.index(sc.dispatch) if sc.dispatch in options else 0, key="anim_policy")
+                          index=options.index(sc.dispatch) if sc.dispatch in options else 0, key=k("anim_policy"))
         c2.caption("Cała zmiana symulowana w ułamku sekundy, odtwarzana przyspieszona. Koszty liczone na bieżąco; "
                    "porównanie z przydziałem naturalnym **tego samego dnia** (ta sama pogoda, awarie, kierowcy)."
                    + ("" if sc.rl_weights else " Polityka RL pojawi się po treningu w zakładce 🧠 Uczenie RL."))

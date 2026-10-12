@@ -38,5 +38,26 @@ def test_demo_map_tabs_render():
     at.sidebar.selectbox[0].select(name).run()
     at.sidebar.button[0].click().run()
     assert not at.exception, at.exception
-    at.radio(key="anim_policy").set_value("dynamic").run()
+    anim = next(r for r in at.radio if r.label == "Przydział wozideł w animacji")
+    assert anim.value == "natural"  # follows the scenario's dispatch
+    anim.set_value("dynamic").run()
     assert not at.exception, at.exception
+
+
+def test_applied_rl_policy_is_shown_in_animation():
+    import yaml
+
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
+    at.sidebar.selectbox[0].select(name).run()
+    at.sidebar.button[0].click().run()
+    # what "Zastosuj politykę RL" does: weights + dispatch rl into the scenario, new widget generation
+    raw = dict(at.session_state["raw"])
+    raw["rl_weights"] = [3.0, 2.0, 0.5, 1.0, 0.0, 0.5, 0.2]
+    raw["dispatch"] = "rl"
+    at.session_state["raw"] = raw
+    at.session_state["ver"] = at.session_state["ver"] + 1
+    at.run()
+    assert not at.exception, at.exception
+    anim = next(r for r in at.radio if r.label == "Przydział wozideł w animacji")
+    assert anim.value == "rl"
