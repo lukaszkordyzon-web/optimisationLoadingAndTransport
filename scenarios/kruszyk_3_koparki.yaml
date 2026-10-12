@@ -1,0 +1,150 @@
+# Wariant rozbudowany – 3 fronty, flota mieszana
+name: Kopalnia Kruszyk – 3 koparki, 2 typy wozideł, większa kruszarka
+shift_hours: 8
+seed: 42
+dispatch: dynamic
+loose_density_t_m3: 1.75
+rolling_resistance_pct: 3.0
+blasts:
+- id: O-01
+  tonnage_t: 12000
+  fragmentation: 0.3
+- id: O-02
+  tonnage_t: 9000
+  fragmentation: 0.55
+- id: O-03
+  tonnage_t: 15000
+  fragmentation: 0.4
+excavators:
+- id: K-1
+  bucket_m3: 6.0
+  swing_cycle_s: 32
+  blast: O-01
+  route: T-dolny
+- id: K-2
+  bucket_m3: 4.5
+  swing_cycle_s: 28
+  blast: O-02
+  route: T-gorny
+- id: K-3
+  bucket_m3: 7.5
+  swing_cycle_s: 34
+  blast: O-03
+  route: T-wschod
+trucks:
+- model: wozidło 55 t
+  count: 8
+  payload_t: 55
+  empty_mass_t: 40
+  power_kw: 520
+  max_speed_kmh: 45
+  fuel_lph_loaded: 60
+  fuel_lph_empty: 32
+  fuel_lph_idle: 10
+- model: wozidło 40 t
+  count: 5
+  payload_t: 40
+  empty_mass_t: 30
+  power_kw: 400
+  max_speed_kmh: 48
+  fuel_lph_loaded: 45
+  fuel_lph_empty: 24
+  fuel_lph_idle: 8
+routes:
+  T-dolny:
+    segments:
+    - name: front
+      length_m: 250
+      grade_pct: 0
+      speed_limit_kmh: 15
+    - name: rampa
+      length_m: 1100
+      grade_pct: 9
+      speed_limit_kmh: 30
+    - name: droga_do_zakladu
+      length_m: 1800
+      grade_pct: 1
+      speed_limit_kmh: 40
+    - name: plac_kruszarki
+      length_m: 150
+      grade_pct: 0
+      speed_limit_kmh: 15
+  T-gorny:
+    segments:
+    - name: front
+      length_m: 200
+      grade_pct: 0
+      speed_limit_kmh: 15
+    - name: rampa
+      length_m: 500
+      grade_pct: 8
+      speed_limit_kmh: 30
+    - name: droga_do_zakladu
+      length_m: 1500
+      grade_pct: 1
+      speed_limit_kmh: 40
+    - name: plac_kruszarki
+      length_m: 150
+      grade_pct: 0
+      speed_limit_kmh: 15
+  T-wschod:
+    segments:
+    - name: front
+      length_m: 300
+      grade_pct: 0
+      speed_limit_kmh: 15
+    - name: rampa_dolna
+      length_m: 700
+      grade_pct: 10
+      speed_limit_kmh: 25
+    - name: poziom_posredni
+      length_m: 400
+      grade_pct: 0
+      speed_limit_kmh: 35
+    - name: rampa_gorna
+      length_m: 600
+      grade_pct: 8
+      speed_limit_kmh: 30
+    - name: droga_do_zakladu
+      length_m: 2200
+      grade_pct: 1
+      speed_limit_kmh: 40
+    - name: plac_kruszarki
+      length_m: 150
+      grade_pct: 0
+      speed_limit_kmh: 15
+crusher:
+  capacity_tph: 1800
+  hopper_t: 220
+  dump_time_s: 50
+  fragmentation_penalty: 0.4
+  kwh_per_t: 1.1
+  kwh_fragmentation_extra: 0.6
+variability:
+  driver_sd: 0.07
+  trip_sd: 0.08
+  load_sd: 0.1
+  rain_probability: 0.2
+  rain_slowdown: 0.12
+  truck_mtbf_h: 40
+  truck_mttr_min: 35
+stockpile:
+  enabled: false
+  divert_wait_s: 180
+  dump_time_s: 40
+  loader_tph: 450
+  feed_below_t: 60
+  initial_t: 0
+  loader_per_h: 350
+  rehandle_cost_per_t: 1.5
+pacing:
+  enabled: false
+  max_slowdown: 0.25
+costs:
+  truck_per_h: 300
+  excavator_per_h: 900
+  crusher_per_h: 1200
+  fuel_per_l: 6.5
+  energy_per_kwh: 0.9
+  drill_blast_per_t: 3.0
+  drill_blast_fine_extra_per_t: 2.5

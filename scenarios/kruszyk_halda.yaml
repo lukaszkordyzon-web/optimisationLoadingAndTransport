@@ -1,0 +1,93 @@
+# Scenariusz syntetyczny – wszystkie wartości są założeniami do zmiany.
+# Liczbę koparek, wozideł, odstrzałów i tras ustawia się dowolnie w listach poniżej.
+name: Kopalnia Kruszyk – hałda buforowa + doradztwo prędkości
+shift_hours: 8
+seed: 42
+dispatch: dynamic          # dynamic = system sam przydziela wozidła; fixed = wozidło przypisane do koparki
+loose_density_t_m3: 1.75   # gęstość urobku spulchnionego
+rolling_resistance_pct: 3.0
+
+blasts:
+  - id: O-01
+    tonnage_t: 12000
+    fragmentation: 0.3     # 0 = bardzo dobre rozdrobnienie, 1 = dużo brył
+  - id: O-02
+    tonnage_t: 9000
+    fragmentation: 0.55
+
+excavators:
+  - id: K-1
+    bucket_m3: 6.0
+    swing_cycle_s: 32
+    blast: O-01
+    route: T-dolny
+  - id: K-2
+    bucket_m3: 4.5
+    swing_cycle_s: 28
+    blast: O-02
+    route: T-gorny
+
+trucks:
+  - model: wozidło 55 t
+    count: 8
+    payload_t: 55
+    empty_mass_t: 40
+    power_kw: 520
+    max_speed_kmh: 45
+    fuel_lph_loaded: 60
+    fuel_lph_empty: 32
+    fuel_lph_idle: 10
+
+routes:
+  T-dolny:                 # od frontu (poziom dolny) do kosza kruszarki
+    segments:
+      - {name: front,            length_m: 250,  grade_pct: 0,  speed_limit_kmh: 15}
+      - {name: rampa,            length_m: 1100, grade_pct: 9,  speed_limit_kmh: 30}
+      - {name: droga_do_zakladu, length_m: 1800, grade_pct: 1,  speed_limit_kmh: 40}
+      - {name: plac_kruszarki,   length_m: 150,  grade_pct: 0,  speed_limit_kmh: 15}
+  T-gorny:
+    segments:
+      - {name: front,            length_m: 200,  grade_pct: 0,  speed_limit_kmh: 15}
+      - {name: rampa,            length_m: 500,  grade_pct: 8,  speed_limit_kmh: 30}
+      - {name: droga_do_zakladu, length_m: 1500, grade_pct: 1,  speed_limit_kmh: 40}
+      - {name: plac_kruszarki,   length_m: 150,  grade_pct: 0,  speed_limit_kmh: 15}
+
+crusher:
+  capacity_tph: 1200
+  hopper_t: 160
+  dump_time_s: 50
+  fragmentation_penalty: 0.4
+  kwh_per_t: 1.1
+  kwh_fragmentation_extra: 0.6
+
+variability:
+  driver_sd: 0.07
+  trip_sd: 0.08
+  load_sd: 0.10
+  rain_probability: 0.2
+  rain_slowdown: 0.12
+  truck_mtbf_h: 40
+  truck_mttr_min: 35
+
+stockpile:                 # hałda buforowa przy kruszarce + ładowarka
+  enabled: true
+  divert_wait_s: 180       # zrzut na hałdę, gdy przewidywane czekanie pod koszem > 3 min
+  dump_time_s: 40
+  loader_tph: 450
+  feed_below_t: 60         # ładowarka dosypuje do kosza, gdy poziom < 60 t
+  initial_t: 0
+  loader_per_h: 350
+  rehandle_cost_per_t: 1.5
+
+pacing:                    # doradztwo prędkości: wolniej zamiast czekać pod kruszarką
+  enabled: true
+  max_slowdown: 0.25
+
+costs:                     # PLN
+  truck_per_h: 300         # z operatorem, bez paliwa
+  excavator_per_h: 900
+  crusher_per_h: 1200      # bez energii
+  fuel_per_l: 6.5
+  energy_per_kwh: 0.9
+  drill_blast_per_t: 3.0
+  drill_blast_fine_extra_per_t: 2.5   # dopłata za drobne rozdrobnienie (fragmentation=0)

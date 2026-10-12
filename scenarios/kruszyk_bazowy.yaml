@@ -34,6 +34,9 @@ trucks:
     empty_mass_t: 40
     power_kw: 520
     max_speed_kmh: 45
+    fuel_lph_loaded: 60
+    fuel_lph_empty: 32
+    fuel_lph_idle: 10
 
 routes:
   T-dolny:                 # od frontu (poziom dolny) do kosza kruszarki
@@ -54,6 +57,8 @@ crusher:
   hopper_t: 160
   dump_time_s: 50
   fragmentation_penalty: 0.4
+  kwh_per_t: 1.1
+  kwh_fragmentation_extra: 0.6
 
 variability:
   driver_sd: 0.07
@@ -64,7 +69,25 @@ variability:
   truck_mtbf_h: 40
   truck_mttr_min: 35
 
-costs:                     # PLN/h – do kalkulacji kosztu na tonę
-  truck_per_h: 450
+stockpile:                 # hałda buforowa przy kruszarce + ładowarka
+  enabled: false
+  divert_wait_s: 180       # zrzut na hałdę, gdy przewidywane czekanie pod koszem > 3 min
+  dump_time_s: 40
+  loader_tph: 450
+  feed_below_t: 60         # ładowarka dosypuje do kosza, gdy poziom < 60 t
+  initial_t: 0
+  loader_per_h: 350
+  rehandle_cost_per_t: 1.5
+
+pacing:                    # doradztwo prędkości: wolniej zamiast czekać pod kruszarką
+  enabled: false
+  max_slowdown: 0.25
+
+costs:                     # PLN
+  truck_per_h: 300         # z operatorem, bez paliwa
   excavator_per_h: 900
-  crusher_per_h: 1500
+  crusher_per_h: 1200      # bez energii
+  fuel_per_l: 6.5
+  energy_per_kwh: 0.9
+  drill_blast_per_t: 3.0
+  drill_blast_fine_extra_per_t: 2.5   # dopłata za drobne rozdrobnienie (fragmentation=0)

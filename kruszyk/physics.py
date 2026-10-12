@@ -73,3 +73,12 @@ def expected_cycle(sc: Scenario, ex: Excavator, truck: TruckFleet) -> dict[str, 
     }
     parts["cycle_s"] = sum(parts.values())
     return parts
+
+
+def crusher_kwh_per_t(crusher: Crusher, fragmentation: float) -> float:
+    return crusher.kwh_per_t * (1 + crusher.kwh_fragmentation_extra * fragmentation)
+
+
+def drill_blast_cost_per_t(costs, fragmentation: float) -> float:
+    """Finer fragmentation = higher powder factor = more expensive blasting."""
+    return costs.drill_blast_per_t + costs.drill_blast_fine_extra_per_t * (1 - fragmentation)

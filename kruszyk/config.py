@@ -53,6 +53,9 @@ class TruckFleet:
     power_kw: float
     max_speed_kmh: float = 45.0
     drive_efficiency: float = 0.75
+    fuel_lph_loaded: float = 60.0  # fuel burn while driving loaded
+    fuel_lph_empty: float = 32.0
+    fuel_lph_idle: float = 10.0    # queueing / spotting / loading / dumping with engine running
 
 
 @dataclass
@@ -62,6 +65,28 @@ class Crusher:
     dump_time_s: float = 60.0
     # how much poor fragmentation reduces throughput (0.4 -> -40 % at fragmentation=1)
     fragmentation_penalty: float = 0.4
+    kwh_per_t: float = 1.1          # specific energy at perfect fragmentation
+    kwh_fragmentation_extra: float = 0.6  # +60 % energy at fragmentation=1
+
+
+@dataclass
+class Stockpile:
+    """Buffer stockpile next to the crusher, fed back to the hopper by a wheel loader."""
+    enabled: bool = False
+    divert_wait_s: float = 180.0  # dump on the stockpile if the expected wait at the hopper is longer
+    dump_time_s: float = 40.0
+    loader_tph: float = 450.0
+    feed_below_t: float = 60.0    # loader tops up the hopper when its level drops below this
+    initial_t: float = 0.0
+    loader_per_h: float = 350.0   # PLN/h
+    rehandle_cost_per_t: float = 1.5
+
+
+@dataclass
+class Pacing:
+    """Speed advice: a loaded truck that would queue at the crusher is told to drive slower."""
+    enabled: bool = False
+    max_slowdown: float = 0.25    # at most +25 % haul time
 
 
 @dataclass
@@ -77,9 +102,14 @@ class Variability:
 
 @dataclass
 class Costs:
-    truck_per_h: float = 450.0      # PLN/h incl. operator and fuel
+    truck_per_h: float = 300.0      # PLN/h incl. operator, without fuel
     excavator_per_h: float = 900.0
-    crusher_per_h: float = 1500.0
+    crusher_per_h: float = 1200.0   # without energy
+    fuel_per_l: float = 6.5
+    energy_per_kwh: float = 0.9
+    # drilling & blasting: better fragmentation (lower value) needs more explosive
+    drill_blast_per_t: float = 3.0
+    drill_blast_fine_extra_per_t: float = 2.5  # extra cost at fragmentation=0
 
 
 @dataclass
@@ -97,6 +127,8 @@ class Scenario:
     seed: int = 42
     variability: Variability = field(default_factory=Variability)
     costs: Costs = field(default_factory=Costs)
+    stockpile: Stockpile = field(default_factory=Stockpile)
+    pacing: Pacing = field(default_factory=Pacing)
 
     @property
     def truck_count(self) -> int:
@@ -118,6 +150,11 @@ class Scenario:
             raise ValueError("Scenariusz musi mieć co najmniej jedno wozidło")
         if self.dispatch not in ("dynamic", "fixed"):
             raise ValueError("dispatch musi być 'dynamic' albo 'fixed'")
+        if self.crusher.hopper_t < max(f.payload_t for f in self.trucks if f.count > 0):
+            raise ValueError("Kosz kruszarki mniejszy niż ładowność wozidła")
+        for r in self.routes.values():
+            if not r.segments:
+                raise ValueError(f"Trasa {r.id} nie ma odcinków")
 
     def with_truck_count(self, n: int) -> "Scenario":
         """Copy of the scenario with the fleet scaled to n trucks (first fleet type absorbs the change)."""
@@ -136,7 +173,7 @@ class Scenario:
 
 
 def _build(cls, data: dict):
-    return cls(**data)
+    return cls(**(data or {}))
 
 
 def load_scenario(path: str | Path) -> Scenario:
@@ -164,6 +201,21 @@ def scenario_from_dict(raw: dict) -> Scenario:
         seed=raw.get("seed", 42),
         variability=_build(Variability, raw.get("variability", {})),
         costs=_build(Costs, raw.get("costs", {})),
+        stockpile=_build(Stockpile, raw.get("stockpile", {})),
+        pacing=_build(Pacing, raw.get("pacing", {})),
     )
     sc.validate()
     return sc
+
+
+def scenario_to_dict(sc: Scenario) -> dict:
+    """Inverse of scenario_from_dict (for saving edited scenarios to YAML)."""
+    from dataclasses import asdict
+
+    d = {k: v for k, v in asdict(sc).items() if k != "routes"}
+    d["routes"] = {rid: {"segments": [asdict(s) for s in r.segments]} for rid, r in sc.routes.items()}
+    return d
+
+
+def dump_scenario(sc: Scenario) -> str:
+    return yaml.safe_dump(scenario_to_dict(sc), allow_unicode=True, sort_keys=False)

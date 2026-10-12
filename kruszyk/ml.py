@@ -15,7 +15,7 @@ from sklearn.model_selection import GroupShuffleSplit
 from .config import Scenario
 from .sim import simulate
 
-NUMERIC = ["loaded", "payload_t", "length_m", "grade_pct", "speed_limit_kmh", "rain", "hour_of_shift"]
+NUMERIC = ["loaded", "payload_t", "length_m", "grade_pct", "speed_limit_kmh", "rain", "hour_of_shift", "pace"]
 CATEGORICAL = ["truck"]
 
 
@@ -54,7 +54,7 @@ class TravelTimeModel:
         segs = list(reversed(sc.routes[ex.route].segments))
         rows = [{"truck": truck, "loaded": 0, "payload_t": 0.0, "length_m": s.length_m,
                  "grade_pct": -s.grade_pct, "speed_limit_kmh": s.speed_limit_kmh,
-                 "rain": int(rain), "hour_of_shift": hour_of_shift} for s in segs[segment_index:]]
+                 "rain": int(rain), "hour_of_shift": hour_of_shift, "pace": 1.0} for s in segs[segment_index:]]
         t = self.predict_s(pd.DataFrame(rows))
         t[0] *= 1 - progress
         return float(t.sum())

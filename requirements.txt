@@ -4,3 +4,7 @@ PyYAML>=6.0
 simpy>=4.1
 scikit-learn>=1.5
 pytest>=8.0
+streamlit>=1.40
+plotly>=5.20
+folium>=0.17
+streamlit-folium>=0.22
