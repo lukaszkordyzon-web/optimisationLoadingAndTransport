@@ -8,6 +8,7 @@ import pandas as pd
 
 from .config import Scenario
 from .physics import route_time_s
+from .site import point_along, polyline_length_m
 
 STATE_LABELS = {
     "jazda_pusty": "jedzie pusty do koparki",
@@ -95,6 +96,10 @@ def snapshot(res, t: float) -> pd.DataFrame:
             dist_from_front = total
         if route:
             row["dist_m"], row["elev_m"] = _point_on_route(sc, route, dist_from_front)
+            path = sc.routes[route].path
+            if path:
+                geo_len = polyline_length_m(path)
+                row["lat"], row["lon"] = point_along(path, dist_from_front * geo_len / total if total else 0.0)
         else:
             row["dist_m"], row["elev_m"] = 0.0, 0.0
         rows.append(row)

@@ -17,6 +17,8 @@ from kruszyk.optimize import replicate, sweep_fragmentation, sweep_trucks
 from kruszyk.sim import simulate
 from kruszyk.views import STATE_LABELS, driver_instruction, operator_view, route_profile, snapshot
 
+from app_map import render_live_map, render_map_tab
+
 SCEN_DIR = Path(__file__).parent / "scenarios"
 STATE_COLORS = {
     "jazda_pusty": "#8ecae6", "jazda_pelny": "#219ebc", "kolejka_koparka": "#e63946",
@@ -175,6 +177,9 @@ def editor() -> dict:
         rid = r.pop("route", None)
         if rid:
             routes.setdefault(rid, {"segments": []})["segments"].append(r)
+    for rid, r in routes.items():  # keep map geometry of routes built from the map
+        if raw["routes"].get(rid, {}).get("path"):
+            r["path"] = raw["routes"][rid]["path"]
     new["routes"] = routes
 
     st.subheader("Kruszarka, hałda buforowa, doradztwo prędkości")
@@ -226,10 +231,10 @@ def editor() -> dict:
     return new
 
 
-tabs = st.tabs(["⚙️ Scenariusz", "📊 Wyniki zmiany", "📍 Podgląd na żywo", "⚖️ Porównanie wariantów",
+tabs = st.tabs(["🗺️ Mapa kopalni", "⚙️ Scenariusz", "📊 Wyniki zmiany", "📍 Podgląd na żywo", "⚖️ Porównanie wariantów",
                 "💥 Odstrzał ↔ kruszarka", "🤖 Model ETA"])
 
-with tabs[0]:
+with tabs[1]:
     edited = editor()
     try:
         sc = scenario_from_dict(copy.deepcopy(edited))
@@ -256,6 +261,9 @@ with tabs[0]:
             hide_index=True, use_container_width=True)
         st.download_button("💾 Pobierz scenariusz (YAML)", yaml_text, file_name="scenariusz.yaml")
 
+with tabs[0]:
+    render_map_tab(st.session_state.get("raw_edited", raw) if ok else raw, set_raw)
+
 if not ok:
     st.stop()
 
@@ -274,7 +282,7 @@ def gantt(res) -> go.Figure:
     return fig
 
 
-with tabs[1]:
+with tabs[2]:
     res = run_sim(yaml_text, int(seed))
     kp = res.kpi
     st.caption(f"Jedna zmiana {sc.shift_hours:g} h · {'deszcz' if kp['rain'] else 'sucho'} · ziarno {seed} "
@@ -354,7 +362,7 @@ def profile_figure(snap: pd.DataFrame) -> go.Figure:
     return fig
 
 
-with tabs[2]:
+with tabs[3]:
     shift_min = int(sc.shift_hours * 60)
     minute = st.slider("Moment zmiany [min od startu]", 0, shift_min - 1, min(180, shift_min - 1), 1)
     t = minute * 60.0
@@ -363,6 +371,7 @@ with tabs[2]:
     hop = res.hopper[res.hopper["t_s"] <= t]
     level = hop["level_t"].iloc[-1] if len(hop) else 0.0
     st.markdown(f"### 🕐 {clock} · kosz kruszarki: {level:.0f} / {sc.crusher.hopper_t:.0f} t")
+    render_live_map(sc, snap, STATE_COLORS, STATE_LABELS)
     st.plotly_chart(profile_figure(snap), use_container_width=True)
 
     st.markdown("#### 📱 Ekran operatora koparki")
@@ -421,7 +430,7 @@ def variant_yaml(base_raw: dict, **changes) -> str:
     return dump_scenario(scenario_from_dict(r))
 
 
-with tabs[3]:
+with tabs[4]:
     base_raw = st.session_state.raw_edited
     st.subheader("Ile wozideł? – przegląd liczby wozideł dla wariantów organizacji")
     c = st.columns(4)
@@ -501,7 +510,7 @@ with tabs[3]:
 
 
 # ---------------------------------------------------------------- blast vs crusher
-with tabs[4]:
+with tabs[5]:
     st.subheader("Mine-to-mill: ile warto dopłacić do odstrzału?")
     st.caption("Lepsze rozdrobnienie (0) = droższe wiercenie i strzelanie, ale szybszy załadunek, wyższa wydajność "
                "i mniej energii na kruszarce. Wszystkie odstrzały w scenariuszu dostają tę samą wartość.")
@@ -531,7 +540,7 @@ with tabs[4]:
 
 
 # ---------------------------------------------------------------- ML
-with tabs[5]:
+with tabs[6]:
     st.subheader("Model czasu przejazdu i ETA pod koparkę")
     st.caption("Uczy się na danych z wielu symulowanych zmian – tak samo będzie uczył się na danych z telefonów. "
                "Porównanie z modelem czysto fizycznym (bez stylu kierowcy, deszczu, pory zmiany).")

@@ -14,6 +14,9 @@ załadunki, poziom kosza).
 ```bash
 pip install -r requirements.txt
 
+# Panel w przeglądarce (mapa, scenariusze, wyniki, podgląd na żywo, porównania)
+streamlit run app.py
+
 # 1. Kalkulator analityczny: czasy cyklu, match factor, wąskie gardło, ile wozideł
 python -m kruszyk calc scenarios/kruszyk_bazowy.yaml
 
@@ -30,6 +33,22 @@ python -m kruszyk train scenarios/kruszyk_bazowy.yaml --shifts 40 --out data/seg
 python -m pytest
 ```
 
+## Panel (`streamlit run app.py`)
+
+| Zakładka | Co robi |
+|---|---|
+| 🗺️ Mapa kopalni | Kalibracja (link z Google Maps lub współrzędne), rysowanie na zdjęciu satelitarnym: drogi i rampy (nachylenie, limit), usypy (materiał, tonaż, rozdrobnienie, gęstość), koparki, kruszarka. Przycisk **„Zbuduj trasy”** wyznacza najkrótszą drogę każda koparka → kruszarka i wstawia ją do scenariusza |
+| ⚙️ Scenariusz | Edycja wszystkich parametrów w tabelach + szybki kalkulator match factor; zapis do YAML |
+| 📊 Wyniki zmiany | KPI, koparki, oś czasu wozideł (gdzie czekają), kosz kruszarki i hałda, struktura kosztu, eksport CSV |
+| 📍 Podgląd na żywo | Suwak czasu: wozidła na mapie i na profilu trasy, **ekran operatora koparki** (kto pod łyżką, kto czeka, kto nadjeżdża i za ile), **ekrany kierowców** (polecenia), animacja zmiany |
+| ⚖️ Porównanie wariantów | Liczba wozideł × warianty (przydział stały/automatyczny, hałda, doradztwo prędkości) z rekomendacją; porównanie zapisanych scenariuszy |
+| 💥 Odstrzał ↔ kruszarka | Mine-to-mill: koszt całkowity na tonę w funkcji rozdrobnienia (droższy odstrzał vs szybszy załadunek i kruszenie) |
+| 🤖 Model ETA | Trening modelu czasów przejazdu na danych z wielu zmian, kalkulator ETA |
+
+Podkład mapy: zdjęcia satelitarne Esri World Imagery + OpenStreetMap (bez klucza API).
+Nachylenia dróg podaje się ręcznie – w kierunku do kruszarki, „+” = pod górę z ładunkiem
+(zdjęcie satelitarne nie zawiera wysokości). Końce dróg, które się łączą, muszą być ≤ 30 m od siebie.
+
 ## Co jest w środku
 
 | Moduł | Rola |
@@ -37,8 +56,10 @@ python -m pytest
 | `kruszyk/config.py` | Scenariusz: odstrzały, koparki, floty wozideł, trasy (odcinki z długością i nachyleniem), kruszarka, zmienność, koszty |
 | `kruszyk/physics.py` | Czasy oczekiwane: prędkość wozidła z mocy i oporów (nachylenie + opór toczenia), hamowanie na zjeździe, liczba łyżek, czas załadunku, wydajność kruszarki zależna od rozdrobnienia |
 | `kruszyk/analytics.py` | Match factor, potrzebna liczba wozideł, wąskie gardło (koparki / wozidła / kruszarka) |
-| `kruszyk/sim.py` | Symulacja zdarzeń dyskretnych (SimPy) – cyfrowy bliźniak; kolejki pod koparką i kruszarką, kosz kruszarki, awarie, deszcz, styl kierowcy |
+| `kruszyk/sim.py` | Symulacja zdarzeń dyskretnych (SimPy) – cyfrowy bliźniak; kolejki pod koparką i kruszarką, kosz kruszarki, hałda buforowa z ładowarką, doradztwo prędkości, awarie, deszcz, styl kierowcy, paliwo, energia, koszty |
 | `kruszyk/optimize.py` | Przegląd liczby wozideł z replikacjami, rekomendacja (min. PLN/t, opcjonalnie z celem t/h) |
+| `kruszyk/site.py` | Mapa: geometria (odległości, pola), parsowanie linków Google Maps, graf dróg, najkrótsza trasa, mapa → scenariusz |
+| `kruszyk/views.py` | Stan wozideł w danej chwili, pozycja na trasie/mapie, ETA, ekran operatora i polecenia kierowców |
 | `kruszyk/ml.py` | Generowanie zbioru danych, model czasu przejazdu odcinka (gradient boosting), ETA wozidła pod koparkę |
 
 ### Dyspozycja bez dyspozytora

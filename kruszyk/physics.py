@@ -53,7 +53,8 @@ def dig_factor(blast: Blast) -> float:
 
 
 def load_time_s(ex: Excavator, truck: TruckFleet, blast: Blast, loose_density: float) -> float:
-    return passes_per_truck(ex, truck, loose_density) * ex.swing_cycle_s * dig_factor(blast)
+    density = blast.loose_density_t_m3 or loose_density
+    return passes_per_truck(ex, truck, density) * ex.swing_cycle_s * dig_factor(blast)
 
 
 def crusher_rate_tph(crusher: Crusher, fragmentation: float) -> float:

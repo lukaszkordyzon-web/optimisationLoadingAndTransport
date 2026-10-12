@@ -19,6 +19,7 @@ class Segment:
 class Route:
     id: str
     segments: list[Segment]
+    path: list | None = None  # [[lat, lon], ...] front -> crusher, when drawn on the map
 
     @property
     def length_m(self) -> float:
@@ -31,6 +32,8 @@ class Blast:
     tonnage_t: float
     # 0 = excellent fragmentation, 1 = poor (big blocks): slows digging and crushing
     fragmentation: float = 0.3
+    material: str = ""
+    loose_density_t_m3: float | None = None  # overrides the scenario density for this pile
 
 
 @dataclass
@@ -129,6 +132,7 @@ class Scenario:
     costs: Costs = field(default_factory=Costs)
     stockpile: Stockpile = field(default_factory=Stockpile)
     pacing: Pacing = field(default_factory=Pacing)
+    site: dict | None = None  # map geometry (see site.py)
 
     @property
     def truck_count(self) -> int:
@@ -184,7 +188,7 @@ def load_scenario(path: str | Path) -> Scenario:
 
 def scenario_from_dict(raw: dict) -> Scenario:
     routes = {
-        rid: Route(rid, [_build(Segment, s) for s in r["segments"]])
+        rid: Route(rid, [_build(Segment, s) for s in r["segments"]], r.get("path"))
         for rid, r in raw["routes"].items()
     }
     sc = Scenario(
@@ -203,6 +207,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         costs=_build(Costs, raw.get("costs", {})),
         stockpile=_build(Stockpile, raw.get("stockpile", {})),
         pacing=_build(Pacing, raw.get("pacing", {})),
+        site=raw.get("site"),
     )
     sc.validate()
     return sc
@@ -212,8 +217,15 @@ def scenario_to_dict(sc: Scenario) -> dict:
     """Inverse of scenario_from_dict (for saving edited scenarios to YAML)."""
     from dataclasses import asdict
 
-    d = {k: v for k, v in asdict(sc).items() if k != "routes"}
-    d["routes"] = {rid: {"segments": [asdict(s) for s in r.segments]} for rid, r in sc.routes.items()}
+    d = {k: v for k, v in asdict(sc).items() if k not in ("routes", "site")}
+    d["routes"] = {}
+    for rid, r in sc.routes.items():
+        d["routes"][rid] = {"segments": [asdict(s) for s in r.segments]}
+        if r.path:
+            d["routes"][rid]["path"] = r.path
+    d["blasts"] = [{k: v for k, v in b.items() if v not in (None, "")} for b in d["blasts"]]
+    if sc.site:
+        d["site"] = sc.site
     return d
 
 
