@@ -11,7 +11,7 @@ blasts:
   fragmentation: 0.3
   material: wapień
   loose_density_t_m3: 1.75
-  psd: &id004
+  psd:
   - - 10.0
     - 2.7
   - - 25.0
@@ -37,7 +37,7 @@ blasts:
   fragmentation: 0.3
   material: dolomit
   loose_density_t_m3: 1.85
-  psd: &id005
+  psd:
   - - 10.0
     - 1.9
   - - 25.0
@@ -63,7 +63,7 @@ blasts:
   fragmentation: 0.3
   material: wapień
   loose_density_t_m3: 1.75
-  psd: &id006
+  psd:
   - - 10.0
     - 4.7
   - - 25.0
@@ -530,13 +530,11 @@ site:
     grade_draw_pct: -1.0
     speed_limit_kmh: 40
     coords:
-    - &id003
-      - 50.0
+    - - 50.0
       - 20.0
     - - 50.0003
       - 20.006
-    - &id001
-      - 50.0
+    - - 50.0
       - 20.0125
   - id: R2
     name: rampa główna
@@ -544,9 +542,9 @@ site:
     grade_draw_pct: -9.0
     speed_limit_kmh: 25
     coords:
-    - *id001
-    - &id002
-      - 49.9955
+    - - 50.0
+      - 20.0125
+    - - 49.9955
       - 20.018
   - id: R3
     name: zjazd na poziom pośredni
@@ -554,8 +552,7 @@ site:
     grade_draw_pct: 0.0
     speed_limit_kmh: 30
     coords:
-    - &id007
-      - 49.997749999999996
+    - - 49.997749999999996
       - 20.01525
     - - 49.9972
       - 20.011
@@ -567,7 +564,8 @@ site:
     grade_draw_pct: 0.0
     speed_limit_kmh: 30
     coords:
-    - *id002
+    - - 49.9955
+      - 20.018
     - - 49.995
       - 20.0225
     - - 49.9945
@@ -583,12 +581,33 @@ site:
       - 20.027
     - - 49.9975
       - 20.02
-    - *id003
+    - - 50.0
+      - 20.0
   piles:
   - id: U-01
     material: wapień
     tonnage_t: 9000
-    psd: *id004
+    psd:
+    - - 10.0
+      - 2.7
+    - - 25.0
+      - 7.8
+    - - 50.0
+      - 17.1
+    - - 100.0
+      - 35.0
+    - - 200.0
+      - 62.8
+    - - 300.0
+      - 80.0
+    - - 500.0
+      - 94.9
+    - - 800.0
+      - 99.5
+    - - 1000.0
+      - 99.9
+    - - 1200.0
+      - 100.0
     loose_density_t_m3: 1.75
     polygon:
     - - 49.9962
@@ -602,7 +621,27 @@ site:
   - id: U-02
     material: dolomit
     tonnage_t: 9000
-    psd: *id005
+    psd:
+    - - 10.0
+      - 1.9
+    - - 25.0
+      - 5.2
+    - - 50.0
+      - 10.9
+    - - 100.0
+      - 21.9
+    - - 200.0
+      - 41.1
+    - - 300.0
+      - 56.2
+    - - 500.0
+      - 76.5
+    - - 800.0
+      - 91.2
+    - - 1000.0
+      - 95.5
+    - - 1200.0
+      - 97.8
     loose_density_t_m3: 1.85
     polygon:
     - - 49.9944
@@ -616,7 +655,27 @@ site:
   - id: U-03
     material: wapień
     tonnage_t: 12000
-    psd: *id006
+    psd:
+    - - 10.0
+      - 4.7
+    - - 25.0
+      - 14.5
+    - - 50.0
+      - 32.0
+    - - 100.0
+      - 61.3
+    - - 200.0
+      - 90.4
+    - - 300.0
+      - 98.1
+    - - 500.0
+      - 100.0
+    - - 800.0
+      - 100.0
+    - - 1000.0
+      - 100.0
+    - - 1200.0
+      - 100.0
     loose_density_t_m3: 1.75
     polygon:
     - - 49.994
@@ -659,11 +718,14 @@ site:
   dedicated:
   - for: sztygar
     coords:
-    - *id003
+    - - 50.0
+      - 20.0
     - - 50.0003
       - 20.006
-    - *id001
-    - *id007
+    - - 50.0
+      - 20.0125
+    - - 49.997749999999996
+      - 20.01525
     - - 49.9972
       - 20.011
     - - 49.9968

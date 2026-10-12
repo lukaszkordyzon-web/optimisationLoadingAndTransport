@@ -10,6 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from kruszyk.config import yaml_dump  # noqa: E402
 from kruszyk.psd import PRESETS  # noqa: E402
 from kruszyk.site import analyze_site, site_to_scenario  # noqa: E402
 
@@ -79,5 +80,5 @@ print("poziomy koparek:", info["levels"])
 print("węzły:", len(info["junctions"]), "ostrzeżenia:", info["warnings"])
 out = ROOT / "scenarios" / "kruszyk_mapa_demo.yaml"
 out.write_text("# Wygenerowane przez tools/make_demo_map.py – geometria przykładowa (nie rzeczywisty teren)\n"
-               + yaml.safe_dump(new, allow_unicode=True, sort_keys=False), encoding="utf-8")
+               + yaml_dump(new), encoding="utf-8")
 print("zapisano", out)
