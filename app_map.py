@@ -29,9 +29,14 @@ def empty_site() -> dict:
 
 def get_site(raw: dict) -> dict:
     if "site" not in st.session_state or st.session_state.get("site_ver") != st.session_state.ver:
-        st.session_state.site = copy.deepcopy(raw.get("site") or empty_site())
+        old = st.session_state.get("site")
+        new = copy.deepcopy(raw.get("site") or empty_site())
+        st.session_state.site = new
         st.session_state.site_ver = st.session_state.ver
-        st.session_state.map_key = st.session_state.get("map_key", 0) + 1
+        # rebuild the map only when the view really changes (another scenario), not after "build routes"
+        if old is None or (old.get("center"), old.get("zoom")) != (new.get("center"), new.get("zoom")):
+            st.session_state.map_key = st.session_state.get("map_key", 0) + 1
+        st.session_state.obj_ver = st.session_state.get("obj_ver", 0) + 1
     return st.session_state.site
 
 
@@ -43,7 +48,8 @@ def base_map(site: dict, height_zoom: int | None = None) -> folium.Map:
     return m
 
 
-def draw_site(m: folium.Map, site: dict) -> None:
+def draw_site(m, site: dict) -> None:
+    """Add site objects to a map or a FeatureGroup."""
     for r in site.get("roads", []):
         folium.PolyLine([tuple(c) for c in r["coords"]], color=ROAD_COLORS.get(r.get("kind"), "#ffe600"), weight=6,
                         tooltip=f"{r['name']} · {r.get('kind')} · {r.get('grade_pct', 0)} % · "
@@ -67,6 +73,19 @@ def _latlon(coords: list) -> list:
     return [[round(c[1], 7), round(c[0], 7)] for c in coords]  # GeoJSON is [lon, lat]
 
 
+def editing_map(site: dict) -> folium.Map:
+    """The drawing map. Its HTML must not depend on the selected mode or on the objects,
+    otherwise st_folium rebuilds it on every change and the view/sketches are lost."""
+    m = base_map(site)
+    Draw(export=False, position="topleft",
+         draw_options={"polyline": {"shapeOptions": {"color": "#ff00ff", "weight": 4}},
+                       "polygon": {"shapeOptions": {"color": "#ff00ff"}}, "marker": True,
+                       "circle": False, "rectangle": False, "circlemarker": False},
+         edit_options={"edit": False}).add_to(m)
+    folium.LayerControl().add_to(m)
+    return m
+
+
 def render_map_tab(raw_for_build: dict, set_raw) -> None:
     site = get_site(raw_for_build)
 
@@ -79,7 +98,7 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
         pos = parse_coords(link)
         if pos:
             site["center"], site["zoom"] = list(pos), int(zoom)
-            st.session_state.map_key += 1
+            st.session_state.map_key += 1  # the only moment the map is rebuilt on purpose
             st.rerun()
         else:
             st.error("Nie rozpoznano współrzędnych. W Google Maps: prawy klik na mapie → kliknij współrzędne (kopiują się).")
@@ -87,7 +106,7 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
     st.subheader("2. Rysowanie obiektów")
     c1, c2 = st.columns([1, 3])
     with c1:
-        mode = st.radio("Co rysujesz?", list(MODES), key="draw_mode")
+        mode = st.radio("Co dodajesz?", list(MODES), key="draw_mode")
         attrs: dict = {}
         if mode == "Droga / rampa":
             attrs["kind"] = st.selectbox("Rodzaj", ["droga", "rampa"])
@@ -96,47 +115,45 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
                                                  8.0 if attrs["kind"] == "rampa" else 0.0, 0.5)
             attrs["speed_limit_kmh"] = st.number_input("Limit prędkości [km/h]", 5.0, 80.0,
                                                        25.0 if attrs["kind"] == "rampa" else 40.0, 5.0)
-            st.caption("Rysuj linię po osi drogi. Końce dróg, które się łączą, stawiaj blisko siebie (≤ 30 m).")
+            st.caption("Narzędzie „linia” (/). Rysuj po osi drogi, zakończ klikając ostatni punkt. "
+                       "Końce dróg, które się łączą, stawiaj blisko siebie (≤ 30 m).")
         elif mode == "Usyp (materiał)":
             attrs["id"] = st.text_input("Oznaczenie usypu", f"U-{len(site['piles']) + 1:02d}")
             attrs["material"] = st.selectbox("Materiał", MATERIALS)
             attrs["tonnage_t"] = st.number_input("Ilość [t]", 0.0, 10_000_000.0, 10_000.0, 500.0)
             attrs["fragmentation"] = st.slider("Rozdrobnienie (0 = drobne, 1 = bryły)", 0.0, 1.0, 0.3, 0.05)
             attrs["loose_density_t_m3"] = st.number_input("Gęstość spulchniona [t/m³]", 1.0, 3.0, 1.75, 0.05)
-            st.caption("Obrysuj usyp wielokątem.")
+            st.caption("Narzędzie „wielokąt” (⬠). Obrysuj usyp, zamknij klikając pierwszy punkt.")
         elif mode == "Koparka":
             attrs["id"] = st.text_input("Oznaczenie koparki", f"K-{len(site['excavators']) + 1}")
             piles = [p["id"] for p in site["piles"]]
             attrs["pile"] = st.selectbox("Ładuje z usypu", piles or ["(najbliższy)"])
             attrs["bucket_m3"] = st.number_input("Łyżka [m³]", 0.5, 30.0, 5.0, 0.5)
             attrs["swing_cycle_s"] = st.number_input("Cykl łyżki [s]", 10.0, 90.0, 30.0, 1.0)
-            st.caption("Postaw znacznik w miejscu pracy koparki.")
+            st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu pracy koparki.")
         else:
-            st.caption("Postaw znacznik na koszu kruszarki (miejsce wyładunku).")
-        add = st.button("➕ Dodaj narysowany obiekt", type="primary", use_container_width=True)
+            st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku).")
+        add = st.button("➕ Dodaj ostatnio narysowany obiekt", type="primary", use_container_width=True)
+        st.caption("Różowy = szkic. Po dodaniu obiekt dostaje kolor (drogi żółte, rampy pomarańczowe, usypy niebieskie). "
+                   "Szkice znikają po odświeżeniu strony.")
 
     with c2:
-        m = base_map(site)
-        draw_site(m, site)
-        kind = MODES[mode]
-        Draw(export=False, position="topleft",
-             draw_options={"polyline": kind == "polyline", "polygon": kind == "polygon",
-                           "marker": kind == "marker", "circle": False, "rectangle": False,
-                           "circlemarker": False},
-             edit_options={"edit": False}).add_to(m)
-        folium.LayerControl().add_to(m)
-        out = st_folium(m, height=620, use_container_width=True, key=f"map_{st.session_state.map_key}",
-                        returned_objects=["last_active_drawing", "center", "zoom"])
+        # objects are pushed as a dynamic layer: the map itself is not rebuilt when they change
+        objects = folium.FeatureGroup(name="Obiekty")
+        draw_site(objects, site)
+        out = st_folium(editing_map(site), height=620, use_container_width=True,
+                        key=f"map_{st.session_state.map_key}", feature_group_to_add=objects,
+                        returned_objects=["last_active_drawing"])
 
     if add:
         geom = (out or {}).get("last_active_drawing")
+        sig = repr(geom.get("geometry")) if geom else None
         if not geom:
             st.warning("Najpierw narysuj obiekt narzędziem po lewej stronie mapy.")
+        elif sig == st.session_state.get("last_added_geom"):
+            st.warning("Ten szkic został już dodany – narysuj nowy obiekt.")
         else:
             g = geom["geometry"]
-            if out.get("center"):
-                site["center"] = [out["center"]["lat"], out["center"]["lng"]]
-                site["zoom"] = out.get("zoom", site.get("zoom", 16))
             try:
                 if mode == "Droga / rampa" and g["type"] == "LineString":
                     site["roads"].append({"id": f"R{len(site['roads']) + 1}", **attrs, "coords": _latlon(g["coordinates"])})
@@ -149,8 +166,11 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
                     lon, lat = g["coordinates"]
                     site["crusher"] = {"lat": lat, "lon": lon}
                 else:
-                    raise ValueError(f"Narysowano {g['type']}, a wybrany obiekt to „{mode}”")
-                st.session_state.map_key += 1
+                    kinds = {"LineString": "linię", "Polygon": "wielokąt", "Point": "znacznik"}
+                    raise ValueError(f"Ostatnio narysowano {kinds.get(g['type'], g['type'])}, a wybrany obiekt to „{mode}”. "
+                                     "Zmień wybór po lewej (mapa się nie zresetuje) i kliknij Dodaj ponownie.")
+                st.session_state.last_added_geom = sig
+                st.session_state.obj_ver += 1  # refresh the tables below, not the map
                 st.rerun()
             except ValueError as e:
                 st.error(str(e))
@@ -162,7 +182,7 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
         if site["roads"]:
             df = pd.DataFrame([{k: v for k, v in r.items() if k != "coords"} | {"długość [m]": round(polyline_length_m(r["coords"]))}
                                for r in site["roads"]])
-            ed = st.data_editor(df, num_rows="dynamic", key=f"roads_{st.session_state.map_key}",
+            ed = st.data_editor(df, num_rows="dynamic", key=f"roads_{st.session_state.obj_ver}",
                                 disabled=["id", "długość [m]"], use_container_width=True, hide_index=True,
                                 column_config={"kind": st.column_config.SelectboxColumn("rodzaj", options=["droga", "rampa"])})
             _sync(site, "roads", ed, "id")
@@ -171,7 +191,7 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
         st.markdown("**Koparki**")
         if site["excavators"]:
             df = pd.DataFrame(site["excavators"])
-            ed = st.data_editor(df, num_rows="dynamic", key=f"ex_{st.session_state.map_key}", hide_index=True,
+            ed = st.data_editor(df, num_rows="dynamic", key=f"ex_{st.session_state.obj_ver}", hide_index=True,
                                 disabled=["lat", "lon"], use_container_width=True,
                                 column_config={"pile": st.column_config.SelectboxColumn(
                                     "usyp", options=[p["id"] for p in site["piles"]] + ["(najbliższy)"])})
@@ -184,7 +204,7 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
         if site["piles"]:
             df = pd.DataFrame([{k: v for k, v in p.items() if k != "polygon"} | {"pow. [m²]": round(polygon_area_m2(p["polygon"]))}
                                for p in site["piles"]])
-            ed = st.data_editor(df, num_rows="dynamic", key=f"piles_{st.session_state.map_key}", hide_index=True,
+            ed = st.data_editor(df, num_rows="dynamic", key=f"piles_{st.session_state.obj_ver}", hide_index=True,
                                 disabled=["pow. [m²]"], use_container_width=True,
                                 column_config={"material": st.column_config.SelectboxColumn("materiał", options=MATERIALS)})
             _sync(site, "piles", ed, "polygon")

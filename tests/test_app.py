@@ -21,3 +21,12 @@ def test_every_preset_loads():
         at.sidebar.selectbox[0].select(name).run()
         at.sidebar.button[0].click().run()
         assert not at.exception, (name, at.exception)
+
+
+def test_switching_draw_mode_keeps_map():
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    key_before = at.session_state["map_key"]
+    for mode in ["Usyp (materiał)", "Koparka", "Kruszarka", "Droga / rampa"]:
+        at.radio(key="draw_mode").set_value(mode).run()
+        assert not at.exception, (mode, at.exception)
+        assert at.session_state["map_key"] == key_before  # map not rebuilt
