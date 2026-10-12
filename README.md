@@ -12,7 +12,7 @@ załadunki, poziom kosza).
 ## Szybki start
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # runtime + pytest
 
 # Panel w przeglądarce (mapa, scenariusze, wyniki, podgląd na żywo, porównania)
 streamlit run app.py
@@ -32,6 +32,21 @@ python -m kruszyk train scenarios/kruszyk_bazowy.yaml --shifts 40 --out data/seg
 
 python -m pytest
 ```
+
+## Wdrożenie na Streamlit Community Cloud
+
+1. Wejdź na https://share.streamlit.io i zaloguj się kontem GitHub (`lukaszkordyzon-web`).
+2. **Create app → Deploy a public app from GitHub** (albo z prywatnego repo – trzeba dać Streamlitowi dostęp).
+3. Ustaw:
+   - Repository: `lukaszkordyzon-web/optimisationLoadingAndTransport`
+   - Branch: `claude/confident-wright-xg92g2` (albo `main` po scaleniu)
+   - Main file path: `app.py`
+   - Advanced settings → Python: **3.12** lub **3.13**
+4. **Deploy** – po ~2–3 minutach aplikacja jest pod adresem `https://<nazwa>.streamlit.app`.
+
+Każdy push na wybraną gałąź automatycznie aktualizuje aplikację. Zależności: `requirements.txt`
+(przypięte wersje), konfiguracja: `.streamlit/config.toml`. Jeśli repo jest prywatne, w ustawieniach
+aplikacji (Sharing) można ograniczyć dostęp do wskazanych adresów e-mail.
 
 ## Panel (`streamlit run app.py`)
 

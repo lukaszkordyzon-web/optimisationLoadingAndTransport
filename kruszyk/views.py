@@ -53,7 +53,11 @@ def _point_on_route(sc: Scenario, route_id: str, dist_from_front: float) -> tupl
 def snapshot(res, t: float) -> pd.DataFrame:
     """State of every truck at time t (seconds from shift start)."""
     sc: Scenario = res.scenario
-    st, seg = res.states, res.segments
+    st = res.states[(res.states["start_s"] <= t) & (res.states["end_s"] > t)]
+    seg = res.segments
+    if len(seg):  # only the trips in progress matter
+        keys = set(zip(st["truck"], st["trip"]))
+        seg = seg[[k in keys for k in zip(seg["truck"], seg["trip"])]]
     ex_route = {e.id: e.route for e in sc.excavators}
     rows = []
     for truck in res.truck_ids:

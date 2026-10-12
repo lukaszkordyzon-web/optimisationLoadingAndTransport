@@ -400,8 +400,8 @@ with tabs[3]:
         st.dataframe(d[["truck", "status", "excavator", "segment", "polecenie", "od [min]"]].rename(columns={
             "truck": "wozidło", "excavator": "koparka", "segment": "odcinek"}), hide_index=True, use_container_width=True)
 
-    with st.expander("▶️ Animacja całej zmiany"):
-        step = st.select_slider("Krok animacji [min]", [1, 2, 5, 10], value=2)
+    if st.toggle("▶️ Animacja całej zmiany (liczy się kilka sekund)"):
+        step = st.select_slider("Krok animacji [min]", [2, 5, 10], value=5)
         frames = run_snapshots(yaml_text, int(seed), step)
         frames["stan"] = frames["state"].map(STATE_LABELS)
         rng_x = max(r.length_m for r in sc.routes.values()) * 1.05
