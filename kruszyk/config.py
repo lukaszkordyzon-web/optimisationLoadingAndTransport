@@ -164,7 +164,9 @@ class Advisor:
     """Real-time recommendations: speed for each truck (arrive when the excavator is free, not earlier),
     and for the excavator operator (fill the bucket before the truck spots)."""
     enabled: bool = False
-    max_slowdown: float = 0.3
+    max_slowdown: float = 0.3      # at most this much slower than normal (never faster than the limit)
+    arrival_margin_s: float = 0.0  # aim to arrive this long BEFORE the excavator is free (travel times vary)
+    crusher_pacing: float = 1.0    # how strongly to slow loaded trucks that would queue at the crusher (0 = not)
 
 
 @dataclass

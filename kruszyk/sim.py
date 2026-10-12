@@ -621,6 +621,7 @@ class Simulation:
             if sc.advisor.enabled:
                 # recommended speed: arrive when the excavator is free – not earlier (queue), not later
                 wait = self.predicted_finish(first, env.now + travel, service) - service - (env.now + travel)
+                wait -= sc.advisor.arrival_margin_s  # learned safety margin: better a bit early than late
                 pace_empty = 1 + min(sc.advisor.max_slowdown, max(0.0, wait) / travel)
             first.pending[truck.id] = (env.now + travel * pace_empty, service)
             cycle_start = env.now
@@ -645,7 +646,10 @@ class Simulation:
             if (sc.pacing.enabled and sc.dispatch != "natural") or sc.advisor.enabled:
                 haul = route_time_s(route, fleet, True, sc.rolling_resistance_pct)
                 wait = self.expected_dump_wait_s(tonnes, extra_t=self.inbound_t, ahead_s=haul)
-                pace = 1 + min(sc.pacing.max_slowdown, wait / haul)
+                if sc.advisor.enabled:
+                    pace = 1 + min(sc.advisor.max_slowdown, sc.advisor.crusher_pacing * wait / haul)
+                else:
+                    pace = 1 + min(sc.pacing.max_slowdown, wait / haul)
             self.inbound_t += tonnes
             yield from self._drive(truck, route, True, tonnes, "pelny", last.cfg.id, pace)
             self.inbound_t -= tonnes

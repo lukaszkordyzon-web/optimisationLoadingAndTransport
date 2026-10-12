@@ -86,3 +86,16 @@ def test_animation_payload(demo):
         assert all(abs(f[1] - lat0) < 0.05 and abs(f[2] - lon0) < 0.05 for f in frames)
         assert all(0 <= f[3] < len(STATE_CODES) for f in frames)
     assert len(data["series"]["t"]) > 100 and data["baseline"]["cpt"]
+
+
+def test_agent_learns_advice_settings_too(demo):
+    from kruszyk.rl import decode_advisor, explain_advisor
+
+    # starting point of the learned advice = the hand-made rules
+    assert decode_advisor([0, 0, 0]) == pytest.approx({"arrival_margin_s": 0.0, "max_slowdown": 0.3, "crusher_pacing": 1.0})
+    r = train(copy.deepcopy(demo), iterations=2, population=5, episodes=1, shift_hours=2, eval_episodes=1,
+              advisor=True, learn_advisor=True)
+    adv = r.advisor
+    assert -120 <= adv["arrival_margin_s"] <= 120 and 0 < adv["max_slowdown"] < 0.6 and 0 < adv["crusher_pacing"] < 2
+    assert list(r.comparison["polityka"])[-2:] == ["polityka RL + zalecenia wg reguł", "polityka RL + zalecenia wyuczone"]
+    assert len(explain_advisor(adv)) == 3

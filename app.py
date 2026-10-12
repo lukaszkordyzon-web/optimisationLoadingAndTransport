@@ -19,6 +19,7 @@ from kruszyk.sim import simulate
 from kruszyk.anim import animation_html
 from kruszyk.rl import POLICIES
 from kruszyk.rl import explain as rl_explain
+from kruszyk.rl import explain_advisor
 from kruszyk.rl import train as rl_train
 from kruszyk.views import STATE_LABELS, driver_instruction, operator_view, route_profile, snapshot
 
@@ -705,7 +706,11 @@ with tabs[6]:
     eps = c[2].number_input("Zmian na politykę", 1, 10, 2)
     ep_h = c[3].number_input("Długość zmiany w nauce [h]", 1.0, 12.0, min(4.0, float(sc.shift_hours)), 1.0)
     ev = c[4].number_input("Zmian w teście końcowym", 1, 20, 4)
-    n_sims = int(iters * (pop + 2) * eps + eps * 2 + 4 * ev)
+    c = st.columns(2)
+    adv_on = c[0].toggle("📱 Zalecenia w czasie rzeczywistym dla agenta", True, key="adv_rl_on")
+    adv_learn = c[1].toggle("🧠 Ucz też ustawień zaleceń (zapas przyjazdu, zwalnianie)", True, key="adv_rl_learn",
+                            disabled=not adv_on)
+    n_sims = int(iters * (pop + 2) * eps + eps * 2 + 5 * ev)
     st.caption(f"≈ {n_sims} symulowanych zmian, zwykle 15–60 s.")
     if st.button("🧠 Ucz agenta", type="primary"):
         bar, live = st.progress(0.0, "start"), st.empty()
@@ -718,7 +723,7 @@ with tabs[6]:
             live.line_chart(pd.DataFrame(rows).set_index("iteracja")[["koszt_polityka", "koszt_naturalny"]])
 
         result = rl_train(sc, iterations=int(iters), population=int(pop), episodes=int(eps), shift_hours=float(ep_h),
-                          eval_episodes=int(ev), callback=cb)
+                          eval_episodes=int(ev), callback=cb, advisor=adv_on, learn_advisor=adv_learn)
         live.empty()
         bar.empty()
         st.session_state.rl_result = {"result": result, "scenario": sc.name}
@@ -765,7 +770,7 @@ with tabs[6]:
             "wykorzystanie koparek": comp["excavator_utilization"].round(2),
         })
         st.dataframe(show, hide_index=True, width="stretch")
-        best = comp.iloc[3]
+        best = comp.iloc[-1]
         hours = sc.shift_hours
         saving = (nat["cost_per_t"] - best["cost_per_t"]) * best["hauled_t"]
         st.success(f"Polityka RL: {best['cost_per_t']:.2f} zł/t vs {nat['cost_per_t']:.2f} zł/t przy przydziale naturalnym, "
@@ -774,6 +779,8 @@ with tabs[6]:
         c1, c2 = st.columns([3, 2])
         c1.markdown("**Czego nauczył się agent** (dodatnia waga = unika koparek z dużą wartością cechy)")
         c1.dataframe(rl_explain(r.weights), hide_index=True, width="stretch")
+        if r.advisor:
+            c1.markdown("**Wyuczone zalecenia**  \n" + "  \n".join(explain_advisor(r.advisor)))
         with c2:
             st.markdown("**Wdrożenie polityki**")
             st.caption("Zapisuje wyuczone wagi w scenariuszu i ustawia przydział „polityka RL”. Potem zobaczysz ją "
@@ -782,5 +789,7 @@ with tabs[6]:
                 new_raw = copy.deepcopy(st.session_state.raw_edited)
                 new_raw["rl_weights"] = r.weights
                 new_raw["dispatch"] = "rl"
+                if r.advisor:
+                    new_raw["advisor"] = {**new_raw.get("advisor", {}), **r.advisor, "enabled": True}
                 set_raw(new_raw)
                 st.rerun()

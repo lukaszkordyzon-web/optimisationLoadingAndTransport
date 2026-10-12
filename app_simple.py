@@ -11,9 +11,10 @@ import streamlit.components.v1 as components
 import yaml
 
 from kruszyk.anim import animation_html
-from kruszyk.config import dump_scenario, scenario_from_dict
+from kruszyk.config import Advisor, dump_scenario, scenario_from_dict
 from kruszyk.psd import PRESETS, preset_of
 from kruszyk.rl import POLICIES
+from kruszyk.rl import explain_advisor
 from kruszyk.rl import train as rl_train
 from kruszyk.sim import simulate
 from kruszyk.site import normalize_roads, site_to_scenario
@@ -298,6 +299,7 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     store = st.session_state.setdefault("rl_by_target", {})
     plain = copy.deepcopy(sc)
     plain.rl_weights, plain.dispatch = None, "natural"
+    plain.advisor = Advisor(enabled=advise)  # learned advice settings stored in the mine don't make it "another mine"
     mine_key = dump_scenario(plain)  # the mine itself, without a learned policy stored in it
     if st.button("🚀 Optymalizuj przydział wozideł", type="primary"):
         bar = st.progress(0.0, "Uczenie…")
@@ -312,12 +314,14 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
                              .rename(columns={"koszt_polityka": "po nauce", "koszt_naturalny": "bez optymalizacji"}))
 
         res = rl_train(sc, iterations=8, population=10, episodes=2, shift_hours=min(4.0, sc.shift_hours),
-                       eval_episodes=3, callback=cb)
+                       eval_episodes=3, callback=cb, advisor=advise, learn_advisor=True)
         bar.empty()
         chart.empty()
         store[which] = {"result": res, "key": mine_key}
         if which == "stan obecny":
             base_raw["rl_weights"] = res.weights
+            if res.advisor:
+                base_raw.setdefault("advisor", {}).update(res.advisor)
         st.rerun()
     entry = store.get(which)
     if not entry or entry["key"] != mine_key:
@@ -332,6 +336,9 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
                 "Te komunikaty widać na żywo w panelu animacji poniżej (📱 Ekrany operatorów koparek).")
     res = entry["result"]
     sc.rl_weights, sc.dispatch = res.weights, "rl"
+    if res.advisor:  # the advice settings the agent learned together with the dispatch
+        for key, val in res.advisor.items():
+            setattr(sc.advisor, key, val)
     rl_yaml = dump_scenario(sc)
     today = run_policy(base_yaml, seed, "natural").kpi
     best = run_policy(rl_yaml, seed, "rl").kpi
@@ -341,6 +348,17 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     st.success(f"**{best['cost_per_t']:.2f} zł/t** zamiast {today['cost_per_t']:.2f} zł/t i "
                f"**{best['hauled_t'] - today['hauled_t']:+,.0f} t** urobku na zmianę – ok. **{saving:,.0f} zł** "
                "oszczędności na zmianę.".replace(",", " "))
+    if res.advisor:
+        st.markdown("#### Czego agent nauczył się o zaleceniach")
+        st.markdown("  \n".join(explain_advisor(res.advisor)))
+        comp = res.comparison.set_index("polityka")
+        rules, learned = comp.iloc[-2], comp.iloc[-1]
+        diff = 100 * (learned["cost_per_t"] / rules["cost_per_t"] - 1)
+        st.caption(f"Test na nowych zmianach: zalecenia wg reguł {rules['cost_per_t']:.2f} zł/t, wyuczone "
+                   f"{learned['cost_per_t']:.2f} zł/t ({diff:+.1f} %). "
+                   + ("Nauka poprawiła reguły." if diff < -0.5 else
+                      "Wyuczone zalecenia ≈ reguły – tu zysk daje głównie lepszy przydział, a zwalnianie niewiele "
+                      "zmienia (w modelu wolniejsza jazda oszczędza tylko paliwo spalane w kolejce)."))
     h = res.history
     fig = go.Figure()
     fig.add_scatter(x=h["iteracja"], y=h["koszt_naturalny"], name="bez optymalizacji", line=dict(color="#9aa0a6", dash="dot"))
