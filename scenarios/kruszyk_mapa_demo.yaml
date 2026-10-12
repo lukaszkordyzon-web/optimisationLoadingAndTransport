@@ -32,6 +32,7 @@ blasts:
     - 99.9
   - - 1200.0
     - 100.0
+  target_share: 40.0
 - id: U-02
   tonnage_t: 9000.0
   fragmentation: 0.3
@@ -58,6 +59,7 @@ blasts:
     - 95.5
   - - 1200.0
     - 97.8
+  target_share: 30.0
 - id: U-03
   tonnage_t: 12000.0
   fragmentation: 0.3
@@ -84,6 +86,7 @@ blasts:
     - 100.0
   - - 1200.0
     - 100.0
+  target_share: 30.0
 excavators:
 - id: K-1
   bucket_m3: 6.0
@@ -585,6 +588,7 @@ site:
       - 20.0
   piles:
   - id: U-01
+    target_share: 40
     material: wapień
     tonnage_t: 9000
     psd:
@@ -619,6 +623,7 @@ site:
     - - 49.9957
       - 20.0078
   - id: U-02
+    target_share: 30
     material: dolomit
     tonnage_t: 9000
     psd:
@@ -653,6 +658,7 @@ site:
     - - 49.9939
       - 20.0218
   - id: U-03
+    target_share: 30
     material: wapień
     tonnage_t: 12000
     psd:

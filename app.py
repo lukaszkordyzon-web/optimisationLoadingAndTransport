@@ -19,7 +19,7 @@ from kruszyk.sim import simulate
 from kruszyk.anim import animation_html
 from kruszyk.rl import POLICIES
 from kruszyk.rl import explain as rl_explain
-from kruszyk.rl import explain_advisor
+from kruszyk.rl import explain_advisor, explain_excavators
 from kruszyk.rl import train as rl_train
 from kruszyk.views import STATE_LABELS, driver_instruction, operator_view, route_profile, snapshot
 
@@ -706,7 +706,8 @@ with tabs[6]:
     eps = c[2].number_input("Zmian na politykę", 1, 10, 2)
     ep_h = c[3].number_input("Długość zmiany w nauce [h]", 1.0, 12.0, min(4.0, float(sc.shift_hours)), 1.0)
     ev = c[4].number_input("Zmian w teście końcowym", 1, 20, 4)
-    c = st.columns(2)
+    c = st.columns(3)
+    ex_learn = c[2].toggle("⛏️ Ucz zarządzania koparkami (ile pracuje, ostatnia łyżka)", True, key="ex_rl_learn")
     adv_on = c[0].toggle("📱 Zalecenia w czasie rzeczywistym dla agenta", True, key="adv_rl_on")
     adv_learn = c[1].toggle("🧠 Ucz też ustawień zaleceń (zapas przyjazdu, zwalnianie)", True, key="adv_rl_learn",
                             disabled=not adv_on)
@@ -723,7 +724,8 @@ with tabs[6]:
             live.line_chart(pd.DataFrame(rows).set_index("iteracja")[["koszt_polityka", "koszt_naturalny"]])
 
         result = rl_train(sc, iterations=int(iters), population=int(pop), episodes=int(eps), shift_hours=float(ep_h),
-                          eval_episodes=int(ev), callback=cb, advisor=adv_on, learn_advisor=adv_learn)
+                          eval_episodes=int(ev), callback=cb, advisor=adv_on, learn_advisor=adv_learn,
+                          learn_excavators=ex_learn)
         live.empty()
         bar.empty()
         st.session_state.rl_result = {"result": result, "scenario": sc.name}
@@ -779,6 +781,8 @@ with tabs[6]:
         c1, c2 = st.columns([3, 2])
         c1.markdown("**Czego nauczył się agent** (dodatnia waga = unika koparek z dużą wartością cechy)")
         c1.dataframe(rl_explain(r.weights), hide_index=True, width="stretch")
+        if r.excavators:
+            c1.markdown("**Wyuczone zarządzanie koparkami**  \n" + "  \n".join(explain_excavators(r.excavators)))
         if r.advisor:
             c1.markdown("**Wyuczone zalecenia**  \n" + "  \n".join(explain_advisor(r.advisor)))
         with c2:
@@ -791,5 +795,7 @@ with tabs[6]:
                 new_raw["dispatch"] = "rl"
                 if r.advisor:
                     new_raw["advisor"] = {**new_raw.get("advisor", {}), **r.advisor, "enabled": True}
+                if r.excavators:
+                    new_raw["excavator_policy"] = {**new_raw.get("excavator_policy", {}), **r.excavators}
                 set_raw(new_raw)
                 st.rerun()

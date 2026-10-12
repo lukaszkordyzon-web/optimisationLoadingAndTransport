@@ -74,6 +74,20 @@ aplikacji (Sharing) można ograniczyć dostęp do wskazanych adresów e-mail.
 - **📁 Mój scenariusz** (panel boczny): „Zapisz scenariusz do pliku” / „Wczytaj scenariusz z pliku” – cała kopalnia,
   zdarzenia, wariant i nauczona polityka w jednym pliku `.kruszyk.yaml`.
 
+### Czego uczy się agent RL
+
+| Obszar | Czego się uczy | Start nauki |
+|---|---|---|
+| Przydział wozideł | do której koparki po wyładunku (8 cech: kolejka, dojazd, odwóz, załadunek, urobek, wozidła w drodze, „własna” koparka, niedobór usypu względem udziału w nadawie) | przydział przypadkowy |
+| Ile koparek pracuje | próg „min. wolnych wozideł na koparkę” – poniżej odstawia koparkę z najdłuższym cyklem (przegląd co 30 min) | wszystkie pracują |
+| Ostatnia łyżka | przy jakim wypełnieniu i jakiej kolejce puścić wozidło bez ostatniej łyżki | zawsze do pełna |
+| Zalecenia | zapas przyjazdu pod koparkę, maks. zwolnienie, zwalnianie przed kruszarką | reguły |
+
+**Udział w nadawie** (przy usypie, opcjonalnie): docelowy procent nadawy z usypu. Liczony na bieżąco, odchyłka
+kosztuje (`blend_penalty_per_t_pp`), agent steruje nim **tylko wozidłami nieprzypisanymi na sztywno**.
+Odstawiona koparka kosztuje `excavator_idle_share` stawki (operator). Koparek obsługujących wozidła przypisane na
+sztywno agent nie odstawia.
+
 ### Zdarzenia na zmianie
 
 | Zdarzenie | Jak działa w symulacji |

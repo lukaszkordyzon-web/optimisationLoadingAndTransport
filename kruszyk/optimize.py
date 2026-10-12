@@ -24,6 +24,9 @@ def kpi_row(k: dict) -> dict:
         "truck_queue_excavator_h": k["truck_queue_excavator_h"],
         "fuel_l_per_t": k["fuel_l_per_t"],
         "stockpile_end_t": k["stockpile_end_t"],
+        "feed_dev_pp": k.get("feed_dev_pp", 0.0),
+        "parked_excavator_h": k.get("parked_excavator_h", 0.0),
+        "topup_skips": k.get("topup_skips", 0),
         **{f"koszt_{name}": v for name, v in k["cost_breakdown"].items()},
     }
 

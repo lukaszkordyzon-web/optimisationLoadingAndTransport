@@ -11,10 +11,10 @@ import streamlit.components.v1 as components
 import yaml
 
 from kruszyk.anim import animation_html
-from kruszyk.config import Advisor, dump_scenario, scenario_from_dict
+from kruszyk.config import Advisor, ExcavatorPolicy, dump_scenario, scenario_from_dict
 from kruszyk.psd import PRESETS, preset_of
 from kruszyk.rl import POLICIES
-from kruszyk.rl import explain_advisor
+from kruszyk.rl import explain_advisor, explain_excavators
 from kruszyk.rl import train as rl_train
 from kruszyk.sim import simulate
 from kruszyk.site import normalize_roads, site_to_scenario
@@ -98,6 +98,11 @@ def _losses(k: dict) -> list[str]:
     if k.get("yields", 0):
         out.append(f"🚙 Ustępowanie pierwszeństwa autom (ekipa, sztygar, cysterna): **{k['yields']}** razy, "
                    f"{60 * k['yield_h']:.0f} min.")
+    if k.get("feed_target"):
+        mix = ", ".join(f"{b} {k['feed_share'].get(b, 0):.0f} % (cel {t:.0f} %)" for b, t in k["feed_target"].items())
+        out.append(f"🧪 Skład nadawy: {mix} – odchyłka **{k['feed_dev_pp']:.1f} pp**.")
+    if k.get("parked_excavator_h", 0) > 0.05:
+        out.append(f"🅿️ Koparki odstawione (za mało wozideł): **{k['parked_excavator_h']:.1f} h**.")
     if k.get("over_limit_pct", 0) > 0.5:
         out.append(f"🚦 **{k['over_limit_pct']:.0f} %** przejazdów odcinków powyżej limitu prędkości "
                    f"({k['speeders']} kierowców jeździ szybciej).")
@@ -235,12 +240,15 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
         ed = _snapshot_editor(
             f"vpiles_{vv}",
             lambda: pd.DataFrame([{"id": p["id"], "material": p.get("material", ""), "tonnage_t": float(p.get("tonnage_t", 0)),
+                                   "target_share": p.get("target_share"),
                                    "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "własna"} for p in site["piles"]]),
             hide_index=True, width="stretch", disabled=["id", "material"],
             column_config={"id": "usyp", "material": "materiał", "tonnage_t": "ilość [t]",
+                           "target_share": st.column_config.NumberColumn("udział w nadawie [%]", min_value=0.0, max_value=100.0),
                            "uziarnienie": st.column_config.SelectboxColumn(options=list(PRESETS) + ["własna"])})
         for p, (_, row) in zip(site["piles"], ed.iterrows()):
             p["tonnage_t"] = float(row["tonnage_t"])
+            p["target_share"] = None if pd.isna(row["target_share"]) or not row["target_share"] else float(row["target_share"])
             if row["uziarnienie"] in PRESETS:
                 p["psd"] = PRESETS[row["uziarnienie"]]
     with st.expander("🕐 Zmiana i zdarzenia w wariancie (np. strzelanie o innej godzinie, inny objazd, cysterna)"):
@@ -300,6 +308,7 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     plain = copy.deepcopy(sc)
     plain.rl_weights, plain.dispatch = None, "natural"
     plain.advisor = Advisor(enabled=advise)  # learned advice settings stored in the mine don't make it "another mine"
+    plain.excavator_policy = ExcavatorPolicy()
     mine_key = dump_scenario(plain)  # the mine itself, without a learned policy stored in it
     if st.button("🚀 Optymalizuj przydział wozideł", type="primary"):
         bar = st.progress(0.0, "Uczenie…")
@@ -314,7 +323,7 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
                              .rename(columns={"koszt_polityka": "po nauce", "koszt_naturalny": "bez optymalizacji"}))
 
         res = rl_train(sc, iterations=8, population=10, episodes=2, shift_hours=min(4.0, sc.shift_hours),
-                       eval_episodes=3, callback=cb, advisor=advise, learn_advisor=True)
+                       eval_episodes=3, callback=cb, advisor=advise, learn_advisor=True, learn_excavators=True)
         bar.empty()
         chart.empty()
         store[which] = {"result": res, "key": mine_key}
@@ -322,6 +331,8 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
             base_raw["rl_weights"] = res.weights
             if res.advisor:
                 base_raw.setdefault("advisor", {}).update(res.advisor)
+            if res.excavators:
+                base_raw.setdefault("excavator_policy", {}).update(res.excavators)
         st.rerun()
     entry = store.get(which)
     if not entry or entry["key"] != mine_key:
@@ -339,6 +350,9 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     if res.advisor:  # the advice settings the agent learned together with the dispatch
         for key, val in res.advisor.items():
             setattr(sc.advisor, key, val)
+    if res.excavators:  # …and how to run the excavators
+        for key, val in res.excavators.items():
+            setattr(sc.excavator_policy, key, val)
     rl_yaml = dump_scenario(sc)
     today = run_policy(base_yaml, seed, "natural").kpi
     best = run_policy(rl_yaml, seed, "rl").kpi
@@ -348,17 +362,22 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     st.success(f"**{best['cost_per_t']:.2f} zł/t** zamiast {today['cost_per_t']:.2f} zł/t i "
                f"**{best['hauled_t'] - today['hauled_t']:+,.0f} t** urobku na zmianę – ok. **{saving:,.0f} zł** "
                "oszczędności na zmianę.".replace(",", " "))
-    if res.advisor:
-        st.markdown("#### Czego agent nauczył się o zaleceniach")
-        st.markdown("  \n".join(explain_advisor(res.advisor)))
-        comp = res.comparison.set_index("polityka")
-        rules, learned = comp.iloc[-2], comp.iloc[-1]
-        diff = 100 * (learned["cost_per_t"] / rules["cost_per_t"] - 1)
-        st.caption(f"Test na nowych zmianach: zalecenia wg reguł {rules['cost_per_t']:.2f} zł/t, wyuczone "
-                   f"{learned['cost_per_t']:.2f} zł/t ({diff:+.1f} %). "
-                   + ("Nauka poprawiła reguły." if diff < -0.5 else
-                      "Wyuczone zalecenia ≈ reguły – tu zysk daje głównie lepszy przydział, a zwalnianie niewiele "
-                      "zmienia (w modelu wolniejsza jazda oszczędza tylko paliwo spalane w kolejce)."))
+    lessons = (explain_excavators(res.excavators) if res.excavators else []) + \
+        (explain_advisor(res.advisor) if res.advisor else [])
+    if lessons:
+        st.markdown("#### Czego agent się nauczył")
+        st.markdown("  \n".join(lessons))
+    if best.get("feed_target"):
+        mix = ", ".join(f"{b} {best['feed_share'].get(b, 0):.0f} % (cel {t:.0f} %)" for b, t in best["feed_target"].items())
+        st.markdown(f"🧪 **Skład nadawy po optymalizacji:** {mix} – odchyłka **{best['feed_dev_pp']:.1f} pp** "
+                    f"(dziś {today.get('feed_dev_pp', 0):.1f} pp). Wozidła przypisane na sztywno jeżdżą po swojemu – "
+                    "skład koryguje się wozidłami wolnymi.")
+    comp = res.comparison.set_index("polityka")
+    if len(comp) >= 5:
+        only, full = comp.iloc[-2], comp.iloc[-1]
+        diff = 100 * (full["cost_per_t"] / only["cost_per_t"] - 1)
+        st.caption(f"Test na nowych zmianach: sam przydział {only['cost_per_t']:.2f} zł/t, przydział + zarządzanie "
+                   f"koparkami{' + zalecenia' if res.advisor else ''} {full['cost_per_t']:.2f} zł/t ({diff:+.1f} %).")
     h = res.history
     fig = go.Figure()
     fig.add_scatter(x=h["iteracja"], y=h["koszt_naturalny"], name="bez optymalizacji", line=dict(color="#9aa0a6", dash="dot"))

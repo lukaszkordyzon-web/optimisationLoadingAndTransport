@@ -15,7 +15,7 @@ import simpy
 
 from .config import Excavator, Scenario, TruckFleet, clock_to_s
 from .site import haversine_m
-from .physics import (crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_t, load_time_s,
+from .physics import (crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_t, load_time_s, passes_per_truck,
                       route_time_s, segment_time_s)
 
 CRUSHER_TICK_S = 10.0
@@ -52,6 +52,10 @@ class ExcavatorState:
     spotting_s: float = 0.0
     last_end: float = 0.0       # when the previous loading finished (excavator free since then)
     prefills: int = 0           # loads started with a bucket filled in advance
+    topup_skips: int = 0        # trucks sent without the last bucket
+    parked: bool = False        # parked by the excavator policy (not dispatched to)
+    parked_since: float | None = None
+    parked_s: float = 0.0
     down: list = field(default_factory=list)  # (from, to, reason): breaks, blasting, refuelling
 
 
@@ -110,6 +114,19 @@ class Simulation:
         self.fuel_l = 0.0
         self.dumped_t = 0.0
         self.decisions = 0
+        # feed mix: what each pile should give (normalised targets) and what it has given so far
+        targets = {b.id: float(b.target_share) for b in sc.blasts if b.target_share}
+        tot = sum(targets.values())
+        self.targets = {b.id: targets.get(b.id, 0.0) / tot for b in sc.blasts} if tot > 0 else {}
+        self.loaded_by_blast = {b.id: 0.0 for b in sc.blasts}
+        # excavators that rigidly assigned trucks depend on – never parked
+        self.pinned = set()
+        for f in sc.trucks:
+            if f.count and f.blend:
+                self.pinned |= set(f.blend)
+            elif f.count and len(f.excavators) == 1:
+                self.pinned.add(f.excavators[0])
+        self.flex_trucks = sum(f.count for f in sc.trucks if not f.blend and len(f.excavators) != 1)
         self.yields, self.yield_s = 0, 0.0
         self.truck_refuels = 0
         self.over_limit_segments, self.drive_segments = 0, 0
@@ -425,15 +442,22 @@ class Simulation:
         service = self._expected_service(ex, truck.fleet)
         wait = self.predicted_finish(ex, self.env.now + travel, service) - (self.env.now + travel) - service
         initial = max(sc.blast(ex.cfg.blast).tonnage_t, 1.0)
+        deficit = 0.0
+        if self.targets:  # how far this pile is behind its share of the feed, in truckloads
+            total = sum(self.loaded_by_blast.values())
+            deficit = (self.targets.get(ex.cfg.blast, 0.0) * total - self.loaded_by_blast[ex.cfg.blast]) / truck.fleet.payload_t
+            deficit = float(np.clip(deficit, -10, 10))
         return [max(wait, 0.0) / 60, travel / 60, haul / 60, service / 60,
                 (ex.remaining_t - ex.committed_t) / initial, float(len(ex.pending)),
-                float(ex.cfg.id == truck.home_excavator)]
+                float(ex.cfg.id == truck.home_excavator), deficit]
 
     def dispatch(self, truck: TruckState) -> ExcavatorState | None:
         allowed = set(self.allowed_ids(truck.fleet))
-        active = [ex for ex in self.excavators.values() if ex.cfg.id in allowed and self._active(ex)]
-        if not active:
+        candidates = [ex for ex in self.excavators.values() if ex.cfg.id in allowed and self._active(ex)]
+        if not candidates:
             return None
+        # parked excavators are skipped – unless they are the only ones this truck may serve
+        active = [ex for ex in candidates if not ex.parked] or candidates
         self.decisions += 1
         mode = self.sc.dispatch
         home = self.excavators.get(truck.home_excavator)
@@ -445,7 +469,10 @@ class Simulation:
             return active[int(self.rng.integers(len(active)))]
         if mode == "rl":
             w = np.asarray(self.sc.rl_weights, dtype=float)
-            return min(active, key=lambda ex: float(np.dot(w, self.features(truck, ex))))
+            feats = {ex.cfg.id: self.features(truck, ex) for ex in active}
+            n = len(next(iter(feats.values())))
+            w = np.pad(w, (0, max(0, n - len(w))))[:n]  # policies saved before new features keep working
+            return min(active, key=lambda ex: float(np.dot(w, feats[ex.cfg.id])))
         best, best_finish = None, math.inf
         for ex in active:
             travel = route_time_s(self.sc.routes[ex.cfg.route], truck.fleet, False,
@@ -516,6 +543,14 @@ class Simulation:
             ex.pending.pop(truck.id, None)
             ex.busy_until = env.now + self._expected_service(ex, fleet)
             tonnes = min(amount, ex.remaining_t)
+            pol = sc.excavator_policy
+            if sc.dispatch == "rl" and pol.topup_min_fill < 0.999 and tonnes >= amount - 1e-6:
+                # learned: with trucks waiting, send this one without its last bucket
+                blast0 = sc.blast(ex.cfg.blast)
+                n_pass = passes_per_truck(ex.cfg, fleet, blast0.loose_density_t_m3 or sc.loose_density_t_m3)
+                if n_pass > 1 and (n_pass - 1) / n_pass >= pol.topup_min_fill and len(ex.resource.queue) >= pol.topup_min_queue:
+                    tonnes = amount * (n_pass - 1) / n_pass
+                    ex.topup_skips += 1
             ex.remaining_t -= tonnes
             ex.committed_t -= committed
             if tonnes <= 1e-6:
@@ -549,6 +584,7 @@ class Simulation:
             ex.loading_s += env.now - t0
             ex.last_end = env.now
             self._log_state(truck, "zaladunek", t0, ex.cfg.id)
+            self.loaded_by_blast[blast.id] += tonnes
             self.loads.append({"truck": truck.id, "excavator": ex.cfg.id, "blast": blast.id,
                                "material": blast.material, "tonnes": tonnes, "fragmentation": blast.fragmentation,
                                "loaded_at_s": env.now, "trip": truck.trip})
@@ -740,8 +776,37 @@ class Simulation:
             yield self.env.timeout(LOADER_TICK_S)
 
     # ---------------------------------------------------------------------- run
+    def excavator_review(self):
+        """Learned rule: with too few flexible trucks per excavator, park the excavators with the longest
+        truck cycle (they add cost but little tonnage). Reviewed every few minutes; parked ones can return."""
+        pol, sc = self.sc.excavator_policy, self.sc
+        fleet = next((f for f in sc.trucks if f.count and not f.blend and len(f.excavators) != 1), None)
+        if fleet is None:
+            return
+        yield self.env.timeout(self.t_start)
+        while True:
+            cand = [ex for ex in self.excavators.values() if ex.remaining_t > 1e-6]
+            k = max(1, math.ceil(self.flex_trucks / pol.min_trucks_per_excavator))
+            pinned = [ex for ex in cand if ex.cfg.id in self.pinned]
+            free = sorted((ex for ex in cand if ex.cfg.id not in self.pinned),
+                          key=lambda ex: route_time_s(sc.routes[ex.cfg.route], fleet, False, sc.rolling_resistance_pct)
+                          + route_time_s(sc.routes[ex.cfg.route], fleet, True, sc.rolling_resistance_pct)
+                          + self._expected_service(ex, fleet))
+            keep = {ex.cfg.id for ex in pinned} | {ex.cfg.id for ex in free[:max(0, k - len(pinned))]}
+            now = self.env.now
+            for ex in self.excavators.values():
+                park = ex.cfg.id not in keep
+                if park and not ex.parked:
+                    ex.parked, ex.parked_since = True, now
+                elif not park and ex.parked:
+                    ex.parked_s += now - ex.parked_since
+                    ex.parked, ex.parked_since = False, None
+            yield self.env.timeout(pol.review_min * 60)
+
     def run(self) -> "SimResult":
         self.env.process(self.crusher_process())
+        if self.sc.dispatch == "rl" and self.sc.excavator_policy.min_trucks_per_excavator > 0.05:
+            self.env.process(self.excavator_review())
         if self.sc.stockpile.enabled:
             self.env.process(self.loader_process())
         for i, truck in enumerate(self.trucks):
@@ -797,9 +862,20 @@ class SimResult:
         st = self.states.groupby("state")["duration_s"].sum() / 3600 if len(self.states) else pd.Series(dtype=float)
         n_cycles = len(done[["truck", "trip"]].drop_duplicates()) if len(done) else 0
 
+        for ex in sim.excavators.values():  # close parking that lasted until the end of the shift
+            if ex.parked and ex.parked_since is not None:
+                ex.parked_s += shift_s - ex.parked_since
+                ex.parked_since = shift_s
+        parked_h = sum(ex.parked_s for ex in sim.excavators.values()) / 3600
+        # feed mix achieved vs target (on dumped tonnes)
+        feed = done.groupby("blast")["tonnes"].sum() if len(done) else pd.Series(dtype=float)
+        feed_share = {b.id: round(100 * float(feed.get(b.id, 0.0)) / dumped, 1) if dumped else 0.0 for b in sc.blasts}
+        feed_target = {k: round(100 * v, 1) for k, v in sim.targets.items()}
+        feed_dev_pp = round(0.5 * sum(abs(feed_share[k] - feed_target[k]) for k in feed_target), 1) if feed_target else 0.0
+
         ex_rows = []
         for ex in sim.excavators.values():
-            active_s = ex.depleted_at if ex.depleted_at is not None else shift_s
+            active_s = (ex.depleted_at if ex.depleted_at is not None else shift_s) - ex.parked_s
             work = ex.loading_s + ex.spotting_s
             ex_rows.append({
                 "excavator": ex.cfg.id,
@@ -808,6 +884,8 @@ class SimResult:
                 "utilization": round(work / active_s, 3) if active_s else 0.0,
                 "waiting_for_trucks_h": round((active_s - work) / 3600, 2),
                 "blast_done_at_h": round(ex.depleted_at / 3600, 2) if ex.depleted_at else None,
+                "parked_h": round(ex.parked_s / 3600, 2),
+                "topup_skips": ex.topup_skips,
             })
 
         h, c = sc.shift_hours, sc.costs
@@ -815,7 +893,8 @@ class SimResult:
         cost = {
             "wozidla": sc.truck_count * c.truck_per_h * h,
             "paliwo": sim.fuel_l * c.fuel_per_l,
-            "koparki": len(sc.excavators) * c.excavator_per_h * h,
+            # a parked excavator still costs its operator, but no fuel / wear
+            "koparki": c.excavator_per_h * (len(sc.excavators) * h - parked_h * (1 - c.excavator_idle_share)),
             "kruszarka": c.crusher_per_h * h,
             "energia": sim.crusher_kwh * c.energy_per_kwh,
             # everything put on the stockpile will be rehandled at some point – charge it now
@@ -823,6 +902,7 @@ class SimResult:
                                 * (sim.stockpile_in_t + min(sim.rehandled_t, sc.stockpile.initial_t)))
             if sc.stockpile.enabled else 0.0,
             "wiercenie_strzelanie": dumped * drill_blast_cost_per_t(c, frag_loaded),
+            "odchylka_skladu": dumped * c.blend_penalty_per_t_pp * feed_dev_pp,
         }
         total = sum(cost.values())
         return {
@@ -862,6 +942,11 @@ class SimResult:
             "cost_total": round(total, 0),
             "cost_per_t": round(total / dumped, 2) if dumped else None,
             "cost_breakdown": {k: round(v, 0) for k, v in cost.items()},
+            "parked_excavator_h": round(parked_h, 2),
+            "topup_skips": sum(e.topup_skips for e in sim.excavators.values()),
+            "feed_share": feed_share,
+            "feed_target": feed_target,
+            "feed_dev_pp": feed_dev_pp,
             "excavators": ex_rows,
         }
 

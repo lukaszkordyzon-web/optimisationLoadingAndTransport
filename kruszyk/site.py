@@ -412,6 +412,8 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
             b["loose_density_t_m3"] = float(p["loose_density_t_m3"])
         if p.get("psd"):
             b["psd"] = p["psd"]
+        if p.get("target_share"):
+            b["target_share"] = float(p["target_share"])
         new["blasts"].append(b)
     pile_ids = {p["id"] for p in piles}
     new["excavators"], new["routes"], new["links"] = [], {}, {}

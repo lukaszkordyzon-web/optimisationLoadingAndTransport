@@ -70,7 +70,7 @@ def test_rl_policy_runs_and_learns(demo):
     assert len(r.weights) == len(FEATURE_NAMES)
     # the untrained start (all weights 0 -> always the first excavator) is beaten after learning
     assert r.history["koszt_polityka"].iloc[-1] < r.history["koszt_polityka"].iloc[0]
-    assert len(r.comparison) == 4
+    assert len(r.comparison) == 5  # natural, fixed, heuristic, RL dispatch only, full RL
     sc.dispatch, sc.rl_weights = "rl", r.weights
     assert simulate(sc).kpi["hauled_t"] > 0
 
@@ -97,5 +97,45 @@ def test_agent_learns_advice_settings_too(demo):
               advisor=True, learn_advisor=True)
     adv = r.advisor
     assert -120 <= adv["arrival_margin_s"] <= 120 and 0 < adv["max_slowdown"] < 0.6 and 0 < adv["crusher_pacing"] < 2
-    assert list(r.comparison["polityka"])[-2:] == ["polityka RL + zalecenia wg reguł", "polityka RL + zalecenia wyuczone"]
+    assert list(r.comparison["polityka"])[-2:] == ["polityka RL – sam przydział", "polityka RL – pełna"]
     assert len(explain_advisor(adv)) == 3
+
+
+def test_excavator_management_parks_and_skips(demo):
+    sc = copy.deepcopy(demo)
+    sc.dispatch, sc.rl_weights = "rl", [1, 1, 0.5, 1, 0, 0.5, 0, 0]
+    sc.excavator_policy.min_trucks_per_excavator = 5.0   # 7 free trucks -> only 2 excavators may work
+    res = simulate(sc)
+    assert res.kpi["parked_excavator_h"] > 0
+    parked = [e for e in res.kpi["excavators"] if e["parked_h"] > 0]
+    assert parked and all(e["excavator"] not in ("K-1", "K-2") for e in parked)  # K-1/K-2 serve the pinned blend trucks
+    base = simulate(demo).kpi["cost_breakdown"]["koparki"]
+    assert res.kpi["cost_breakdown"]["koparki"] < base   # a parked excavator costs less
+    sc.excavator_policy.min_trucks_per_excavator = 0.0
+    sc.excavator_policy.topup_min_fill, sc.excavator_policy.topup_min_queue = 0.5, 0
+    res = simulate(sc)
+    assert res.kpi["topup_skips"] > 0
+    loads = res.loads.groupby(["truck", "trip"])["tonnes"].sum()
+    assert (loads < 55 - 1).any()
+
+
+def test_feed_targets_measured_and_steered(demo):
+    sc = copy.deepcopy(demo)
+    for b, t in zip(sc.blasts, [70, 15, 15]):
+        b.target_share = t
+    k = simulate(sc).kpi
+    assert k["feed_target"] == {"U-01": 70.0, "U-02": 15.0, "U-03": 15.0}
+    assert k["feed_dev_pp"] > 0 and k["cost_breakdown"]["odchylka_skladu"] > 0
+    # a policy that follows the deficit gets closer to the target mix than one that ignores it
+    sc.dispatch = "rl"
+    sc.rl_weights = [0, 0, 0, 0, 0, 0, 0, -5.0]
+    follow = simulate(sc).kpi["feed_dev_pp"]
+    sc.rl_weights = [0, 0, 0, 0, 0, 0, 0, 5.0]
+    against = simulate(sc).kpi["feed_dev_pp"]
+    assert follow < against
+
+
+def test_old_policies_without_new_features_still_run(demo):
+    sc = copy.deepcopy(demo)
+    sc.dispatch, sc.rl_weights = "rl", [1.0, 1.0, 0.5, 1.0, 0.0, 0.5, 0.0]  # saved before the feed-mix feature
+    assert simulate(sc).kpi["hauled_t"] > 0

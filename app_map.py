@@ -219,7 +219,9 @@ ROAD_COLS = {"id": "id", "name": "nazwa", "kind": st.column_config.SelectboxColu
              "speed_limit_kmh": "limit [km/h]",
              "active": st.column_config.CheckboxColumn("w użyciu", help="odznacz = droga planowana / zamknięta")}
 PILE_COLS = {"id": "usyp", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
-             "tonnage_t": "ilość [t]", "fragmentation": "rozdrobnienie (0–1)", "loose_density_t_m3": "gęstość [t/m³]"}
+             "tonnage_t": "ilość [t]", "fragmentation": "rozdrobnienie (0–1)", "loose_density_t_m3": "gęstość [t/m³]",
+             "target_share": st.column_config.NumberColumn("udział w nadawie [%]", min_value=0.0, max_value=100.0,
+                                                           help="ile procent nadawy ma iść z tego usypu (puste = bez celu)")}
 EX_COLS = {"id": "koparka", "bucket_m3": "łyżka [m³]", "swing_cycle_s": "cykl łyżki [s]", "lat": "szer.", "lon": "dł."}
 
 
@@ -388,6 +390,11 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                                   index=list(PRESETS).index(DEFAULT_PRESET))
             attrs["psd"] = PRESETS[preset]
             attrs["loose_density_t_m3"] = st.number_input("Gęstość spulchniona [t/m³]", 1.0, 3.0, 1.75, 0.05)
+            share = st.number_input("Udział w nadawie [%] (0 = bez celu)", 0.0, 100.0, 0.0, 5.0,
+                                    help="Oczekiwany procent nadawy z tego usypu. Steruje nim optymalizacja – tylko "
+                                         "dla wozideł nieprzypisanych na sztywno do jednej koparki.")
+            if share > 0:
+                attrs["target_share"] = share
             st.caption("Narzędzie „wielokąt” (⬠). Obrysuj usyp, zamknij klikając pierwszy punkt.")
         elif mode == "Koparka":
             attrs["id"] = st.text_input("Oznaczenie koparki", f"K-{len(site['excavators']) + 1}")
@@ -489,13 +496,14 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                 if p.get("psd"):
                     sm = summary(p["psd"], max_feed)
                     row |= {"uziarnienie": preset_of(p["psd"]), "P80 [mm]": sm["P80 [mm]"], "nadziarno [%]": sm["nadziarno [%]"]}
+                row.setdefault("target_share", None)
                 row["pow. [m²]"] = round(polygon_area_m2(p["polygon"]))
                 rows.append(row)
             df = pd.DataFrame(rows)
             ed = st.data_editor(df, num_rows="dynamic", key=f"piles_{st.session_state.obj_ver}", hide_index=True,
                                 disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]"],
                                 width="stretch", column_config=PILE_COLS)
-            _sync(site, "piles", ed, "polygon")
+            _sync(site, "piles", ed, "polygon", extra=("target_share",))
         else:
             st.caption("brak")
 

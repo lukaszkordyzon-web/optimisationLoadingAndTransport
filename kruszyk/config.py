@@ -35,6 +35,7 @@ class Blast:
     material: str = ""
     loose_density_t_m3: float | None = None  # overrides the scenario density for this pile
     psd: list | None = None  # grading curve [[mm, % passing], ...]; when given, it sets `fragmentation`
+    target_share: float | None = None  # desired share of the crusher feed from this pile [%] (flexible trucks)
 
 
 @dataclass
@@ -179,6 +180,18 @@ class Costs:
     # drilling & blasting: better fragmentation (lower value) needs more explosive
     drill_blast_per_t: float = 3.0
     drill_blast_fine_extra_per_t: float = 2.5  # extra cost at fragmentation=0
+    excavator_idle_share: float = 0.35  # a parked excavator still costs this share of its hourly rate (operator)
+    blend_penalty_per_t_pp: float = 0.05  # zł per tonne for each percentage point the feed misses its target mix
+
+
+@dataclass
+class ExcavatorPolicy:
+    """Excavator management learned by the agent (used with the RL dispatch). Defaults = today:
+    all excavators work and every truck is filled to the payload."""
+    min_trucks_per_excavator: float = 0.0  # fewer flexible trucks per excavator than this -> park the weakest one
+    topup_min_fill: float = 1.0            # send a truck without its last bucket if already this full…
+    topup_min_queue: float = 1.5           # …and at least this many trucks are waiting
+    review_min: float = 30.0               # how often the number of working excavators is reviewed
 
 
 DISPATCH_MODES = ("natural", "fixed", "dynamic", "rl")
@@ -213,6 +226,7 @@ class Scenario:
     refueling: Refueling = field(default_factory=Refueling)
     traffic: Traffic = field(default_factory=Traffic)
     advisor: Advisor = field(default_factory=Advisor)
+    excavator_policy: ExcavatorPolicy = field(default_factory=ExcavatorPolicy)
     pacing: Pacing = field(default_factory=Pacing)
     site: dict | None = None  # map geometry (see site.py)
     links: dict = field(default_factory=dict)  # "K-1>K-2" -> Route between two excavators
@@ -313,6 +327,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         refueling=_build(Refueling, raw.get("refueling", {})),
         traffic=_build(Traffic, raw.get("traffic", {})),
         advisor=_build(Advisor, raw.get("advisor", {})),
+        excavator_policy=_build(ExcavatorPolicy, raw.get("excavator_policy", {})),
         site=raw.get("site"),
         links=_routes(raw.get("links")),
         natural_switch_prob=raw.get("natural_switch_prob", 0.25),

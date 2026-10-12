@@ -36,11 +36,11 @@ site = {
          "active": False, "coords": [[49.9945, 20.0270], [49.9975, 20.0200], C]},
     ],
     "piles": [
-        {"id": "U-01", "material": "wapień", "tonnage_t": 9000, "psd": PRESETS["średnie"], "loose_density_t_m3": 1.75,
+        {"id": "U-01", "target_share": 40, "material": "wapień", "tonnage_t": 9000, "psd": PRESETS["średnie"], "loose_density_t_m3": 1.75,
          "polygon": [[49.9962, 20.0078], [49.9962, 20.0092], [49.9957, 20.0092], [49.9957, 20.0078]]},
-        {"id": "U-02", "material": "dolomit", "tonnage_t": 9000, "psd": PRESETS["grube"], "loose_density_t_m3": 1.85,
+        {"id": "U-02", "target_share": 30, "material": "dolomit", "tonnage_t": 9000, "psd": PRESETS["grube"], "loose_density_t_m3": 1.85,
          "polygon": [[49.9944, 20.0218], [49.9944, 20.0232], [49.9939, 20.0232], [49.9939, 20.0218]]},
-        {"id": "U-03", "material": "wapień", "tonnage_t": 12000, "psd": PRESETS["drobne (dobry odstrzał)"], "loose_density_t_m3": 1.75,
+        {"id": "U-03", "target_share": 30, "material": "wapień", "tonnage_t": 12000, "psd": PRESETS["drobne (dobry odstrzał)"], "loose_density_t_m3": 1.75,
          "polygon": [[49.9940, 20.0265], [49.9940, 20.0280], [49.9935, 20.0280], [49.9935, 20.0265]]},
     ],
     "excavators": [

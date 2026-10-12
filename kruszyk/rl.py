@@ -30,7 +30,9 @@ FEATURE_NAMES = [
     "pozostały urobek (udział)",
     "wozidła już wysłane do koparki",
     "„własna” koparka kierowcy",
+    "niedobór usypu względem udziału w nadawie [kursy]",
 ]
+EXCAVATOR_PARAMS = ["min. wozideł na koparkę", "ostatnia łyżka: min. wypełnienie", "ostatnia łyżka: min. kolejka"]
 POLICIES = {"natural": "naturalny (obecna praktyka)", "fixed": "stały do koparki",
             "dynamic": "heurystyka systemu", "rl": "polityka RL"}
 
@@ -48,27 +50,51 @@ def decode_advisor(x) -> dict:
             "crusher_pacing": float(2 * sig(x[2]))}
 
 
+def decode_excavators(x) -> dict:
+    """Unbounded learned numbers -> excavator management. x = 0 is today's practice:
+    all excavators work, every truck is filled to the payload."""
+    x = np.asarray(x, dtype=float)
+    return {"min_trucks_per_excavator": float(3 * max(0.0, np.tanh(x[0]))),
+            "topup_min_fill": float(1 - 0.25 * max(0.0, np.tanh(x[1]))),
+            "topup_min_queue": float(3 / (1 + np.exp(-x[2])))}
+
+
+def split_theta(theta, learn_excavators: bool, learn_advisor: bool):
+    """theta = [dispatch weights | excavator management (3) | advice settings (3)]."""
+    n = len(FEATURE_NAMES)
+    theta = np.asarray(theta, dtype=float)
+    ex = theta[n:n + 3] if learn_excavators else None
+    adv_start = n + (3 if learn_excavators else 0)
+    adv = theta[adv_start:adv_start + 3] if learn_advisor else None
+    return theta[:n], ex, adv
+
+
 def _episode_scenario(sc: Scenario, policy: str, theta=None, shift_hours: float | None = None,
-                      advisor: bool = False) -> Scenario:
-    """theta = dispatch weights (+ 3 advisor numbers when they are learned too)."""
+                      advisor: bool = False, learn_excavators: bool = False, learn_advisor: bool = False) -> Scenario:
     v = copy.deepcopy(sc)
     v.dispatch = policy
-    n = len(FEATURE_NAMES)
-    v.rl_weights = [float(w) for w in theta[:n]] if theta is not None else None
-    # today's practice and the fixed heuristic run without real-time advice; the agent may use it
+    # today's practice and the fixed heuristic: no real-time advice, all excavators, full trucks
     v.advisor.enabled = bool(advisor) and policy == "rl"
-    if v.advisor.enabled and theta is not None and len(theta) > n:
-        for key, val in decode_advisor(theta[n:]).items():
-            setattr(v.advisor, key, val)
+    if theta is not None:
+        w, ex, adv = split_theta(theta, learn_excavators, learn_advisor and v.advisor.enabled)
+        v.rl_weights = [float(x) for x in w]
+        if ex is not None and policy == "rl":
+            for key, val in decode_excavators(ex).items():
+                setattr(v.excavator_policy, key, val)
+        if adv is not None:
+            for key, val in decode_advisor(adv).items():
+                setattr(v.advisor, key, val)
+    else:
+        v.rl_weights = None
     if shift_hours:
         v.shift_hours = shift_hours
     return v
 
 
 def evaluate(sc: Scenario, policy: str, seeds: list[int], theta=None, shift_hours: float | None = None,
-             advisor: bool = False) -> dict:
+             advisor: bool = False, learn_excavators: bool = False, learn_advisor: bool = False) -> dict:
     """Mean KPIs of a policy over the given simulated shifts."""
-    v = _episode_scenario(sc, policy, theta, shift_hours, advisor)
+    v = _episode_scenario(sc, policy, theta, shift_hours, advisor, learn_excavators, learn_advisor)
     rows = [kpi_row(simulate(v, seed=s).kpi) for s in seeds]
     df = pd.DataFrame(rows)
     out = df.mean(numeric_only=True).to_dict()
@@ -82,26 +108,28 @@ class TrainResult:
     history: pd.DataFrame
     comparison: pd.DataFrame
     advisor: dict | None = None   # learned advisor settings (None when not learned)
+    excavators: dict | None = None  # learned excavator management (None when not learned)
     baseline_by_iteration: dict = field(default_factory=dict)
 
 
 def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: float = 0.25,
           episodes: int = 2, shift_hours: float | None = 4.0, eval_episodes: int = 4, seed: int = 0,
           callback: Callable[[int, int, dict], None] | None = None, advisor: bool = False,
-          learn_advisor: bool = True) -> TrainResult:
+          learn_advisor: bool = True, learn_excavators: bool = True) -> TrainResult:
     """Learn the dispatch weights; with `advisor` the trucks/operators get real-time advice and, with
     `learn_advisor`, its three settings are learned together with the dispatch (starting from the rules)."""
     rng = np.random.default_rng(seed)
     n = len(FEATURE_NAMES)
     learn_adv = advisor and learn_advisor
-    dim = n + (len(ADVISOR_PARAMS) if learn_adv else 0)
+    dim = n + (3 if learn_excavators else 0) + (len(ADVISOR_PARAMS) if learn_adv else 0)
+    kw = dict(advisor=advisor, learn_excavators=learn_excavators, learn_advisor=learn_adv)
     mu = np.zeros(dim)  # start: an untrained dispatch policy + the hand-made advice rules
     sigma = np.concatenate([np.full(n, 1.5), np.full(dim - n, 1.0)])
     n_elite = max(2, int(round(population * elite_frac)))
     history = []
 
     def record(it: int, seeds: list[int], pop_costs: list[float] | None):
-        policy = evaluate(sc, "rl", seeds, mu, shift_hours, advisor)
+        policy = evaluate(sc, "rl", seeds, mu, shift_hours, **kw)
         natural = evaluate(sc, "natural", seeds, None, shift_hours)
         row = {
             "iteracja": it,
@@ -120,7 +148,9 @@ def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: 
             "naturalny_avg_queue_per_cycle_min": natural["avg_queue_per_cycle_min"],
             "naturalny_excavator_utilization": natural["excavator_utilization"],
             **{f"w{i}": float(x) for i, x in enumerate(mu[:n])},
-            **({k: v for k, v in decode_advisor(mu[n:]).items()} if learn_adv else {}),
+            **(decode_excavators(split_theta(mu, learn_excavators, learn_adv)[1]) if learn_excavators else {}),
+            **(decode_advisor(split_theta(mu, learn_excavators, learn_adv)[2]) if learn_adv else {}),
+            "feed_dev_pp": policy.get("feed_dev_pp", 0.0),
         }
         history.append(row)
         if callback:
@@ -133,7 +163,7 @@ def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: 
         cand[0] = mu  # keep the current mean in the race
         scores = []
         for k, w in enumerate(cand):
-            r = evaluate(sc, "rl", seeds, w, shift_hours, advisor)
+            r = evaluate(sc, "rl", seeds, w, shift_hours, **kw)
             scores.append((r["cost_per_t"], k, r))
         scores.sort(key=lambda x: x[0])
         elite = np.array([cand[k] for _, k, _ in scores[:n_elite]])
@@ -146,15 +176,35 @@ def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: 
     comp = []
     for policy in ("natural", "fixed", "dynamic"):
         comp.append({"polityka": POLICIES[policy], **evaluate(sc, policy, eval_seeds)})
-    if learn_adv:
-        rules = np.concatenate([mu[:n], np.zeros(dim - n)])  # same dispatch, advice by the hand-made rules
-        comp.append({"polityka": "polityka RL + zalecenia wg reguł", **evaluate(sc, "rl", eval_seeds, rules, None, True)})
-        comp.append({"polityka": "polityka RL + zalecenia wyuczone", **evaluate(sc, "rl", eval_seeds, mu, None, True)})
-    else:
-        comp.append({"polityka": POLICIES["rl"] + (" + zalecenia" if advisor else ""),
-                     **evaluate(sc, "rl", eval_seeds, mu, None, advisor)})
+    if learn_excavators or learn_adv:
+        # the same learned dispatch, but excavators and advice as today / by the rules
+        only_dispatch = np.concatenate([mu[:n], np.zeros(dim - n)])
+        comp.append({"polityka": "polityka RL – sam przydział",
+                     **evaluate(sc, "rl", eval_seeds, only_dispatch, **kw)})
+    comp.append({"polityka": "polityka RL – pełna" if (learn_excavators or learn_adv) else
+                 POLICIES["rl"] + (" + zalecenia" if advisor else ""), **evaluate(sc, "rl", eval_seeds, mu, **kw)})
+    _, ex_x, adv_x = split_theta(mu, learn_excavators, learn_adv)
     return TrainResult(weights=[float(x) for x in mu[:n]], history=pd.DataFrame(history),
-                       comparison=pd.DataFrame(comp), advisor=decode_advisor(mu[n:]) if learn_adv else None)
+                       comparison=pd.DataFrame(comp),
+                       advisor=decode_advisor(adv_x) if learn_adv else None,
+                       excavators=decode_excavators(ex_x) if learn_excavators else None)
+
+
+def explain_excavators(p: dict) -> list[str]:
+    """Learned excavator management in plain words."""
+    out = []
+    if p["min_trucks_per_excavator"] < 0.3:
+        out.append("⛏️ Wszystkie koparki pracują – odstawianie się nie opłaca.")
+    else:
+        out.append(f"⛏️ Na każdą pracującą koparkę ma przypadać co najmniej **{p['min_trucks_per_excavator']:.1f}** "
+                   "wolnych wozideł; gdy jest ich mniej, koparka z najdłuższym cyklem wozideł zostaje odstawiona "
+                   "(sprawdzane co 30 min).")
+    if p["topup_min_fill"] > 0.98:
+        out.append("🪣 Wozidła są zawsze ładowane do pełna.")
+    else:
+        out.append(f"🪣 Ostatnią łyżkę można pominąć, gdy wozidło jest pełne w **{100 * p['topup_min_fill']:.0f} %** "
+                   f"lub więcej, a w kolejce czeka co najmniej **{p['topup_min_queue']:.1f}** wozidło.")
+    return out
 
 
 def explain_advisor(adv: dict) -> list[str]:
