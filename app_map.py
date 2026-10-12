@@ -4,14 +4,15 @@ from __future__ import annotations
 import copy
 
 import folium
+import numpy as np
 import pandas as pd
 import streamlit as st
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
 from kruszyk.psd import DEFAULT_PRESET, PRESETS, SIEVES_MM, clean, preset_of, rosin_rammler, summary
-from kruszyk.site import (analyze_site, normalize_roads, centroid, parse_coords, polygon_area_m2, polyline_length_m,
-                          site_to_scenario)
+from kruszyk.site import (analyze_site, normalize_roads, centroid, haversine_m, parse_coords, polygon_area_m2,
+                          polyline_length_m, site_to_scenario)
 
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 ESRI_ATTR = "Esri, Maxar, Earthstar Geographics"
@@ -27,7 +28,9 @@ MODES = {
     "Miejsce strzelania": "marker",
     "Miejsce postoju koparki": "marker",
     "Trasa dedykowana": "polyline",
+    "✏️ Edytuj / przesuń / usuń": None,
 }
+EDIT = "✏️ Edytuj / przesuń / usuń"
 DEDICATED_FOR = {"ekipa": "🧨 ekipa strzałowa", "sztygar": "👷 sztygar", "cysterna": "⛽ cysterna"}
 DIRECTIONS = {"⬇ w dół": -1, "⬆ pod górę": 1, "➡ płasko": 0}
 
@@ -36,11 +39,28 @@ def empty_site() -> dict:
     return {"center": [52.0, 19.4], "zoom": 6, "crusher": None, "piles": [], "excavators": [], "roads": []}
 
 
+def ensure_uids(site: dict) -> None:
+    """Every road / pile / excavator gets a stable hidden id, so tables and edits always hit the right object
+    (also after deleting or reordering). Duplicate road ids are renamed."""
+    import uuid
+
+    seen = set()
+    for key in ("roads", "piles", "excavators"):
+        for o in site.get(key, []):
+            if not o.get("uid"):
+                o["uid"] = uuid.uuid4().hex[:10]
+    for r in site.get("roads", []):
+        if not r.get("id") or r["id"] in seen:
+            r["id"] = next(f"R{i}" for i in range(1, 10_000) if f"R{i}" not in seen | {x.get("id") for x in site["roads"]})
+        seen.add(r["id"])
+
+
 def get_site(raw: dict) -> dict:
     if "site" not in st.session_state or st.session_state.get("site_ver") != st.session_state.ver:
         old = st.session_state.get("site")
         new = copy.deepcopy(raw.get("site") or empty_site())
         normalize_roads(new)
+        ensure_uids(new)
         st.session_state.site = new
         st.session_state.site_ver = st.session_state.ver
         # rebuild the map only when the view really changes (another scenario), not after "build routes"
@@ -100,38 +120,38 @@ def draw_site(m, site: dict) -> None:
         active = r.get("active", True)
         g = float(r.get("grade_draw_pct", 0.0))
         slope = "płasko" if abs(g) < 0.05 else (f"w górę {g:g} %" if g > 0 else f"w dół {-g:g} %")
-        tip = (f"{r['name']} · {r.get('kind')} · wzdłuż strzałki: {slope} · limit {r.get('speed_limit_kmh', '?')} km/h · "
+        tip = (f"🛣️ {r.get('id')} · {r['name']} · {r.get('kind')} · wzdłuż strzałki: {slope} · limit {r.get('speed_limit_kmh', '?')} km/h · "
                f"{polyline_length_m(r['coords']):.0f} m" + ("" if active else " · PLANOWANA (dziś nieużywana)"))
-        folium.PolyLine(pts, color="#000000", weight=10, opacity=0.55).add_to(m)  # dark casing
+        folium.PolyLine(pts, color="#000000", weight=10, opacity=0.55, tooltip=tip).add_to(m)  # dark casing
         folium.PolyLine(pts, color=ROAD_COLORS.get(r.get("kind"), "#ffffff") if active else PLANNED_COLOR, weight=6,
                         dash_array=None if active else "10 8", tooltip=tip).add_to(m)
         _direction_arrow(m, pts, g, tip)
     for d in site.get("dedicated", []):
         colors = {"ekipa": "#ff006e", "sztygar": "#3a86ff", "cysterna": "#8338ec"}
         folium.PolyLine([tuple(c) for c in d["coords"]], color=colors.get(d.get("for"), "#ffbe0b"), weight=4,
-                        dash_array="6 6", tooltip=f"trasa dedykowana: {DEDICATED_FOR.get(d.get('for'), 'koparka ' + str(d.get('for')))}"
+                        dash_array="6 6", tooltip=f"〰️ trasa {d.get('for')} · dedykowana: {DEDICATED_FOR.get(d.get('for'), 'koparka ' + str(d.get('for')))}"
                         ).add_to(m)
     for p in site.get("parking", []):
-        folium.Marker((p["lat"], p["lon"]), tooltip=f"miejsce postoju koparki {p.get('excavator')}",
+        folium.Marker((p["lat"], p["lon"]), tooltip=f"🅿️ postój {p.get('excavator')} · miejsce postoju koparki",
                       icon=folium.DivIcon(html=f"<div style='font-size:13px;font-weight:700;color:#fff;"
                                                f"text-shadow:0 0 3px #000;white-space:nowrap'>🅿️ {p.get('excavator')}</div>")
                       ).add_to(m)
     for p in site.get("piles", []):
         folium.Polygon([tuple(c) for c in p["polygon"]], color="#00e5ff", fill=True, fill_opacity=0.25,
-                       tooltip=f"Usyp {p['id']}: {p.get('material', '')} · {p.get('tonnage_t', 0):,.0f} t").add_to(m)
-        folium.Marker(centroid(p["polygon"]), icon=folium.DivIcon(
+                       tooltip=f"⛰️ {p['id']} · usyp: {p.get('material', '')} · {p.get('tonnage_t', 0):,.0f} t").add_to(m)
+        folium.Marker(centroid(p["polygon"]), tooltip=f"⛰️ {p['id']} · usyp: {p.get('material', '')}", icon=folium.DivIcon(
             html=f"<div style='color:#fff;font-weight:700;text-shadow:0 0 3px #000;white-space:nowrap'>"
                  f"{p['id']} · {p.get('material', '')}</div>")).add_to(m)
     for e in site.get("excavators", []):
-        folium.Marker((e["lat"], e["lon"]), tooltip=f"Koparka {e['id']} → {e.get('pile', '?')}",
+        folium.Marker((e["lat"], e["lon"]), tooltip=f"⛏️ {e['id']} · koparka → {e.get('pile', '?')}",
                       icon=folium.Icon(color="orange", icon="wrench", prefix="fa")).add_to(m)
     if site.get("crusher"):
         c = site["crusher"]
-        folium.Marker((c["lat"], c["lon"]), tooltip="Kruszarka",
+        folium.Marker((c["lat"], c["lon"]), tooltip="🏭 Kruszarka",
                       icon=folium.Icon(color="red", icon="industry", prefix="fa")).add_to(m)
     if site.get("blast"):
         b = site["blast"]
-        folium.Marker((b["lat"], b["lon"]), tooltip="Miejsce strzelania",
+        folium.Marker((b["lat"], b["lon"]), tooltip="🧨 Miejsce strzelania",
                       icon=folium.DivIcon(html="<div style='font-size:22px'>🧨</div>")).add_to(m)
 
 
@@ -177,13 +197,16 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
     note = "" if target == mode else " (parametry domyślne – popraw w tabeli poniżej)"
     if target == "Droga / rampa":
         a.setdefault("name", f"{a['kind']} {len(site['roads']) + 1}")
-        site["roads"].append({"id": f"R{len(site['roads']) + 1}", **a, "coords": _latlon(g["coordinates"])})
+        rid = next(f"R{i}" for i in range(1, 10_000) if f"R{i}" not in {r.get("id") for r in site["roads"]})
+        site["roads"].append({"id": rid, **a, "coords": _latlon(g["coordinates"])})
+        ensure_uids(site)
         return f"✅ Dodano drogę „{a['name']}” ({polyline_length_m(site['roads'][-1]['coords']):.0f} m){note}"
     if target == "Usyp (materiał)":
         ids = {p["id"] for p in site["piles"]}
         if a.get("id") in ids or not a.get("id"):
             a["id"] = next(f"U-{i:02d}" for i in range(1, 1000) if f"U-{i:02d}" not in ids)
         site["piles"].append({**a, "polygon": _latlon(g["coordinates"][0][:-1])})
+        ensure_uids(site)
         return f"✅ Dodano usyp {a['id']}{note}"
     lon, lat = g["coordinates"]
     if target == "Kruszarka":
@@ -196,7 +219,249 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
     if a.get("id") in ids or not a.get("id"):
         a["id"] = next(f"K-{i}" for i in range(1, 1000) if f"K-{i}" not in ids)
     site["excavators"].append({**a, "lat": lat, "lon": lon})
+    ensure_uids(site)
     return f"✅ Dodano koparkę {a['id']}{note}"
+
+
+# ---------- editing existing objects (select on the map → move / redraw / delete) ----------
+POINT_KINDS = ("excavator", "crusher", "blast", "parking")
+
+
+def site_items(site: dict) -> dict:
+    """All editable objects: selection key → label. Keys are "kind:ident" (uid for roads/piles/excavators)."""
+    items = {}
+    for r in site.get("roads", []):
+        items[f"road:{r['uid']}"] = f"🛣️ {r.get('id')} · {r.get('name', '')}" + ("" if r.get("active", True) else " (planowana)")
+    for p in site.get("piles", []):
+        items[f"pile:{p['uid']}"] = f"⛰️ usyp {p['id']} · {p.get('material', '')}"
+    for e in site.get("excavators", []):
+        items[f"excavator:{e['uid']}"] = f"⛏️ koparka {e['id']}"
+    if site.get("crusher"):
+        items["crusher:"] = "🏭 kruszarka"
+    if site.get("blast"):
+        items["blast:"] = "🧨 miejsce strzelania"
+    for p in site.get("parking", []):
+        items[f"parking:{p['excavator']}"] = f"🅿️ miejsce postoju koparki {p['excavator']}"
+    for d in site.get("dedicated", []):
+        items[f"dedicated:{d['for']}"] = f"〰️ trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}"
+    return items
+
+
+def find_obj(site: dict, sel: str | None):
+    if not sel:
+        return None
+    kind, ident = sel.split(":", 1)
+    if kind in ("road", "pile", "excavator"):
+        return next((o for o in site.get(kind + "s", []) if o.get("uid") == ident), None)
+    if kind in ("crusher", "blast"):
+        return site.get(kind)
+    if kind == "parking":
+        return next((p for p in site.get("parking", []) if p.get("excavator") == ident), None)
+    if kind == "dedicated":
+        return next((d for d in site.get("dedicated", []) if str(d.get("for")) == ident), None)
+    return None
+
+
+def sel_from_click(site: dict, tooltip: str | None, latlng: dict | None) -> str | None:
+    """Clicked object → selection key: by the tooltip prefix, otherwise the nearest object (≤ 40 m)."""
+    head = (tooltip or "").strip().split(" · ")[0].strip()
+    by_id = {"🛣️": ("road", "roads"), "⛰️": ("pile", "piles"), "⛏️": ("excavator", "excavators")}
+    for icon, (kind, key) in by_id.items():
+        if head.startswith(icon):
+            oid = head[len(icon):].strip()
+            o = next((o for o in site.get(key, []) if str(o.get("id")) == oid), None)
+            if o:
+                return f"{kind}:{o['uid']}"
+    if head.startswith("🏭") and site.get("crusher"):
+        return "crusher:"
+    if head.startswith("🧨") and site.get("blast"):
+        return "blast:"
+    if head.startswith("🅿️"):
+        who = head.split("postój", 1)[-1].strip()
+        if any(p.get("excavator") == who for p in site.get("parking", [])):
+            return f"parking:{who}"
+    if head.startswith("〰️"):
+        who = head.split("trasa", 1)[-1].strip()
+        if any(str(d.get("for")) == who for d in site.get("dedicated", [])):
+            return f"dedicated:{who}"
+    if not latlng or latlng.get("lat") is None:
+        return None
+    q = (latlng["lat"], latlng["lng"])
+    cands = []
+    for sel in site_items(site):
+        o = find_obj(site, sel)
+        kind = sel.split(":", 1)[0]
+        if kind in POINT_KINDS:
+            pts = [(o["lat"], o["lon"])]
+        elif kind == "pile":
+            pts = [tuple(c) for c in o["polygon"]] + [centroid(o["polygon"])]
+        else:
+            pts = [tuple(c) for c in o["coords"]]
+        cands.append((min(haversine_m(q, p) for p in pts), sel))
+    best = min(cands, default=None)
+    return best[1] if best and best[0] <= 40 else None
+
+
+def rename_refs(site: dict, kind: str, old, new) -> None:
+    """Keep references consistent after renaming a pile or an excavator."""
+    if old == new:
+        return
+    if kind == "piles":
+        for e in site.get("excavators", []):
+            if e.get("pile") == old:
+                e["pile"] = new
+    if kind == "excavators":
+        for p in site.get("parking", []):
+            if p.get("excavator") == old:
+                p["excavator"] = new
+        for d in site.get("dedicated", []):
+            if d.get("for") == old:
+                d["for"] = new
+
+
+def delete_obj(site: dict, sel: str) -> str:
+    kind, ident = sel.split(":", 1)
+    o = find_obj(site, sel)
+    if o is None:
+        return "⚠️ Nie ma już takiego obiektu"
+    if kind == "road":
+        site["roads"] = [r for r in site["roads"] if r is not o]
+        return f"🗑️ Usunięto drogę {o.get('id')}"
+    if kind == "pile":
+        site["piles"] = [p for p in site["piles"] if p is not o]
+        for e in site.get("excavators", []):
+            if e.get("pile") == o["id"]:
+                e["pile"] = "(najbliższy)"
+        return f"🗑️ Usunięto usyp {o['id']} (jego koparki ładują teraz z najbliższego)"
+    if kind == "excavator":
+        site["excavators"] = [e for e in site["excavators"] if e is not o]
+        site["parking"] = [p for p in site.get("parking", []) if p.get("excavator") != o["id"]]
+        site["dedicated"] = [d for d in site.get("dedicated", []) if d.get("for") != o["id"]]
+        return f"🗑️ Usunięto koparkę {o['id']} (razem z jej miejscem postoju i trasą przejazdu)"
+    if kind in ("crusher", "blast"):
+        site[kind] = None
+        return "🗑️ Usunięto " + ("kruszarkę" if kind == "crusher" else "miejsce strzelania")
+    if kind == "parking":
+        site["parking"] = [p for p in site["parking"] if p is not o]
+        return f"🗑️ Usunięto miejsce postoju koparki {ident}"
+    site["dedicated"] = [d for d in site["dedicated"] if d is not o]
+    return "🗑️ Usunięto trasę dedykowaną"
+
+
+def apply_edit_drawing(site: dict, sel: str, g: dict) -> str:
+    """The next drawing after „Przesuń” / „Przerysuj” becomes the new position / geometry of the object."""
+    kind = sel.split(":", 1)[0]
+    o = find_obj(site, sel)
+    if o is None:
+        return "⚠️ Nie ma już takiego obiektu"
+    if kind in POINT_KINDS:
+        if g["type"] != "Point":
+            return "⚠️ Aby przesunąć obiekt, postaw znacznik (📍) w nowym miejscu"
+        o["lon"], o["lat"] = g["coordinates"]
+        return "✅ Przesunięto obiekt"
+    if kind in ("road", "dedicated"):
+        if g["type"] != "LineString":
+            return "⚠️ Aby przerysować drogę / trasę, narysuj linię (/)"
+        o["coords"] = _latlon(g["coordinates"])
+        return f"✅ Przerysowano ({polyline_length_m(o['coords']):.0f} m)"
+    if g["type"] != "Polygon":
+        return "⚠️ Aby przerysować usyp, narysuj wielokąt (⬠)"
+    o["polygon"] = _latlon(g["coordinates"][0][:-1])
+    return f"✅ Przerysowano usyp {o['id']}"
+
+
+def highlight(m, site: dict, sel: str | None) -> None:
+    """Yellow halo around the selected object (drawn under it)."""
+    o = find_obj(site, sel)
+    if o is None:
+        return
+    kind = sel.split(":", 1)[0]
+    if kind in POINT_KINDS:
+        folium.CircleMarker((o["lat"], o["lon"]), radius=22, color=SKETCH_COLOR, weight=4, fill=True,
+                            fill_opacity=0.15).add_to(m)
+    elif kind == "pile":
+        folium.Polygon([tuple(c) for c in o["polygon"]], color=SKETCH_COLOR, weight=6, fill=False).add_to(m)
+    else:
+        folium.PolyLine([tuple(c) for c in o["coords"]], color=SKETCH_COLOR, weight=18, opacity=0.6).add_to(m)
+
+
+def edit_panel(site: dict) -> None:
+    """Left column in the edit mode: choose an object (or click it on the map) and change / move / delete it."""
+    items = site_items(site)
+    if "sel_next" in st.session_state:  # set by a click on the map / a delete (the widget can't be set directly then)
+        st.session_state.sel_box = st.session_state.pop("sel_next")
+    if st.session_state.get("sel_box") not in items:
+        st.session_state.sel_box = None
+    sel = st.selectbox("Obiekt (albo kliknij go na mapie)", [None] + list(items), key="sel_box",
+                       format_func=lambda k: "— wybierz —" if k is None else items[k])
+    arm = st.session_state.get("edit_arm")
+    if arm and arm[1] != sel:
+        st.session_state.edit_arm = arm = None
+    if not sel:
+        st.caption("Kliknij drogę, usyp, koparkę lub inny znacznik na mapie – zaznaczy się na żółto.")
+        return
+    o = find_obj(site, sel)
+    kind = sel.split(":", 1)[0]
+    ver = st.session_state.obj_ver
+    k = f"{sel}_{ver}"
+
+    def put(field, value):
+        if o.get(field) != value:
+            o[field] = value
+            st.session_state.obj_ver += 1
+
+    if kind == "road":
+        put("name", st.text_input("Nazwa", o.get("name", ""), key=f"en_{k}"))
+        put("kind", st.selectbox("Rodzaj", ["droga", "rampa"], index=int(o.get("kind") == "rampa"), key=f"ek_{k}"))
+        put("grade_draw_pct", float(st.number_input(
+            "Nachylenie wzdłuż strzałki [%]", -25.0, 25.0, float(o.get("grade_draw_pct", 0.0)), 0.5, key=f"eg_{k}",
+            help="+ = droga wznosi się w kierunku strzałki, − = opada")))
+        if st.button("⇅ Zamień: w górę ↔ w dół", key=f"esw_{k}", help="Gdy droga została narysowana w złą stronę"):
+            o["grade_draw_pct"] = -float(o.get("grade_draw_pct", 0.0)) + 0.0
+            st.session_state.obj_ver += 1
+            st.rerun()
+        put("speed_limit_kmh", float(st.number_input("Limit prędkości [km/h]", 5.0, 80.0,
+                                                     float(o.get("speed_limit_kmh", 40.0)), 5.0, key=f"el_{k}")))
+        put("active", not st.checkbox("Droga planowana (dziś nieużywana)", not o.get("active", True), key=f"ea_{k}"))
+    elif kind == "excavator":
+        new_id = st.text_input("Oznaczenie", o["id"], key=f"ei_{k}").strip()
+        if new_id and new_id != o["id"] and new_id not in {e["id"] for e in site["excavators"]}:
+            rename_refs(site, "excavators", o["id"], new_id)
+            put("id", new_id)
+        piles = [p["id"] for p in site["piles"]] + ["(najbliższy)"]
+        cur = o.get("pile") if o.get("pile") in piles else "(najbliższy)"
+        put("pile", st.selectbox("Ładuje z usypu", piles, index=piles.index(cur), key=f"ep_{k}"))
+        put("bucket_m3", float(st.number_input("Łyżka [m³]", 0.5, 30.0, float(o.get("bucket_m3", 5.0)), 0.5, key=f"eb_{k}")))
+    elif kind == "pile":
+        new_id = st.text_input("Oznaczenie", o["id"], key=f"ei_{k}").strip()
+        if new_id and new_id != o["id"] and new_id not in {p["id"] for p in site["piles"]}:
+            rename_refs(site, "piles", o["id"], new_id)
+            put("id", new_id)
+        mat = o.get("material") if o.get("material") in MATERIALS else "inny"
+        put("material", st.selectbox("Materiał", MATERIALS, index=MATERIALS.index(mat), key=f"em_{k}"))
+        put("tonnage_t", float(st.number_input("Ilość [t]", 0.0, 10_000_000.0, float(o.get("tonnage_t", 0.0)), 500.0,
+                                               key=f"et_{k}")))
+
+    c1, c2 = st.columns(2)
+    if kind in POINT_KINDS:
+        if c1.button("📍 Przesuń", key=f"emv_{k}", width="stretch"):
+            st.session_state.edit_arm = arm = ("move", sel)
+    else:
+        if c1.button("✏️ Przerysuj", key=f"erd_{k}", width="stretch"):
+            st.session_state.edit_arm = arm = ("redraw", sel)
+    if c2.button("🗑️ Usuń", key=f"edl_{k}", width="stretch"):
+        st.session_state.map_flash = delete_obj(site, sel)
+        st.session_state.sel_next = None
+        st.session_state.edit_arm = None
+        st.session_state.obj_ver += 1
+        st.rerun()
+    if arm:
+        tool = {"move": "postaw **znacznik (📍)** w nowym miejscu",
+                "redraw": "narysuj od nowa **wielokąt (⬠)**" if kind == "pile" else "narysuj od nowa **linię (/)**"}
+        st.info(f"Teraz {tool[arm[0]]} – obiekt przeniesie się tam sam.")
+        if st.button("Anuluj", key=f"ecn_{k}"):
+            st.session_state.edit_arm = None
+            st.rerun()
 
 
 def editing_map(site: dict) -> folium.Map:
@@ -419,29 +684,54 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                        "drogowego – na wprost. Bez znacznika koparka cofa się o kilkaset metrów swoją trasą.")
         elif mode == "Kruszarka":
             st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku).")
-        else:
+        elif mode == "Miejsce strzelania":
             st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu strzelania. Godziny przyjazdu ekipy, "
                        "odpalenia i wyjazdu ustawisz niżej w sekcji „Zmiana i zdarzenia”.")
-        st.info("Wybierz typ i parametry, potem narysuj obiekt – **dodaje się sam**. "
+        if mode == EDIT:
+            edit_panel(site)
+        else:
+            st.info("Wybierz typ i parametry, potem narysuj obiekt – **dodaje się sam**. "
                 "Linia = droga/rampa, wielokąt = usyp, znacznik = koparka (albo kruszarka, gdy wybrana).")
-        st.caption("Żółty = szkic (znika po odświeżeniu strony). Dodane: drogi białe, rampy fioletowe, planowane szare, "
-                   "usypy niebieskie. Parametry można poprawić w tabelach poniżej.")
+            st.caption("Żółty = szkic (znika po odświeżeniu strony). Dodane: drogi białe, rampy fioletowe, planowane "
+                       "szare, usypy niebieskie. Żeby poprawić, przesunąć lub usunąć obiekt – wybierz "
+                       "„✏️ Edytuj / przesuń / usuń” i kliknij go na mapie.")
 
     with c2:
         # objects are pushed as a dynamic layer: the map itself is not rebuilt when they change
         objects = folium.FeatureGroup(name="Obiekty")
+        if mode == EDIT:
+            highlight(objects, site, st.session_state.get("sel_box"))
         draw_site(objects, site)
         draw_network(objects, analyze_site(site))
         out = st_folium(editing_map(site), height=620, use_container_width=True,
                         key=f"map_{st.session_state.map_key}", feature_group_to_add=objects,
-                        returned_objects=["last_active_drawing"])
+                        returned_objects=["last_active_drawing", "last_object_clicked",
+                                          "last_object_clicked_tooltip"])
 
-    geom = (out or {}).get("last_active_drawing")
+    out = out or {}
+    click = (out.get("last_object_clicked_tooltip"), repr(out.get("last_object_clicked")))
+    if out.get("last_object_clicked") and click != st.session_state.get("last_click"):
+        st.session_state.last_click = click
+        if mode == EDIT:
+            sel = sel_from_click(site, click[0], out.get("last_object_clicked"))
+            if sel and sel != st.session_state.get("sel_box"):
+                st.session_state.sel_next = sel
+                st.session_state.edit_arm = None
+                st.rerun()
+    geom = out.get("last_active_drawing")
     if geom and geom.get("geometry"):
         sig = repr(geom["geometry"])
         if sig != st.session_state.get("last_added_geom"):
             st.session_state.last_added_geom = sig
-            msg = add_drawing(site, geom["geometry"], mode, attrs)
+            arm = st.session_state.get("edit_arm")
+            if mode != EDIT:
+                msg = add_drawing(site, geom["geometry"], mode, attrs)
+            elif arm:
+                msg = apply_edit_drawing(site, arm[1], geom["geometry"])
+                st.session_state.edit_arm = None
+            else:
+                msg = ("⚠️ W trybie edycji nic nie dodaję – wybierz obiekt i kliknij „📍 Przesuń” / „✏️ Przerysuj”, "
+                       "albo zmień tryb na rodzaj obiektu, który chcesz dodać.")
             st.session_state.map_flash = msg
             st.session_state.obj_ver += 1  # refresh the tables below, not the map
             st.rerun()
@@ -454,22 +744,19 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
     with c1:
         st.markdown("**Drogi i rampy**")
         if site["roads"]:
-            df = pd.DataFrame([{k: v for k, v in r.items() if k != "coords"} | {"active": r.get("active", True)}
-                               | {"długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]])
-            ed = st.data_editor(df, num_rows="dynamic", key=f"roads_{st.session_state.obj_ver}",
-                                disabled=["id", "długość [m]"], width="stretch", hide_index=True,
-                                column_config=ROAD_COLS)
-            _sync(site, "roads", ed, "id", extra=("active",))
+            object_table(site, "roads", lambda: pd.DataFrame(
+                [{k: v for k, v in r.items() if k not in ("coords", "uid")} | {"active": r.get("active", True)}
+                 | {"długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]]),
+                extra=("active",), disabled=["id", "długość [m]"], column_config=ROAD_COLS)
         else:
             st.caption("brak")
         st.markdown("**Koparki**")
         if site["excavators"]:
-            df = pd.DataFrame(site["excavators"])
-            ed = st.data_editor(df, num_rows="dynamic", key=f"ex_{st.session_state.obj_ver}", hide_index=True,
-                                disabled=["lat", "lon"], width="stretch",
-                                column_config={**EX_COLS, "pile": st.column_config.SelectboxColumn(
-                                    "ładuje z usypu", options=[p["id"] for p in site["piles"]] + ["(najbliższy)"])})
-            _sync(site, "excavators", ed, "lat")
+            object_table(site, "excavators", lambda: pd.DataFrame(
+                [{k: v for k, v in e.items() if k != "uid"} for e in site["excavators"]]),
+                disabled=["lat", "lon"],
+                column_config={**EX_COLS, "pile": st.column_config.SelectboxColumn(
+                    "ładuje z usypu", options=[p["id"] for p in site["piles"]] + ["(najbliższy)"])})
         else:
             st.caption("brak")
         st.markdown(f"**Kruszarka:** {'✅ ustawiona' if site.get('crusher') else '❌ brak'} · "
@@ -492,18 +779,15 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
             max_feed = float(raw_for_build.get("crusher", {}).get("max_feed_mm", 800))
             rows = []
             for p in site["piles"]:
-                row = {k: v for k, v in p.items() if k not in ("polygon", "psd", "fragmentation")}
+                row = {k: v for k, v in p.items() if k not in ("polygon", "psd", "fragmentation", "uid")}
                 if p.get("psd"):
                     sm = summary(p["psd"], max_feed)
                     row |= {"uziarnienie": preset_of(p["psd"]), "P80 [mm]": sm["P80 [mm]"], "nadziarno [%]": sm["nadziarno [%]"]}
                 row.setdefault("target_share", None)
                 row["pow. [m²]"] = round(polygon_area_m2(p["polygon"]))
                 rows.append(row)
-            df = pd.DataFrame(rows)
-            ed = st.data_editor(df, num_rows="dynamic", key=f"piles_{st.session_state.obj_ver}", hide_index=True,
-                                disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]"],
-                                width="stretch", column_config=PILE_COLS)
-            _sync(site, "piles", ed, "polygon", extra=("target_share",))
+            object_table(site, "piles", lambda: pd.DataFrame(rows), extra=("target_share",),
+                         disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]"], column_config=PILE_COLS)
         else:
             st.caption("brak")
 
@@ -566,19 +850,37 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
 
-def _sync(site: dict, key: str, edited: pd.DataFrame, geom_key: str, extra: tuple = ()) -> None:
-    """Apply table edits (attributes, deleted rows) back to the site objects, keeping geometry."""
-    old = site[key]
-    keep = []  # rows added in the table are ignored – geometry comes from the map
-    for idx, row in edited.iterrows():
-        if idx >= len(old):
+def object_table(site: dict, key: str, make_df, extra: tuple = (), **editor_kw) -> None:
+    """Editable table of site objects. The editor works on a fixed snapshot (per object version) and every
+    row is tied to its object by a hidden id – so deleting/editing a row always changes the right object."""
+    ver = st.session_state.obj_ver
+    snap_key = f"tbl_{key}_{ver}"
+    if snap_key not in st.session_state:
+        st.session_state[snap_key] = ([o["uid"] for o in site[key]], make_df())
+    uids, df0 = st.session_state[snap_key]
+    ed = st.data_editor(df0, num_rows="dynamic", key=f"{key}_{ver}", hide_index=True, width="stretch", **editor_kw)
+    readonly = set(editor_kw.get("disabled") or [])
+    by_uid = {o["uid"]: o for o in site[key]}
+    kept = set()
+    for idx, row in ed.iterrows():
+        if not isinstance(idx, (int, np.integer)) or idx >= len(uids):
+            continue  # rows added in the table are ignored – geometry comes from the map
+        obj = by_uid.get(uids[idx])
+        if obj is None:
             continue
-        obj = dict(old[idx])
+        kept.add(uids[idx])
         for col, val in row.items():
-            if (col in obj or col in extra) and not pd.isna(val) and col not in ("lat", "lon"):
-                obj[col] = val.item() if hasattr(val, "item") else val
-        keep.append(obj)
-    site[key] = keep
+            if col in readonly or col in ("lat", "lon") or (col not in obj and col not in extra):
+                continue
+            if isinstance(val, (list, dict)) or not pd.isna(val):
+                val = val.item() if hasattr(val, "item") else val
+                if col == "id" and val != obj.get("id"):
+                    rename_refs(site, key, obj.get("id"), val)
+                obj[col] = val
+            elif col in extra:
+                obj[col] = None
+    # rows deleted in the table disappear; objects added after the snapshot stay
+    site[key] = [o for o in site[key] if o["uid"] in kept or o["uid"] not in uids]
 
 
 def render_live_map(sc, snap: pd.DataFrame, colors: dict, labels: dict) -> None:

@@ -117,3 +117,26 @@ def test_scenario_file_roundtrip():
     data = yaml.safe_load(text)
     assert data["site"]["roads"] and data["variant"]["name"] == raw["name"]
     assert any("Zapisz scenariusz" in b.proto.label for b in at.get("download_button"))
+
+
+def test_map_edit_mode_select_and_delete():
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
+    at.sidebar.selectbox[0].select(name).run()
+    at.sidebar.button[0].click().run()
+    at.radio(key="draw_mode").set_value("✏️ Edytuj / przesuń / usuń").run()
+    assert not at.exception, at.exception
+    site = at.session_state["site"]
+    ex = site["excavators"][0]
+    at.selectbox(key="sel_box").set_value(f"excavator:{ex['uid']}").run()
+    assert not at.exception, at.exception
+    n = len(site["excavators"])
+    next(b for b in at.button if b.label == "🗑️ Usuń").click().run()
+    assert not at.exception, at.exception
+    assert len(at.session_state["site"]["excavators"]) == n - 1
+    road = at.session_state["site"]["roads"][0]
+    g = road.get("grade_draw_pct", 0.0)
+    at.selectbox(key="sel_box").set_value(f"road:{road['uid']}").run()
+    next(b for b in at.button if b.label.startswith("⇅")).click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["site"]["roads"][0]["grade_draw_pct"] == -g + 0.0
