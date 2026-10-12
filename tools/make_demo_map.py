@@ -59,6 +59,13 @@ raw["trucks"] = [
      "power_kw": 400, "max_speed_kmh": 48, "fuel_lph_loaded": 45, "fuel_lph_empty": 24, "fuel_lph_idle": 8,
      "blend": {"K-1": 0.5, "K-2": 0.5}},
 ]
+site["blast"] = {"lat": 49.99405, "lon": 20.0262}  # next blast: on the bottom level, east of U-03
+raw["blasting"] = {"enabled": True, "crew_arrive": "09:00", "fire_from": "11:00", "fire_to": "11:20",
+                   "evacuation_min": 10, "crew_leave": "11:40"}
+raw["inspection"] = {"enabled": True, "start": "09:30", "stops": ["K-1", "K-2", "K-3"], "stop_min": 10}
+raw["refueling"] = {"tanker_times": ["13:00"], "excavator_refuel_min": 20}
+raw["shift_plan"] = {"start_time": "06:00", "startup_min": 15, "end_early_min": 10,
+                     "breaks": [{"start": "10:00", "min": 20}]}
 raw["crusher"]["capacity_tph"] = 2600
 raw["crusher"]["hopper_t"] = 250
 new = site_to_scenario(site, raw)

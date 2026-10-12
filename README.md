@@ -48,7 +48,33 @@ Każdy push na wybraną gałąź automatycznie aktualizuje aplikację. Zależno�
 (przypięte wersje), konfiguracja: `.streamlit/config.toml`. Jeśli repo jest prywatne, w ustawieniach
 aplikacji (Sharing) można ograniczyć dostęp do wskazanych adresów e-mail.
 
-## Panel (`streamlit run app.py`)
+## Panel – tryb prosty (domyślny), 4 kroki
+
+1. **① Kopalnia – stan obecny**: lokalizacja, rysowanie dróg i ramp (nachylenie, limit prędkości, drogi planowane),
+   usypów (materiał, ilość, **krzywa uziarnienia**), koparek, kruszarki i **miejsca strzelania**; sieć dróg i poziomy;
+   **zmiana i zdarzenia** (rozruch, przerwy, strzelanie, objazd sztygara, tankowanie, praktyka prędkości, mijanie);
+   wozidła i kruszarka; „Zapisz kopalnię”.
+2. **② Jak jest dziś** – symulacja zmiany przy obecnej praktyce, wskaźniki, „gdzie tracimy”, animacja na mapie.
+3. **③ Wariant – co jeśli** – kopia stanu obecnego: zmieniasz wozidła, przypisania, drogi (otwierasz planowaną, zamykasz
+   istniejącą), kruszarkę, uziarnienie, godziny zdarzeń – i widzisz wynik vs dziś.
+4. **④ Optymalizacja** – uczenie ze wzmocnieniem przydziału wozideł + **zalecenia w czasie rzeczywistym**:
+   prędkość dla każdego kierowcy (dojazd dokładnie, gdy koparka będzie wolna) i komunikaty dla operatora koparki
+   („WZ-03 za 1:40 → nabierz łyżkę i czekaj”). Wynik vs dziś, krzywa uczenia, animacja z ekranami operatorów.
+
+### Zdarzenia na zmianie
+
+| Zdarzenie | Jak działa w symulacji |
+|---|---|
+| Rozruch / koniec | pierwszy kurs po rozruchu; ostatni kurs musi się skończyć przed „końcem pracy” |
+| Przerwy | wozidła kończą kurs i stoją, koparki nie zaczynają załadunku |
+| Strzelanie | od ewakuacji do otwarcia nikt nie wjeżdża do wyrobiska, koparki stoją; samochód ekipy jeździ po drogach |
+| Objazd sztygara | samochód od kruszarki przez kolejne koparki i z powrotem |
+| Cysterna | objeżdża koparki o podanych godzinach, każda stoi na czas tankowania |
+| Tankowanie wozideł | według zużycia (jazda, postoje); poniżej rezerwy zjazd na stację |
+| Mijanie | jadący w dół ustępuje jadącemu w górę: wozidło zjeżdżające traci czas, gdy auto wyjeżdża |
+| Limity prędkości | obowiązujące na każdej drodze; zadany odsetek kierowców jeździ o X % szybciej – liczone przekroczenia |
+
+## Panel – tryb zaawansowany (`streamlit run app.py`, przełącznik w panelu bocznym)
 
 | Zakładka | Co robi |
 |---|---|

@@ -24,6 +24,7 @@ MODES = {
     "Usyp (materiał)": "polygon",
     "Koparka": "marker",
     "Kruszarka": "marker",
+    "Miejsce strzelania": "marker",
 }
 
 
@@ -89,6 +90,10 @@ def draw_site(m, site: dict) -> None:
         c = site["crusher"]
         folium.Marker((c["lat"], c["lon"]), tooltip="Kruszarka",
                       icon=folium.Icon(color="red", icon="industry", prefix="fa")).add_to(m)
+    if site.get("blast"):
+        b = site["blast"]
+        folium.Marker((b["lat"], b["lon"]), tooltip="Miejsce strzelania",
+                      icon=folium.DivIcon(html="<div style='font-size:22px'>🧨</div>")).add_to(m)
 
 
 def _latlon(coords: list) -> list:
@@ -109,7 +114,7 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
     are used when they belong to that type, otherwise defaults (editable later in the tables)."""
     target = GEOM_MODE.get(g["type"])
     if g["type"] == "Point":
-        target = "Kruszarka" if mode == "Kruszarka" else "Koparka"
+        target = mode if mode in ("Kruszarka", "Miejsce strzelania") else "Koparka"
     if target is None:
         return f"⚠️ Nieobsługiwany kształt: {g['type']}"
     a = dict(attrs) if target == mode else dict(DEFAULTS.get(target, {}))
@@ -128,6 +133,9 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
     if target == "Kruszarka":
         site["crusher"] = {"lat": lat, "lon": lon}
         return "✅ Ustawiono kruszarkę"
+    if target == "Miejsce strzelania":
+        site["blast"] = {"lat": lat, "lon": lon}
+        return "✅ Ustawiono miejsce strzelania – godziny ustaw w sekcji „Zmiana i zdarzenia”"
     ids = {e["id"] for e in site["excavators"]}
     if a.get("id") in ids or not a.get("id"):
         a["id"] = next(f"K-{i}" for i in range(1, 1000) if f"K-{i}" not in ids)
@@ -327,8 +335,11 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
             attrs["bucket_m3"] = st.number_input("Łyżka [m³]", 0.5, 30.0, 5.0, 0.5)
             attrs["swing_cycle_s"] = st.number_input("Cykl łyżki [s]", 10.0, 90.0, 30.0, 1.0)
             st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu pracy koparki.")
-        else:
+        elif mode == "Kruszarka":
             st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku).")
+        else:
+            st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu strzelania. Godziny przyjazdu ekipy, "
+                       "odpalenia i wyjazdu ustawisz niżej w sekcji „Zmiana i zdarzenia”.")
         st.info("Wybierz typ i parametry, potem narysuj obiekt – **dodaje się sam**. "
                 "Linia = droga/rampa, wielokąt = usyp, znacznik = koparka (albo kruszarka, gdy wybrana).")
         st.caption("Żółty = szkic (znika po odświeżeniu strony). Dodane: drogi białe, rampy fioletowe, planowane szare, "
@@ -427,10 +438,14 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                                         "odległość od drogi [m]": v["dist_to_road_m"]} for k, v in info["levels"].items()]),
                          hide_index=True, width="stretch")
 
+    from app_events import events_editor
+
+    # always edits the scenario kept in the session (in the advanced mode raw_for_build is a per-run copy)
+    events_editor(st.session_state.raw, "ev", [e["id"] for e in site.get("excavators", [])], site, number="5")
     if simple:
         quick_fleet_crusher(raw_for_build, site)
 
-    st.subheader("7. Zapisz kopalnię" if simple else "5. Trasy z mapy → scenariusz")
+    st.subheader("7. Zapisz kopalnię" if simple else "6. Trasy z mapy → scenariusz")
     st.caption("Program wyznacza najkrótszą trasę od każdej koparki do kruszarki po narysowanych drogach, "
                "liczy długości i nachylenia odcinków. Po każdej zmianie na mapie kliknij przycisk ponownie.")
     if site != (raw_for_build.get("site") or {}) and (site.get("roads") or site.get("piles") or site.get("excavators")):

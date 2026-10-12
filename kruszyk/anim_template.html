@@ -28,13 +28,19 @@
   .lbl { background: transparent; border: 0; box-shadow: none; color: #fff; font-weight: 700; font-size: 11px;
          text-shadow: 0 0 3px #000, 0 0 3px #000; padding: 0; }
   .lbl::before { display:none; }
+  #banner { position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:1000; padding:6px 14px;
+            border-radius:8px; font-weight:700; color:#fff; display:none; box-shadow:0 2px 6px #0005; }
+  .adv { padding:3px 0; border-bottom:1px solid var(--line); }
+  .adv b { display:inline-block; min-width:34px; }
+  .lbl.over { color:#ff4d4d; }
+  .veh { font-size:18px; text-shadow:0 0 3px #fff; }
   .tag { color:#fff; font-weight:700; font-size:12px; text-shadow:0 0 3px #000,0 0 3px #000; white-space:nowrap; }
   canvas { width: 100%; height: 120px; background: #fff; border-radius: 6px; }
 </style>
 </head>
 <body>
 <div id="wrap">
-  <div id="map"></div>
+  <div id="map"><div id="banner"></div></div>
   <div id="panel">
     <div class="card">
       <div class="clock" id="clock">06:00</div>
@@ -66,6 +72,10 @@
     <div class="card">
       <div class="muted">Koszt zł/t w czasie zmiany (czerwony: ten przydział, szary: naturalny)</div>
       <canvas id="chart" width="600" height="220"></canvas>
+    </div>
+    <div class="card" id="advice-card">
+      <div class="muted">📱 Ekrany operatorów koparek</div>
+      <div id="advice"></div>
     </div>
     <div class="card legend" id="legend"></div>
   </div>
@@ -118,8 +128,33 @@ new ResizeObserver(() => {
 const trucks = Object.entries(D.trucks).map(([id, f]) => {
   const m = L.circleMarker([f[0][1], f[0][2]], { radius: 7, color: '#000', weight: 1, fillOpacity: 1, fillColor: '#aaa' })
     .bindTooltip(id, { permanent: true, direction: 'right', offset: [6, 0], className: 'lbl' }).addTo(map);
-  return { id, f, m, i: 0, code: -1 };
+  return { id, f, m, i: 0, code: -1, label: '' };
 });
+
+// light vehicles: blasting crew, foreman, fuel tanker
+const ICON = { 'strzelanie': '🧨', 'objazd': '👷', 'cysterna': '⛽' };
+const lights = (D.light || []).filter(v => v.frames && v.frames.length > 1).map(v => {
+  const m = L.marker([v.frames[0][1], v.frames[0][2]], { icon: L.divIcon({ className: '',
+    html: `<div class="veh" title="${v.name}">${ICON[v.kind] || '🚙'}</div>`, iconAnchor: [9, 9] }) })
+    .bindTooltip(v.name, { direction: 'top' });
+  return { v, m, i: 0, on: false };
+});
+function locateLight(o, t) {
+  const f = o.v.frames;
+  if (t < f[0][0] || t > f[f.length - 1][0]) return null;
+  if (t < f[o.i][0]) o.i = 0;
+  while (o.i < f.length - 2 && f[o.i + 1][0] <= t) o.i++;
+  const a = f[o.i], b = f[Math.min(o.i + 1, f.length - 1)];
+  if (b[0] === a[0]) return [b[1], b[2]];
+  const k = Math.min(1, Math.max(0, (t - a[0]) / (b[0] - a[0])));
+  return [a[1] + k * (b[1] - a[1]), a[2] + k * (b[2] - a[2])];
+}
+function speedOf(tr) {
+  const f = tr.f, a = f[tr.i], b = f[Math.min(tr.i + 1, f.length - 1)];
+  if (!a[4] || b[0] <= a[0]) return null;
+  const d = map.distance([a[1], a[2]], [b[1], b[2]]);
+  return { v: d / (b[0] - a[0]) * 3.6, limit: a[4] };
+}
 
 function locate(tr, t) {
   const f = tr.f;
@@ -155,11 +190,38 @@ function draw() {
     if (c !== tr.code) { tr.code = c; tr.m.setStyle({ fillColor: D.colors[D.states[c]] }); }
     if (queues.has(c)) q++; else if (drive.has(c)) nd++; else if (load.has(c)) nl++;
   });
+  lights.forEach(o => {
+    const p = locateLight(o, t);
+    if (p) { o.m.setLatLng(p); if (!o.on) { o.m.addTo(map); o.on = true; } }
+    else if (o.on) { o.m.remove(); o.on = false; }
+  });
   const now = performance.now();
   if (now - lastPanel < 90 && playing) return;
   lastPanel = now;
   const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
-  el('clock').textContent = `${String(6 + h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  const [h0, m0] = (D.start_clock || '06:00').split(':').map(Number);
+  const tot = (h0 * 60 + m0 + h * 60 + m) % 1440;
+  el('clock').textContent = `${String(Math.floor(tot / 60)).padStart(2, '0')}:${String(tot % 60).padStart(2, '0')}`;
+  trucks.forEach(tr => {
+    const sp = speedOf(tr);
+    const txt = sp ? `${tr.id} · ${Math.round(sp.v)} km/h` : tr.id;
+    const over = sp && sp.v > sp.limit + 0.5;
+    if (txt !== tr.label) {
+      tr.label = txt;
+      tr.m.setTooltipContent(over ? `<span style="color:#ff4d4d">${txt} ⚠ limit ${sp.limit}</span>` : txt);
+    }
+  });
+  const inWin = w => w && t >= w[0] && t < w[1];
+  const bn = el('banner');
+  if (inWin(D.closure)) { bn.style.display = 'block'; bn.style.background = '#d00000'; bn.textContent = '🔴 STRZELANIE – wyrobisko zamknięte dla wozideł'; }
+  else if ((D.breaks || []).some(inWin)) { bn.style.display = 'block'; bn.style.background = '#e09f3e'; bn.textContent = '⏸ Przerwa'; }
+  else if (t < (D.t_start || 0)) { bn.style.display = 'block'; bn.style.background = '#6c757d'; bn.textContent = '🔑 Rozruch – przejęcie i rozgrzanie maszyn'; }
+  else bn.style.display = 'none';
+  if (D.advice) {
+    const mi = Math.floor(t / 60);
+    el('advice').innerHTML = Object.entries(D.advice).map(([ex, lines]) =>
+      `<div class="adv"><b>${ex}</b> ${lines[Math.min(mi, lines.length - 1)] || ''}</div>`).join('');
+  }
   el('time').value = t;
   el('queue').textContent = q;
   el('queue').className = q > 2 ? 'bad' : '';

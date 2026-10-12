@@ -273,6 +273,32 @@ costs:
   energy_per_kwh: 0.9
   drill_blast_per_t: 3.0
   drill_blast_fine_extra_per_t: 2.5
+blasting:
+  enabled: true
+  crew_arrive: 09:00
+  fire_from: '11:00'
+  fire_to: '11:20'
+  evacuation_min: 10
+  crew_leave: '11:40'
+inspection:
+  enabled: true
+  start: 09:30
+  stops:
+  - K-1
+  - K-2
+  - K-3
+  stop_min: 10
+refueling:
+  tanker_times:
+  - '13:00'
+  excavator_refuel_min: 20
+shift_plan:
+  start_time: 06:00
+  startup_min: 15
+  end_early_min: 10
+  breaks:
+  - start: '10:00'
+    min: 20
 links:
   K-1>K-2:
     segments:
@@ -619,3 +645,6 @@ site:
     pile: U-03
     bucket_m3: 7.5
     swing_cycle_s: 34
+  blast:
+    lat: 49.99405
+    lon: 20.0262

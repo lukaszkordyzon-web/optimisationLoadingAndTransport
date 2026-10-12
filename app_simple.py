@@ -85,6 +85,21 @@ def _losses(k: dict) -> list[str]:
         out.append(f"🏭💤 Kruszarka stała bez materiału **{k['crusher_starved_h']:.1f} h**.")
     if k["truck_breakdown_h"] > 0.2:
         out.append(f"🔧 Awarie wozideł: **{k['truck_breakdown_h']:.1f} h**.")
+    if k.get("truck_blasting_h", 0) > 0.05:
+        out.append(f"🧨 Strzelanie: wozidła stały **{k['truck_blasting_h']:.1f} h**, koparki "
+                   f"**{k['excavator_down_h'].get('strzelanie', 0):.1f} h**.")
+    if k.get("truck_break_h", 0) > 0.05:
+        out.append(f"⏸ Przerwy: wozidła **{k['truck_break_h']:.1f} h** łącznie.")
+    if k.get("excavator_down_h", {}).get("tankowanie", 0) > 0.05:
+        out.append(f"⛽ Tankowanie koparek z cysterny: **{k['excavator_down_h']['tankowanie']:.1f} h** postoju.")
+    if k.get("truck_refuels", 0):
+        out.append(f"⛽ Wozidła zjeżdżały tankować **{k['truck_refuels']}** razy.")
+    if k.get("yields", 0):
+        out.append(f"🚙 Ustępowanie pierwszeństwa autom (ekipa, sztygar, cysterna): **{k['yields']}** razy, "
+                   f"{60 * k['yield_h']:.0f} min.")
+    if k.get("over_limit_pct", 0) > 0.5:
+        out.append(f"🚦 **{k['over_limit_pct']:.0f} %** przejazdów odcinków powyżej limitu prędkości "
+                   f"({k['speeders']} kierowców jeździ szybciej).")
     return out or ["✅ Brak wyraźnych strat – łańcuch jest dobrze zbalansowany."]
 
 
@@ -224,6 +239,11 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
             p["tonnage_t"] = float(row["tonnage_t"])
             if row["uziarnienie"] in PRESETS:
                 p["psd"] = PRESETS[row["uziarnienie"]]
+    with st.expander("🕐 Zmiana i zdarzenia w wariancie (np. strzelanie o innej godzinie, inny objazd, cysterna)"):
+        from app_events import events_editor
+
+        events_editor(var, f"v{vv}", [e["id"] for e in (site or {}).get("excavators", [])] or
+                      [e["id"] for e in var.get("excavators", [])], site, number="•")
     c1, c2, _ = st.columns([1, 1, 2])
     cr = var.setdefault("crusher", {})
     cr["capacity_tph"] = c1.number_input("🏭 Kruszarka – wydajność [t/h]", 50.0, 10000.0, float(cr.get("capacity_tph", 1000)),
@@ -260,9 +280,15 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     targets = {"stan obecny": base_yaml}
     if st.session_state.get("variant_yaml") and st.session_state.get("variant_raw") is not None:
         targets["wariant"] = st.session_state.variant_yaml
-    which = st.radio("Co optymalizujemy?", list(targets), horizontal=True, key="rl_target")
+    c1, c2 = st.columns([1, 2])
+    which = c1.radio("Co optymalizujemy?", list(targets), horizontal=True, key="rl_target")
+    advise = c2.toggle("📱 Zalecenia w czasie rzeczywistym", True, key="rl_advisor",
+                       help="Każde wozidło dostaje zalecaną prędkość, żeby dojechać pod koparkę dokładnie, gdy będzie "
+                            "wolna (nie wcześniej – kolejka, nie później – koparka czeka). Operator koparki dostaje "
+                            "komunikat, kto i za ile podjedzie oraz co robić: nabrać łyżkę i czekać, przegarnąć front…")
     yaml_text = targets[which]
     sc = scenario_from_dict(yaml.safe_load(yaml_text))
+    sc.advisor.enabled = advise
     if len(sc.excavators) < 2:
         st.warning("Optymalizacja przydziału ma sens, gdy są co najmniej 2 koparki.")
         return
@@ -294,6 +320,13 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     if not entry or entry["key"] != mine_key:
         st.caption("Kliknij przycisk – nauka trwa zwykle 15–40 s.")
         return
+    if advise:
+        st.info("**Co dostają ludzie w kabinach (telefony służbowe):**  \n"
+                "🚚 **Kierowca:** „Jedź do K-2, zalecana prędkość 22 km/h – będziesz, gdy koparka skończy WZ-04” "
+                "(zamiast pędzić i stać w kolejce: mniej paliwa, mniej zużycia).  \n"
+                "⛏️ **Operator:** „WZ-03 za 1:40 → nabierz łyżkę i czekaj” – pierwsza łyżka gotowa w chwili "
+                "podstawienia skraca załadunek o jeden cykl; „brak wozideł przez 5 min → przegarnij front”.  \n"
+                "Te komunikaty widać na żywo w panelu animacji poniżej (📱 Ekrany operatorów koparek).")
     res = entry["result"]
     sc.rl_weights, sc.dispatch = res.weights, "rl"
     rl_yaml = dump_scenario(sc)

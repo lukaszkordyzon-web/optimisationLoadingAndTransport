@@ -15,20 +15,25 @@ from .site import analyze_site, haversine_m
 
 STATE_CODES = ["jazda_pusty", "przejazd_miedzy_usypami", "jazda_pelny", "kolejka_koparka", "podstawienie",
                "zaladunek", "kolejka_kruszarka", "wyladunek", "wyladunek_halda", "awaria", "postoj_brak_urobku",
-               "start"]
+               "start", "przerwa", "postoj_strzelanie", "koniec_zmiany", "tankowanie", "postoj_koparki"]
 STATE_LABELS = {
     "jazda_pusty": "jedzie pusty", "przejazd_miedzy_usypami": "jedzie na 2. usyp", "jazda_pelny": "jedzie pełny",
     "kolejka_koparka": "czeka pod koparką", "podstawienie": "podstawia się", "zaladunek": "ładowany",
     "kolejka_kruszarka": "czeka pod kruszarką", "wyladunek": "wyładunek", "wyladunek_halda": "wyładunek na hałdę",
-    "awaria": "awaria", "postoj_brak_urobku": "postój – brak urobku", "start": "przed startem",
+    "awaria": "awaria", "postoj_brak_urobku": "postój – brak urobku", "start": "rozruch / przed startem",
+    "przerwa": "przerwa", "postoj_strzelanie": "czeka – strzelanie", "koniec_zmiany": "koniec zmiany",
+    "tankowanie": "tankowanie", "postoj_koparki": "czeka – koparka stoi",
 }
 STATE_COLORS = {
     "jazda_pusty": "#8ecae6", "przejazd_miedzy_usypami": "#b5838d", "jazda_pelny": "#219ebc",
     "kolejka_koparka": "#e63946", "podstawienie": "#f4a261", "zaladunek": "#2a9d8f",
     "kolejka_kruszarka": "#d62828", "wyladunek": "#264653", "wyladunek_halda": "#6c757d", "awaria": "#000000",
-    "postoj_brak_urobku": "#adb5bd", "start": "#adb5bd",
+    "postoj_brak_urobku": "#adb5bd", "start": "#adb5bd", "przerwa": "#ffd166", "postoj_strzelanie": "#ff006e",
+    "koniec_zmiany": "#adb5bd", "tankowanie": "#8338ec", "postoj_koparki": "#fb8500",
 }
-QUEUES = {"kolejka_koparka", "kolejka_kruszarka"}
+QUEUES = {"kolejka_koparka", "kolejka_kruszarka", "postoj_koparki"}
+CRUSHER_SIDE = {"kolejka_kruszarka", "wyladunek", "wyladunek_halda", "postoj_brak_urobku", "przerwa",
+                "postoj_strzelanie", "koniec_zmiany", "tankowanie"}
 
 
 def _cum(path: list) -> list[float]:
@@ -74,7 +79,7 @@ def trajectories(res) -> dict[str, list[list]]:
     out: dict[str, list[list]] = {}
     seg = res.segments
     for k, truck in enumerate(res.truck_ids):
-        frames: list[list] = [[0.0, *_offset(crusher, k), code["start"]]]
+        frames: list[list] = [[0.0, *_offset(crusher, k), code["start"], 0]]
         st = res.states[res.states["truck"] == truck].sort_values("start_s")
         tseg = seg[seg["truck"] == truck] if len(seg) else seg
         last = crusher
@@ -97,18 +102,20 @@ def trajectories(res) -> dict[str, list[list]]:
                     for d in [d0, *inner, d1]:
                         f = 0.0 if d1 == d0 else (d - d0) / (d1 - d0)
                         lat, lon = _at(path, cum, d)
-                        frames.append([round(sr.start_s + f * sr.duration_s, 1), round(lat, 7), round(lon, 7), c])
+                        frames.append([round(sr.start_s + f * sr.duration_s, 1), round(lat, 7), round(lon, 7), c,
+                                       sr.speed_limit_kmh if sr.segment not in ("front", "plac_kruszarki", "dojazd") else 0])
                     last = _at(path, cum, d1)
                 continue
-            if state in ("kolejka_koparka", "podstawienie", "zaladunek"):
+            if state in ("kolejka_koparka", "podstawienie", "zaladunek", "postoj_koparki"):
                 spot = ex_pos.get(row.excavator, last)
-            elif state in ("kolejka_kruszarka", "wyladunek", "wyladunek_halda", "postoj_brak_urobku"):
+            elif state in CRUSHER_SIDE:
                 spot = crusher
             else:
                 spot = last
-            p = _offset(spot, k) if state in QUEUES or state == "postoj_brak_urobku" else [round(spot[0], 7), round(spot[1], 7)]
-            frames.append([round(row.start_s, 1), *p, c])
-            frames.append([round(row.end_s, 1), *p, c])
+            spread = state in QUEUES or state in CRUSHER_SIDE - {"wyladunek", "wyladunek_halda"}
+            p = _offset(spot, k) if spread else [round(spot[0], 7), round(spot[1], 7)]
+            frames.append([round(row.start_s, 1), *p, c, 0])
+            frames.append([round(row.end_s, 1), *p, c, 0])
             last = spot
         out[truck] = frames
     return out
@@ -144,6 +151,53 @@ def _series(res) -> dict:
             "cost": clean(tl["cost"]), "cpt": clean(tl["cost_per_t"]), "hopper": clean(tl["level_t"])}
 
 
+def _mmss(sec: float) -> str:
+    sec = max(0, int(sec))
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def excavator_advice(res) -> dict[str, list[str]]:
+    """What the operator's phone says, minute by minute: who is loaded, who comes next and when,
+    and what to do meanwhile (fill the bucket / clean the face / wait)."""
+    sc = res.scenario
+    st = res.states
+    out = {}
+    n = int(sc.shift_hours * 60)
+    for e in sc.excavators:
+        blast = sc.blast(e.blast)
+        one_pass = e.swing_cycle_s * (1 + 0.5 * blast.fragmentation)
+        mine = st[(st["excavator"] == e.id) & st["state"].isin(["podstawienie", "zaladunek"])].sort_values("start_s")
+        spots = mine[mine["state"] == "podstawienie"][["start_s", "truck"]].to_numpy()
+        loading = mine[["start_s", "end_s", "truck", "state"]].to_numpy()
+        down = [(a, b, r) for a, b, r in getattr(res, "excavator_down", {}).get(e.id, [])]
+        lines, j = [], 0
+        for m in range(n):
+            t = m * 60.0
+            w = next((r for a, b, r in down if a <= t < b), None)
+            if w:
+                lines.append({"przerwa": "⏸ przerwa", "strzelanie": "🔴 STRZELANIE – zjazd z frontu",
+                              "tankowanie": "⛽ tankowanie z cysterny"}.get(w, w))
+                continue
+            cur = next((x for x in loading if x[0] <= t < x[1]), None)
+            if cur is not None:
+                lines.append(f"🟢 {'ładuje' if cur[3] == 'zaladunek' else 'podstawia się'} {cur[2]}")
+                continue
+            while j < len(spots) and spots[j][0] <= t:
+                j += 1
+            if j >= len(spots):
+                lines.append("brak wozideł w drodze – przegarnij front")
+                continue
+            eta, truck = spots[j][0] - t, spots[j][1]
+            if eta <= one_pass:
+                lines.append(f"{truck} za {_mmss(eta)} → łyżka pełna, czekaj")
+            elif eta <= one_pass + 90:
+                lines.append(f"{truck} za {_mmss(eta)} → nabierz łyżkę")
+            else:
+                lines.append(f"{truck} za {_mmss(eta)} → przegarnij front / przygotuj urobek")
+        out[e.id] = lines
+    return out
+
+
 def animation_payload(res, baseline=None, label: str = "", baseline_label: str = "naturalny") -> str:
     sc = res.scenario
     payload = {
@@ -157,6 +211,12 @@ def animation_payload(res, baseline=None, label: str = "", baseline_label: str =
         "baseline": _series(baseline) if baseline is not None else None,
         "hopper_cap": sc.crusher.hopper_t,
         "excavators": [{"id": e.id, "blast": e.blast, "material": sc.blast(e.blast).material} for e in sc.excavators],
+        "light": res.light_vehicles,
+        "closure": list(res.closure) if res.closure else None,
+        "breaks": [list(b) for b in res.breaks],
+        "advice": excavator_advice(res),
+        "start_clock": sc.shift_plan.start_time,
+        "t_start": res.t_start,
     }
     return json.dumps(payload, separators=(",", ":"))
 

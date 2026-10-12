@@ -72,8 +72,10 @@ def test_applied_rl_policy_is_shown_in_animation():
 def test_simple_mode_every_preset():
     at = AppTest.from_file(APP, default_timeout=180).run()
     assert not at.exception, at.exception
-    assert [t.label for t in at.tabs] == ["① Kopalnia – stan obecny", "② Jak jest dziś", "③ Wariant – co jeśli",
-                                          "④ Optymalizacja"]
+    labels = [t.label for t in at.tabs]
+    for step in ["① Kopalnia – stan obecny", "② Jak jest dziś", "③ Wariant – co jeśli", "④ Optymalizacja",
+                 "🧨 Strzelanie", "👷 Objazd sztygara", "⛽ Tankowanie"]:
+        assert step in labels
     for name in at.sidebar.selectbox[0].options:
         at.sidebar.selectbox[0].select(name).run()
         at.sidebar.button[0].click().run()

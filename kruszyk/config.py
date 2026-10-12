@@ -60,6 +60,7 @@ class TruckFleet:
     fuel_lph_loaded: float = 60.0  # fuel burn while driving loaded
     fuel_lph_empty: float = 32.0
     fuel_lph_idle: float = 10.0    # queueing / spotting / loading / dumping with engine running
+    tank_l: float = 700.0          # fuel tank; trucks start the shift full (fuelled before the shift)
     # which excavators these trucks may serve (empty = all)
     excavators: list = field(default_factory=list)
     # two-pile trips: {excavator: share of the payload}, loaded in this order, e.g. {K-1: 0.5, K-2: 0.5}
@@ -107,6 +108,60 @@ class Variability:
     rain_slowdown: float = 0.12
     truck_mtbf_h: float = 40.0    # mean time between truck breakdowns
     truck_mttr_min: float = 35.0  # mean repair time
+    # practice on site: some drivers go faster than the posted limit
+    speeding_share: float = 0.3   # share of drivers who exceed limits
+    speeding_pct: float = 10.0    # by how much (%)
+
+
+@dataclass
+class ShiftPlan:
+    """A real shift is not 8 h of hauling: start-up, breaks, finishing early."""
+    start_time: str = "06:00"
+    startup_min: float = 15.0      # taking over machines, daily checks, warm-up
+    end_early_min: float = 10.0    # parking, handover before the end of the shift
+    breaks: list = field(default_factory=lambda: [{"start": "10:00", "min": 20}])
+
+
+@dataclass
+class Blasting:
+    """Blasting in the pit: crew drives to the blast point, the pit is closed for trucks while firing."""
+    enabled: bool = False
+    crew_arrive: str = "09:00"     # crew at the blast point
+    fire_from: str = "11:00"       # firing window – trucks and excavators out of the pit
+    fire_to: str = "11:20"
+    evacuation_min: float = 10.0   # trucks must leave the pit this long before firing
+    crew_leave: str = "11:40"
+
+
+@dataclass
+class Inspection:
+    """Shift foreman's (sztygar) round through the pit in a light vehicle."""
+    enabled: bool = False
+    start: str = "09:30"
+    stops: list = field(default_factory=list)  # excavator ids, visited in order
+    stop_min: float = 10.0
+
+
+@dataclass
+class Refueling:
+    truck_reserve_pct: float = 15.0   # a truck goes to the fuel station below this level
+    truck_refuel_min: float = 12.0
+    tanker_times: list = field(default_factory=list)  # fuel tanker rounds to the excavators, e.g. ["13:00"]
+    excavator_refuel_min: float = 20.0
+
+
+@dataclass
+class Traffic:
+    yield_s: float = 30.0          # time a truck loses giving way to a light vehicle coming up
+    light_speed_kmh: float = 30.0  # light vehicles (crew, foreman, tanker) – never above the road limit
+
+
+@dataclass
+class Advisor:
+    """Real-time recommendations: speed for each truck (arrive when the excavator is free, not earlier),
+    and for the excavator operator (fill the bucket before the truck spots)."""
+    enabled: bool = False
+    max_slowdown: float = 0.3
 
 
 @dataclass
@@ -147,6 +202,12 @@ class Scenario:
     variability: Variability = field(default_factory=Variability)
     costs: Costs = field(default_factory=Costs)
     stockpile: Stockpile = field(default_factory=Stockpile)
+    shift_plan: ShiftPlan = field(default_factory=ShiftPlan)
+    blasting: Blasting = field(default_factory=Blasting)
+    inspection: Inspection = field(default_factory=Inspection)
+    refueling: Refueling = field(default_factory=Refueling)
+    traffic: Traffic = field(default_factory=Traffic)
+    advisor: Advisor = field(default_factory=Advisor)
     pacing: Pacing = field(default_factory=Pacing)
     site: dict | None = None  # map geometry (see site.py)
     links: dict = field(default_factory=dict)  # "K-1>K-2" -> Route between two excavators
@@ -241,6 +302,12 @@ def scenario_from_dict(raw: dict) -> Scenario:
         costs=_build(Costs, raw.get("costs", {})),
         stockpile=_build(Stockpile, raw.get("stockpile", {})),
         pacing=_build(Pacing, raw.get("pacing", {})),
+        shift_plan=_build(ShiftPlan, raw.get("shift_plan", {})),
+        blasting=_build(Blasting, raw.get("blasting", {})),
+        inspection=_build(Inspection, raw.get("inspection", {})),
+        refueling=_build(Refueling, raw.get("refueling", {})),
+        traffic=_build(Traffic, raw.get("traffic", {})),
+        advisor=_build(Advisor, raw.get("advisor", {})),
         site=raw.get("site"),
         links=_routes(raw.get("links")),
         natural_switch_prob=raw.get("natural_switch_prob", 0.25),
@@ -287,3 +354,18 @@ def scenario_to_dict(sc: Scenario) -> dict:
 
 def dump_scenario(sc: Scenario) -> str:
     return yaml.safe_dump(scenario_to_dict(sc), allow_unicode=True, sort_keys=False)
+
+
+def clock_to_s(hhmm: str, start: str = "06:00") -> float:
+    """'HH:MM' -> seconds since the shift start (times after midnight wrap around)."""
+    def minutes(t: str) -> int:
+        h, m = str(t).strip().split(":")
+        return int(h) * 60 + int(m)
+    d = minutes(hhmm) - minutes(start)
+    return (d % (24 * 60)) * 60.0
+
+
+def s_to_clock(sec: float, start: str = "06:00") -> str:
+    h, m = str(start).split(":")
+    total = (int(h) * 60 + int(m) + int(sec // 60)) % (24 * 60)
+    return f"{total // 60:02d}:{total % 60:02d}"
