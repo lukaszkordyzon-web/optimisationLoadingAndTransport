@@ -73,6 +73,45 @@ def _latlon(coords: list) -> list:
     return [[round(c[1], 7), round(c[0], 7)] for c in coords]  # GeoJSON is [lon, lat]
 
 
+DEFAULTS = {
+    "Droga / rampa": {"kind": "droga", "grade_pct": 0.0, "speed_limit_kmh": 40.0},
+    "Usyp (materiał)": {"material": "inny", "tonnage_t": 10_000.0, "fragmentation": 0.3, "loose_density_t_m3": 1.75},
+    "Koparka": {"pile": "(najbliższy)", "bucket_m3": 5.0, "swing_cycle_s": 30.0},
+}
+GEOM_MODE = {"LineString": "Droga / rampa", "Polygon": "Usyp (materiał)"}
+
+
+def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
+    """Add a freshly drawn geometry to the site. The shape decides the object type; form parameters
+    are used when they belong to that type, otherwise defaults (editable later in the tables)."""
+    target = GEOM_MODE.get(g["type"])
+    if g["type"] == "Point":
+        target = "Kruszarka" if mode == "Kruszarka" else "Koparka"
+    if target is None:
+        return f"⚠️ Nieobsługiwany kształt: {g['type']}"
+    a = dict(attrs) if target == mode else dict(DEFAULTS.get(target, {}))
+    note = "" if target == mode else " (parametry domyślne – popraw w tabeli poniżej)"
+    if target == "Droga / rampa":
+        a.setdefault("name", f"{a['kind']} {len(site['roads']) + 1}")
+        site["roads"].append({"id": f"R{len(site['roads']) + 1}", **a, "coords": _latlon(g["coordinates"])})
+        return f"✅ Dodano drogę „{a['name']}” ({polyline_length_m(site['roads'][-1]['coords']):.0f} m){note}"
+    if target == "Usyp (materiał)":
+        ids = {p["id"] for p in site["piles"]}
+        if a.get("id") in ids or not a.get("id"):
+            a["id"] = next(f"U-{i:02d}" for i in range(1, 1000) if f"U-{i:02d}" not in ids)
+        site["piles"].append({**a, "polygon": _latlon(g["coordinates"][0][:-1])})
+        return f"✅ Dodano usyp {a['id']}{note}"
+    lon, lat = g["coordinates"]
+    if target == "Kruszarka":
+        site["crusher"] = {"lat": lat, "lon": lon}
+        return "✅ Ustawiono kruszarkę"
+    ids = {e["id"] for e in site["excavators"]}
+    if a.get("id") in ids or not a.get("id"):
+        a["id"] = next(f"K-{i}" for i in range(1, 1000) if f"K-{i}" not in ids)
+    site["excavators"].append({**a, "lat": lat, "lon": lon})
+    return f"✅ Dodano koparkę {a['id']}{note}"
+
+
 def editing_map(site: dict) -> folium.Map:
     """The drawing map. Its HTML must not depend on the selected mode or on the objects,
     otherwise st_folium rebuilds it on every change and the view/sketches are lost."""
@@ -133,9 +172,10 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
             st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu pracy koparki.")
         else:
             st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku).")
-        add = st.button("➕ Dodaj ostatnio narysowany obiekt", type="primary", use_container_width=True)
-        st.caption("Różowy = szkic. Po dodaniu obiekt dostaje kolor (drogi żółte, rampy pomarańczowe, usypy niebieskie). "
-                   "Szkice znikają po odświeżeniu strony.")
+        st.info("Wybierz typ i parametry, potem narysuj obiekt – **dodaje się sam**. "
+                "Linia = droga/rampa, wielokąt = usyp, znacznik = koparka (albo kruszarka, gdy wybrana).")
+        st.caption("Różowy = szkic (znika po odświeżeniu strony). Dodane: drogi żółte, rampy pomarańczowe, "
+                   "usypy niebieskie. Parametry można poprawić w tabelach poniżej.")
 
     with c2:
         # objects are pushed as a dynamic layer: the map itself is not rebuilt when they change
@@ -145,35 +185,18 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
                         key=f"map_{st.session_state.map_key}", feature_group_to_add=objects,
                         returned_objects=["last_active_drawing"])
 
-    if add:
-        geom = (out or {}).get("last_active_drawing")
-        sig = repr(geom.get("geometry")) if geom else None
-        if not geom:
-            st.warning("Najpierw narysuj obiekt narzędziem po lewej stronie mapy.")
-        elif sig == st.session_state.get("last_added_geom"):
-            st.warning("Ten szkic został już dodany – narysuj nowy obiekt.")
-        else:
-            g = geom["geometry"]
-            try:
-                if mode == "Droga / rampa" and g["type"] == "LineString":
-                    site["roads"].append({"id": f"R{len(site['roads']) + 1}", **attrs, "coords": _latlon(g["coordinates"])})
-                elif mode == "Usyp (materiał)" and g["type"] == "Polygon":
-                    site["piles"].append({**attrs, "polygon": _latlon(g["coordinates"][0][:-1])})
-                elif mode == "Koparka" and g["type"] == "Point":
-                    lon, lat = g["coordinates"]
-                    site["excavators"].append({**attrs, "lat": lat, "lon": lon})
-                elif mode == "Kruszarka" and g["type"] == "Point":
-                    lon, lat = g["coordinates"]
-                    site["crusher"] = {"lat": lat, "lon": lon}
-                else:
-                    kinds = {"LineString": "linię", "Polygon": "wielokąt", "Point": "znacznik"}
-                    raise ValueError(f"Ostatnio narysowano {kinds.get(g['type'], g['type'])}, a wybrany obiekt to „{mode}”. "
-                                     "Zmień wybór po lewej (mapa się nie zresetuje) i kliknij Dodaj ponownie.")
-                st.session_state.last_added_geom = sig
-                st.session_state.obj_ver += 1  # refresh the tables below, not the map
-                st.rerun()
-            except ValueError as e:
-                st.error(str(e))
+    geom = (out or {}).get("last_active_drawing")
+    if geom and geom.get("geometry"):
+        sig = repr(geom["geometry"])
+        if sig != st.session_state.get("last_added_geom"):
+            st.session_state.last_added_geom = sig
+            msg = add_drawing(site, geom["geometry"], mode, attrs)
+            st.session_state.map_flash = msg
+            st.session_state.obj_ver += 1  # refresh the tables below, not the map
+            st.rerun()
+    flash = st.session_state.pop("map_flash", None)
+    if flash:
+        (st.success if flash.startswith("✅") else st.warning)(flash)
 
     st.subheader("3. Obiekty na mapie (można poprawiać parametry i usuwać wiersze)")
     c1, c2 = st.columns(2)

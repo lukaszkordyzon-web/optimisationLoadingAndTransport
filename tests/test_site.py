@@ -85,3 +85,20 @@ def test_site_to_scenario_runs_simulation():
 def test_polygon_area():
     sq = [[50.0, 20.0], [50.0, 20.0014], [49.99910, 20.0014], [49.99910, 20.0]]  # ~100 x 100 m
     assert polygon_area_m2(sq) == pytest.approx(10_000, rel=0.03)
+
+
+def test_drawing_type_follows_shape():
+    from app_map import add_drawing, empty_site
+
+    s = empty_site()
+    line = {"type": "LineString", "coordinates": [[20, 50], [20.01, 50]]}
+    poly = {"type": "Polygon", "coordinates": [[[20, 50], [20.001, 50], [20.001, 50.001], [20, 50]]]}
+    point = {"type": "Point", "coordinates": [20, 50]}
+    assert "drogę" in add_drawing(s, line, "Usyp (materiał)", {"id": "U-01"})  # shape wins over selection
+    add_drawing(s, poly, "Usyp (materiał)", {"id": "U-01", "material": "wapień"})
+    add_drawing(s, poly, "Usyp (materiał)", {"id": "U-01", "material": "wapień"})  # duplicate id renamed
+    add_drawing(s, point, "Koparka", {"id": "K-1", "pile": "U-01"})
+    add_drawing(s, point, "Kruszarka", {})
+    assert [p["id"] for p in s["piles"]] == ["U-01", "U-02"]
+    assert s["piles"][0]["material"] == "wapień"
+    assert [e["id"] for e in s["excavators"]] == ["K-1"] and s["crusher"]
