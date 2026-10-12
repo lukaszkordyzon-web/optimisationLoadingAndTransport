@@ -125,7 +125,7 @@ def network(sc) -> dict:
     levels = info.get("levels", {})
     return {
         "roads": [{"coords": r["coords"], "kind": r.get("kind", "droga"), "name": r.get("name", ""),
-                   "grade": r.get("grade_pct", 0)} for r in site.get("roads", [])],
+                   "grade": r.get("grade_pct", 0), "active": r.get("active", True)} for r in site.get("roads", [])],
         "piles": [{"polygon": p["polygon"], "id": p["id"], "material": p.get("material", "")} for p in site.get("piles", [])],
         "excavators": [{"id": e["id"], "lat": e["lat"], "lon": e["lon"],
                         "elev": (levels.get(e["id"]) or {}).get("elev_m")} for e in site.get("excavators", [])],

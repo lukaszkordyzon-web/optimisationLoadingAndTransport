@@ -23,6 +23,7 @@ from kruszyk.rl import train as rl_train
 from kruszyk.views import STATE_LABELS, driver_instruction, operator_view, route_profile, snapshot
 
 from app_map import render_live_map, render_map_tab
+from app_simple import animation_page, render_simple, run_policy
 
 SCEN_DIR = Path(__file__).parent / "scenarios"
 STATE_COLORS = {
@@ -42,10 +43,13 @@ def presets() -> dict[str, Path]:
             for p in sorted(SCEN_DIR.glob("*.yaml"))}
 
 
-def set_raw(raw: dict):
+def set_raw(raw: dict, new_mine: bool = False):
     st.session_state.raw = raw
     st.session_state.ver = st.session_state.get("ver", 0) + 1  # new widget keys -> widgets reload
     st.session_state.pop("res", None)
+    if new_mine:  # another mine loaded: the variant and learned policies belong to the previous one
+        for key in ("variant_raw", "variant_yaml", "rl_by_target", "rl_result"):
+            st.session_state.pop(key, None)
 
 
 if "raw" not in st.session_state:
@@ -108,16 +112,25 @@ with st.sidebar:
     st.caption("Optymalizacja łańcucha odstrzał → koparka → wozidła → kruszarka (dane syntetyczne)")
     p = presets()
     choice = st.selectbox("Scenariusz przykładowy", list(p))
-    if st.button("Wczytaj scenariusz", use_container_width=True):
-        set_raw(yaml.safe_load(p[choice].read_text(encoding="utf-8")))
+    if st.button("Wczytaj scenariusz", width="stretch"):
+        set_raw(yaml.safe_load(p[choice].read_text(encoding="utf-8")), new_mine=True)
         st.rerun()
     up = st.file_uploader("…albo wczytaj własny plik YAML", type=["yaml", "yml"])
     if up is not None and st.session_state.get("uploaded") != up.file_id:
         st.session_state.uploaded = up.file_id
-        set_raw(yaml.safe_load(up.getvalue().decode("utf-8")))
+        set_raw(yaml.safe_load(up.getvalue().decode("utf-8")), new_mine=True)
         st.rerun()
     st.divider()
-    seed = st.number_input("Ziarno losowania (inna zmiana = inne ziarno)", 0, 10_000, int(raw.get("seed", 42)))
+    advanced = st.toggle("🔧 Tryb zaawansowany", value=False, key="advanced",
+                         help="Wszystkie parametry i analizy: wyniki zmiany, podgląd na żywo z ekranami operatora "
+                              "i kierowców, porównania wariantów, szczegóły uczenia, odstrzał ↔ kruszarka, model ETA.")
+    seed = int(raw.get("seed", 42))
+    if advanced:
+        seed = st.number_input("Ziarno losowania (inna zmiana = inne ziarno)", 0, 10_000, seed)
+
+if not advanced:
+    render_simple(raw, set_raw, render_map_tab)
+    st.stop()
 
 
 # ---------------------------------------------------------------- editor
@@ -125,7 +138,8 @@ def records(df: pd.DataFrame) -> list[dict]:
     df = df.dropna(how="all")
     out = []
     for r in df.to_dict("records"):
-        out.append({kk: (v.item() if hasattr(v, "item") else v) for kk, v in r.items() if not pd.isna(v)})
+        out.append({kk: (v.item() if hasattr(v, "item") else v) for kk, v in r.items()
+                    if isinstance(v, (list, dict)) or not pd.isna(v)})
     return out
 
 
@@ -147,18 +161,25 @@ def editor() -> dict:
 
     st.subheader("Odstrzały i koparki")
     c1, c2 = st.columns([2, 3])
-    new["blasts"] = records(c1.data_editor(pd.DataFrame(raw["blasts"]), num_rows="dynamic", key=k("blasts"),
+    psd_by_id = {b["id"]: b["psd"] for b in raw["blasts"] if b.get("psd")}  # curves are edited on the map screen
+    new["blasts"] = records(c1.data_editor(pd.DataFrame([{k_: v for k_, v in b.items() if k_ != "psd"} for b in raw["blasts"]]),
+                                           num_rows="dynamic", key=k("blasts"),
         column_config={"id": "Odstrzał", "tonnage_t": st.column_config.NumberColumn("Tonaż [t]", min_value=0),
                        "fragmentation": st.column_config.NumberColumn("Rozdrobnienie 0=dobre 1=bryły",
                                                                       min_value=0.0, max_value=1.0, step=0.05)},
-        use_container_width=True))
+        width="stretch"))
+    for b in new["blasts"]:
+        if b.get("id") in psd_by_id:
+            b["psd"] = psd_by_id[b["id"]]
+    if psd_by_id:
+        c1.caption("Usypy z krzywą uziarnienia: rozdrobnienie liczone z krzywej (edycja na ekranie mapy).")
     route_ids = list(raw["routes"])
     blast_ids = [b["id"] for b in new["blasts"] if "id" in b]
     ex_df = pd.DataFrame(raw["excavators"])
     for col, default in (("fill_factor", 0.9), ("spot_time_s", 40.0)):
         if col not in ex_df:
             ex_df[col] = default
-    new["excavators"] = records(c2.data_editor(ex_df, num_rows="dynamic", key=k("ex"), use_container_width=True,
+    new["excavators"] = records(c2.data_editor(ex_df, num_rows="dynamic", key=k("ex"), width="stretch",
         column_config={"id": "Koparka", "bucket_m3": "Łyżka [m³]", "swing_cycle_s": "Cykl łyżki [s]",
                        "blast": st.column_config.SelectboxColumn("Odstrzał", options=blast_ids),
                        "route": st.column_config.SelectboxColumn("Trasa", options=route_ids),
@@ -172,7 +193,7 @@ def editor() -> dict:
     tr_df["excavators"] = [", ".join(x) if isinstance(x, list) else "" for x in tr_df.get("excavators", [None] * len(tr_df))]
     tr_df["blend"] = [", ".join(f"{a}:{b:g}" for a, b in x.items()) if isinstance(x, dict) else ""
                       for x in tr_df.get("blend", [None] * len(tr_df))]
-    new["trucks"] = records(st.data_editor(tr_df, num_rows="dynamic", key=k("trucks"), use_container_width=True,
+    new["trucks"] = records(st.data_editor(tr_df, num_rows="dynamic", key=k("trucks"), width="stretch",
         column_config={"model": "Model", "count": st.column_config.NumberColumn("Liczba", min_value=0, step=1),
                        "excavators": st.column_config.TextColumn("Koparki (dozwolone)"),
                        "blend": st.column_config.TextColumn("Dwa usypy w kursie"),
@@ -195,7 +216,7 @@ def editor() -> dict:
 
     st.subheader("Trasy (od frontu do kosza kruszarki; nachylenie + = pod górę z ładunkiem)")
     seg_rows = [{"route": rid, **s} for rid, r in raw["routes"].items() for s in r["segments"]]
-    seg_df = st.data_editor(pd.DataFrame(seg_rows), num_rows="dynamic", key=k("segs"), use_container_width=True,
+    seg_df = st.data_editor(pd.DataFrame(seg_rows), num_rows="dynamic", key=k("segs"), width="stretch",
         column_config={"route": "Trasa", "name": "Odcinek", "length_m": "Długość [m]",
                        "grade_pct": "Nachylenie [%]", "speed_limit_kmh": "Limit [km/h]"})
     routes: dict = {}
@@ -284,7 +305,7 @@ with tabs[2]:
             "spot_s": "podstawienie [s]", "load_s": "załadunek [s]", "haul_s": "jazda pełny [s]",
             "dump_s": "wyładunek [s]", "return_s": "powrót [s]", "cycle_s": "cykl [s]",
             "trucks_needed": "wozideł potrzeba", "excavator_max_tph": "max koparki [t/h]"}),
-            hide_index=True, use_container_width=True)
+            hide_index=True, width="stretch")
         st.download_button("💾 Pobierz scenariusz (YAML)", yaml_text, file_name="scenariusz.yaml")
 
 with tabs[0]:
@@ -332,10 +353,10 @@ with tabs[3]:
     st.dataframe(pd.DataFrame(kp["excavators"]).rename(columns={
         "excavator": "koparka", "loaded_t": "załadowano [t]", "remaining_t": "zostało [t]",
         "utilization": "wykorzystanie", "waiting_for_trucks_h": "czeka na wozidła [h]",
-        "blast_done_at_h": "odstrzał wybrany po [h]"}), hide_index=True, use_container_width=True)
+        "blast_done_at_h": "odstrzał wybrany po [h]"}), hide_index=True, width="stretch")
 
     st.markdown("**Oś czasu wozideł** – czerwone = czekanie")
-    st.plotly_chart(gantt(res), use_container_width=True)
+    st.plotly_chart(gantt(res), width="stretch")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -348,13 +369,13 @@ with tabs[3]:
             fig.add_scatter(x=h["godzina"], y=h["stockpile_t"], name="hałda [t]")
         fig.add_hline(y=sc.crusher.hopper_t, line_dash="dot", annotation_text="pojemność kosza")
         fig.update_layout(height=320, xaxis_title="godzina zmiany", margin=dict(t=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     with c2:
         st.markdown("**Struktura kosztu [PLN/t]**")
         cb = pd.Series(kp["cost_breakdown"]) / max(kp["hauled_t"], 1)
         fig = px.bar(cb[cb > 0].sort_values(), orientation="h", labels={"value": "PLN/t", "index": ""})
         fig.update_layout(height=320, showlegend=False, margin=dict(t=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with st.expander("Pobierz dane syntetyczne (CSV)"):
         c = st.columns(4)
@@ -398,7 +419,7 @@ with tabs[4]:
     level = hop["level_t"].iloc[-1] if len(hop) else 0.0
     st.markdown(f"### 🕐 {clock} · kosz kruszarki: {level:.0f} / {sc.crusher.hopper_t:.0f} t")
     render_live_map(sc, snap, STATE_COLORS, STATE_LABELS)
-    st.plotly_chart(profile_figure(snap), use_container_width=True)
+    st.plotly_chart(profile_figure(snap), width="stretch")
 
     st.markdown("#### 📱 Ekran operatora koparki")
     cols = st.columns(len(sc.excavators))
@@ -424,7 +445,7 @@ with tabs[4]:
         d["polecenie"] = d.apply(driver_instruction, axis=1)
         d["od [min]"] = d["since_min"].round(1)
         st.dataframe(d[["truck", "status", "excavator", "segment", "polecenie", "od [min]"]].rename(columns={
-            "truck": "wozidło", "excavator": "koparka", "segment": "odcinek"}), hide_index=True, use_container_width=True)
+            "truck": "wozidło", "excavator": "koparka", "segment": "odcinek"}), hide_index=True, width="stretch")
 
     if st.toggle("▶️ Animacja całej zmiany (liczy się kilka sekund)"):
         step = st.select_slider("Krok animacji [min]", [2, 5, 10], value=5)
@@ -441,7 +462,7 @@ with tabs[4]:
                             showlegend=False, hoverinfo="skip")
         fig.update_traces(marker=dict(size=14), textposition="top center", selector=dict(mode="markers+text"))
         fig.update_layout(height=450, xaxis_title="odległość do kruszarki [m]", yaxis_title="wysokość [m]")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 
 # ---------------------------------------------------------------- comparisons
@@ -490,13 +511,13 @@ with tabs[5]:
                       labels={"trucks": "liczba wozideł", "throughput_tph": "wywóz [t/h]"})
         if target:
             fig.add_hline(y=target, line_dash="dot", annotation_text="cel")
-        c1.plotly_chart(fig, use_container_width=True)
+        c1.plotly_chart(fig, width="stretch")
         c2.plotly_chart(px.line(sw, x="trucks", y="cost_per_t", color="wariant", markers=True,
-                                labels={"trucks": "liczba wozideł", "cost_per_t": "koszt [PLN/t]"}), use_container_width=True)
+                                labels={"trucks": "liczba wozideł", "cost_per_t": "koszt [PLN/t]"}), width="stretch")
         c1.plotly_chart(px.line(sw, x="trucks", y="avg_queue_per_cycle_min", color="wariant", markers=True,
-                                labels={"trucks": "liczba wozideł", "avg_queue_per_cycle_min": "kolejki [min/cykl]"}), use_container_width=True)
+                                labels={"trucks": "liczba wozideł", "avg_queue_per_cycle_min": "kolejki [min/cykl]"}), width="stretch")
         c2.plotly_chart(px.line(sw, x="trucks", y="excavator_utilization", color="wariant", markers=True,
-                                labels={"trucks": "liczba wozideł", "excavator_utilization": "wykorzystanie koparek"}), use_container_width=True)
+                                labels={"trucks": "liczba wozideł", "excavator_utilization": "wykorzystanie koparek"}), width="stretch")
         best = []
         for name, g in sw.groupby("wariant"):
             g2 = g[g["throughput_tph"] >= target] if target else g
@@ -505,7 +526,7 @@ with tabs[5]:
             best.append({"wariant": name, "najlepiej wozideł": int(b["trucks"]), "t/h": round(b["throughput_tph"]),
                          "PLN/t": round(b["cost_per_t"], 2), "kolejki min/cykl": round(b["avg_queue_per_cycle_min"], 1)})
         st.markdown("**Rekomendacje** (najniższy koszt na tonę" + (f" przy ≥ {target} t/h)" if target else ")"))
-        st.dataframe(pd.DataFrame(best), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(best), hide_index=True, width="stretch")
 
     st.divider()
     st.subheader("Porównanie zapisanych scenariuszy")
@@ -528,12 +549,12 @@ with tabs[5]:
                                           "cost_per_t": "PLN/t", "avg_queue_per_cycle_min": "kolejki min/cykl",
                                           "excavator_utilization": "wyk. koparek", "crusher_utilization": "wyk. kruszarki",
                                           "fuel_l_per_t": "paliwo l/t", "stockpile_end_t": "hałda na koniec t"}),
-                     hide_index=True, use_container_width=True)
+                     hide_index=True, width="stretch")
         cost_cols = [c for c in cmp_df if c.startswith("koszt_")]
         long = cmp_df.melt(id_vars="scenariusz", value_vars=cost_cols, var_name="składnik", value_name="PLN")
         long["składnik"] = long["składnik"].str.replace("koszt_", "")
         st.plotly_chart(px.bar(long, x="scenariusz", y="PLN", color="składnik", title="Koszt zmiany wg składników"),
-                        use_container_width=True)
+                        width="stretch")
 
 
 # ---------------------------------------------------------------- blast vs crusher
@@ -558,10 +579,10 @@ with tabs[7]:
                       labels={"fragmentation": "rozdrobnienie (0 = drobne, 1 = bryły)"})
         best = fr.loc[fr["cost_per_t"].idxmin()]
         fig.add_vline(x=best["fragmentation"], line_dash="dot", annotation_text="optimum")
-        c1.plotly_chart(fig, use_container_width=True)
+        c1.plotly_chart(fig, width="stretch")
         c2.plotly_chart(px.line(fr, x="fragmentation", y=["throughput_tph", "crushed_tph"], markers=True,
                                 labels={"fragmentation": "rozdrobnienie", "value": "t/h", "variable": ""}),
-                        use_container_width=True)
+                        width="stretch")
         st.success(f"Najniższy koszt całkowity: rozdrobnienie ≈ {best['fragmentation']:.1f} → "
                    f"{best['cost_per_t']:.2f} PLN/t, {best['throughput_tph']:.0f} t/h")
 
@@ -586,7 +607,7 @@ with tabs[8]:
         sample["przewidywany_s"] = model.predict_s(sample)
         st.plotly_chart(px.scatter(sample, x="duration_s", y="przewidywany_s", color="segment", opacity=0.5,
                                    labels={"duration_s": "rzeczywisty czas [s]", "przewidywany_s": "przewidywany [s]"}),
-                        use_container_width=True)
+                        width="stretch")
         st.markdown("**Kalkulator ETA**")
         c = st.columns(5)
         tr = c[0].selectbox("Wozidło", sorted(data["truck"].unique()))
@@ -601,20 +622,6 @@ with tabs[8]:
 
 
 # ---------------------------------------------------------------- animation on the map
-@st.cache_data(show_spinner=False)
-def run_policy(yaml_text: str, seed: int, policy: str):
-    sc_ = scenario_from_dict(yaml.safe_load(yaml_text))
-    sc_.dispatch = policy
-    return simulate(sc_, seed=seed)
-
-
-@st.cache_data(show_spinner=False)
-def animation_page(yaml_text: str, seed: int, policy: str) -> str:
-    res_p = run_policy(yaml_text, seed, policy)
-    base = run_policy(yaml_text, seed, "natural")
-    return animation_html(res_p, base, f"Przydział: {POLICIES[policy]}", "naturalny")
-
-
 with tabs[1]:
     if not any(r.path for r in sc.routes.values()):
         st.info("Animacja jeździ po drogach narysowanych na mapie. Narysuj kopalnię w zakładce **🗺️ Mapa kopalni** "
@@ -634,7 +641,7 @@ with tabs[1]:
                 ("Kolejka pod kruszarką [h]", "truck_queue_crusher_h", 1), ("Kolejka pod koparkami [h]", "truck_queue_excavator_h", 1)]
         st.dataframe(pd.DataFrame([{"wskaźnik (cała zmiana)": n, POLICIES[policy]: round(a[key] or 0, d),
                                     "naturalny": round(b[key] or 0, d)} for n, key, d in rows]),
-                     hide_index=True, use_container_width=True)
+                     hide_index=True, width="stretch")
 
 
 # ---------------------------------------------------------------- reinforcement learning
@@ -685,13 +692,13 @@ with tabs[6]:
         fig.add_scatter(x=h["iteracja"], y=h["koszt_polityka"], name="polityka agenta", line=dict(color="#d62828", width=4))
         fig.update_layout(title="Koszt na tonę [zł/t]", height=340, xaxis_title="iteracja (0 = agent nienauczony)",
                           legend=dict(orientation="h", y=-0.3), margin=dict(t=40))
-        c1.plotly_chart(fig, use_container_width=True)
+        c1.plotly_chart(fig, width="stretch")
         hh = h[h["iteracja"] > 0]
         fig = go.Figure(go.Bar(x=hh["iteracja"], y=hh["oszczednosc_pct"],
                                marker_color=["#2a9d8f" if v > 0 else "#d62828" for v in hh["oszczednosc_pct"]]))
         fig.update_layout(title="Oszczędność vs przydział naturalny na tych samych zmianach [%]", height=340,
                           xaxis_title="iteracja", yaxis_title="%", margin=dict(t=40))
-        c2.plotly_chart(fig, use_container_width=True)
+        c2.plotly_chart(fig, width="stretch")
         c = st.columns(4)
         for col, (key, title) in zip(c, [("throughput_tph", "Wydajność [t/h]"), ("fuel_l_per_t", "Paliwo [l/t]"),
                                          ("avg_queue_per_cycle_min", "Kolejki [min/cykl]"),
@@ -700,7 +707,7 @@ with tabs[6]:
             fig.add_scatter(x=h["iteracja"], y=h[f"naturalny_{key}"], name="naturalny", line=dict(color="#9aa0a6", dash="dot"))
             fig.add_scatter(x=h["iteracja"], y=h[key], name="agent", line=dict(color="#d62828", width=3))
             fig.update_layout(title=title, height=260, showlegend=False, margin=dict(t=40, l=10, r=10))
-            col.plotly_chart(fig, use_container_width=True)
+            col.plotly_chart(fig, width="stretch")
 
         st.markdown("#### Test końcowy na nowych, pełnych zmianach")
         comp = r.comparison
@@ -714,7 +721,7 @@ with tabs[6]:
             "kolejki [min/cykl]": comp["avg_queue_per_cycle_min"].round(1),
             "wykorzystanie koparek": comp["excavator_utilization"].round(2),
         })
-        st.dataframe(show, hide_index=True, use_container_width=True)
+        st.dataframe(show, hide_index=True, width="stretch")
         best = comp.iloc[3]
         hours = sc.shift_hours
         saving = (nat["cost_per_t"] - best["cost_per_t"]) * best["hauled_t"]
@@ -723,7 +730,7 @@ with tabs[6]:
                    f"Przy tej samej ilości urobku to ok. **{saving:,.0f} zł na zmianę** ({hours:g} h).".replace(",", " "))
         c1, c2 = st.columns([3, 2])
         c1.markdown("**Czego nauczył się agent** (dodatnia waga = unika koparek z dużą wartością cechy)")
-        c1.dataframe(rl_explain(r.weights), hide_index=True, use_container_width=True)
+        c1.dataframe(rl_explain(r.weights), hide_index=True, width="stretch")
         with c2:
             st.markdown("**Wdrożenie polityki**")
             st.caption("Zapisuje wyuczone wagi w scenariuszu i ustawia przydział „polityka RL”. Potem zobaczysz ją "

@@ -10,6 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from kruszyk.psd import PRESETS  # noqa: E402
 from kruszyk.site import analyze_site, site_to_scenario  # noqa: E402
 
 C = [50.0000, 20.0000]          # crusher
@@ -29,13 +30,16 @@ site = {
          "coords": [MID, [49.9972, 20.0110], [49.9968, 20.0085]]},
         {"id": "R4", "name": "poziom dolny", "kind": "droga", "grade_pct": 0.0, "speed_limit_kmh": 30,
          "coords": [B, [49.9950, 20.0225], [49.9945, 20.0270]]},
+        # planned: a gentler exit from the east end of the bottom level straight to the crusher (off today)
+        {"id": "R5", "name": "planowany wyjazd wschodni", "kind": "rampa", "grade_pct": 3.3, "speed_limit_kmh": 35,
+         "active": False, "coords": [[49.9945, 20.0270], [49.9975, 20.0200], C]},
     ],
     "piles": [
-        {"id": "U-01", "material": "wapień", "tonnage_t": 9000, "fragmentation": 0.3, "loose_density_t_m3": 1.75,
+        {"id": "U-01", "material": "wapień", "tonnage_t": 9000, "psd": PRESETS["średnie"], "loose_density_t_m3": 1.75,
          "polygon": [[49.9962, 20.0078], [49.9962, 20.0092], [49.9957, 20.0092], [49.9957, 20.0078]]},
-        {"id": "U-02", "material": "dolomit", "tonnage_t": 9000, "fragmentation": 0.5, "loose_density_t_m3": 1.85,
+        {"id": "U-02", "material": "dolomit", "tonnage_t": 9000, "psd": PRESETS["grube"], "loose_density_t_m3": 1.85,
          "polygon": [[49.9944, 20.0218], [49.9944, 20.0232], [49.9939, 20.0232], [49.9939, 20.0218]]},
-        {"id": "U-03", "material": "wapień", "tonnage_t": 12000, "fragmentation": 0.35, "loose_density_t_m3": 1.75,
+        {"id": "U-03", "material": "wapień", "tonnage_t": 12000, "psd": PRESETS["drobne (dobry odstrzał)"], "loose_density_t_m3": 1.75,
          "polygon": [[49.9940, 20.0265], [49.9940, 20.0280], [49.9935, 20.0280], [49.9935, 20.0265]]},
     ],
     "excavators": [

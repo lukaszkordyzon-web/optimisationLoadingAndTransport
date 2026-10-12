@@ -82,8 +82,13 @@ L.control.scale({ imperial: false }).addTo(map);
 const bounds = [];
 const N = D.net;
 N.roads.forEach(r => {
-  const c = r.kind === 'rampa' ? '#ff8800' : '#ffe600';
-  L.polyline(r.coords, { color: c, weight: 6, opacity: 0.9 }).bindTooltip(`${r.name} · ${r.grade} %`).addTo(map);
+  if (r.active === false) {
+    L.polyline(r.coords, { color: '#9e9e9e', weight: 4, dashArray: '10 8' }).bindTooltip(`${r.name} · planowana`).addTo(map);
+    return;
+  }
+  const c = r.kind === 'rampa' ? '#d500f9' : '#ffffff';
+  L.polyline(r.coords, { color: '#000', weight: 10, opacity: 0.55 }).addTo(map);
+  L.polyline(r.coords, { color: c, weight: 6, opacity: 0.95 }).bindTooltip(`${r.name} · ${r.grade} %`).addTo(map);
   r.coords.forEach(p => bounds.push(p));
 });
 N.piles.forEach(p => {
@@ -99,7 +104,16 @@ N.excavators.forEach(e => L.marker([e.lat, e.lon], { icon: L.divIcon({ className
 N.excavators.forEach(e => bounds.push([e.lat, e.lon]));
 if (N.crusher) bounds.push([N.crusher.lat, N.crusher.lon]);
 if (N.crusher) L.marker([N.crusher.lat, N.crusher.lon], { icon: L.divIcon({ className: '', html: '<div class="tag" style="transform:translate(-50%,-30px)">🏭 kruszarka</div>' }) }).addTo(map);
-if (bounds.length) map.fitBounds(bounds, { padding: [50, 50] }); else map.setView(N.center || [52, 19], N.zoom || 15);
+function fit() { if (bounds.length) map.fitBounds(bounds, { padding: [50, 50] }); else map.setView(N.center || [52, 19], N.zoom || 15); }
+fit();
+// the page may be rendered in a hidden tab (size 0): refit as soon as the map becomes visible
+const visible = () => { const m = document.getElementById('map'); return m.clientWidth > 50 && m.clientHeight > 50; };
+let fitted = visible();
+new ResizeObserver(() => {
+  const ok = visible();
+  map.invalidateSize();
+  if (ok && !fitted) { fitted = true; fit(); }
+}).observe(document.getElementById('map'));
 
 const trucks = Object.entries(D.trucks).map(([id, f]) => {
   const m = L.circleMarker([f[0][1], f[0][2]], { radius: 7, color: '#000', weight: 1, fillOpacity: 1, fillColor: '#aaa' })
@@ -122,6 +136,11 @@ const el = id => document.getElementById(id);
 const fmt = (v, d = 0) => v === null || v === undefined ? '–' : v.toLocaleString('pl-PL', { minimumFractionDigits: d, maximumFractionDigits: d });
 el('policy').textContent = D.label;
 el('blabel').textContent = D.baseline_label + ' (ten sam dzień)';
+if (!B) {  // no comparison: hide its rows and adjust the chart caption
+  el('bcpt').parentElement.style.display = 'none';
+  el('delta').parentElement.style.display = 'none';
+  el('chart').previousElementSibling.textContent = 'Koszt zł/t w czasie zmiany';
+}
 el('time').max = D.shift_s;
 const drive = new Set([0, 1, 2]), load = new Set([4, 5]), queues = new Set(D.queue_codes);
 el('legend').innerHTML = D.states.filter(s => s !== 'start').map(s =>

@@ -113,6 +113,7 @@ class RoadGraph:
     """
 
     def __init__(self, roads: list[dict]):
+        roads = [r for r in roads if r.get("active", True)]  # planned / closed roads are not driven on
         self.nodes: list[tuple[float, float]] = []
         self.edges: dict[tuple[int, int], tuple[float, int]] = {}  # (u<v) -> (length, road index)
         self.roads = roads
@@ -355,6 +356,8 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
              "fragmentation": float(p.get("fragmentation", 0.3)), "material": p.get("material", "")}
         if p.get("loose_density_t_m3"):
             b["loose_density_t_m3"] = float(p["loose_density_t_m3"])
+        if p.get("psd"):
+            b["psd"] = p["psd"]
         new["blasts"].append(b)
     pile_ids = {p["id"] for p in piles}
     new["excavators"], new["routes"], new["links"] = [], {}, {}

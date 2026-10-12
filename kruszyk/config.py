@@ -34,6 +34,7 @@ class Blast:
     fragmentation: float = 0.3
     material: str = ""
     loose_density_t_m3: float | None = None  # overrides the scenario density for this pile
+    psd: list | None = None  # grading curve [[mm, % passing], ...]; when given, it sets `fragmentation`
 
 
 @dataclass
@@ -72,6 +73,7 @@ class Crusher:
     dump_time_s: float = 60.0
     # how much poor fragmentation reduces throughput (0.4 -> -40 % at fragmentation=1)
     fragmentation_penalty: float = 0.4
+    max_feed_mm: float = 800.0      # bigger blocks = oversize (hammering, slower feeding)
     kwh_per_t: float = 1.1          # specific energy at perfect fragmentation
     kwh_fragmentation_extra: float = 0.6  # +60 % energy at fragmentation=1
 
@@ -244,6 +246,11 @@ def scenario_from_dict(raw: dict) -> Scenario:
         natural_switch_prob=raw.get("natural_switch_prob", 0.25),
         rl_weights=raw.get("rl_weights"),
     )
+    from .psd import fragmentation_index
+
+    for b in sc.blasts:  # a grading curve, when given, decides how blocky the material is
+        if b.psd:
+            b.fragmentation = fragmentation_index(b.psd, sc.crusher.max_feed_mm)
     sc.validate()
     return sc
 
