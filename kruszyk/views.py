@@ -12,6 +12,7 @@ from .site import point_along, polyline_length_m
 
 STATE_LABELS = {
     "jazda_pusty": "jedzie pusty do koparki",
+    "przejazd_miedzy_usypami": "jedzie na drugi usyp",
     "kolejka_koparka": "czeka pod koparką",
     "podstawienie": "podstawia się",
     "zaladunek": "ładowany",
@@ -78,9 +79,16 @@ def snapshot(res, t: float) -> pd.DataFrame:
         row["route"] = route
         total = sc.routes[route].length_m if route else 0.0
 
-        if s["state"] in ("jazda_pusty", "jazda_pelny"):
+        if s["state"] == "przejazd_miedzy_usypami":
+            dist_from_front = 0.0  # between two piles: shown at the loading end of the route profile
+            leg = seg[(seg["truck"] == truck) & (seg["trip"] == s["trip"]) & (seg["leg"] == "miedzy")]
+            on = leg[(leg["start_s"] <= t) & (leg["start_s"] + leg["duration_s"] > t)]
+            if len(on):
+                row["segment"] = on.iloc[0]["segment"]
+        elif s["state"] in ("jazda_pusty", "jazda_pelny"):
             loaded = int(s["state"] == "jazda_pelny")
-            leg = seg[(seg["truck"] == truck) & (seg["trip"] == s["trip"]) & (seg["loaded"] == loaded)]
+            leg = seg[(seg["truck"] == truck) & (seg["trip"] == s["trip"])
+                      & (seg["leg"] == ("pelny" if loaded else "pusty"))]
             leg = leg.sort_values("start_s")
             on = leg[(leg["start_s"] <= t) & (leg["start_s"] + leg["duration_s"] > t)]
             if len(on):
@@ -129,6 +137,8 @@ def driver_instruction(row) -> str:
     s = row["state"]
     if s == "jazda_pusty":
         return f"Jedź do {row['excavator']} – dojazd ok. {row['eta_s'] / 60:.1f} min" if row["eta_s"] else f"Jedź do {row['excavator']}"
+    if s == "przejazd_miedzy_usypami":
+        return f"Jedź na drugi usyp – koparka {row['excavator']}"
     if s == "jazda_pelny":
         return "Jedź do kruszarki"
     if s == "kolejka_koparka":

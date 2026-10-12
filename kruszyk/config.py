@@ -59,6 +59,10 @@ class TruckFleet:
     fuel_lph_loaded: float = 60.0  # fuel burn while driving loaded
     fuel_lph_empty: float = 32.0
     fuel_lph_idle: float = 10.0    # queueing / spotting / loading / dumping with engine running
+    # which excavators these trucks may serve (empty = all)
+    excavators: list = field(default_factory=list)
+    # two-pile trips: {excavator: share of the payload}, loaded in this order, e.g. {K-1: 0.5, K-2: 0.5}
+    blend: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -115,6 +119,9 @@ class Costs:
     drill_blast_fine_extra_per_t: float = 2.5  # extra cost at fragmentation=0
 
 
+DISPATCH_MODES = ("natural", "fixed", "dynamic", "rl")
+
+
 @dataclass
 class Scenario:
     name: str
@@ -126,13 +133,21 @@ class Scenario:
     crusher: Crusher
     loose_density_t_m3: float = 1.75
     rolling_resistance_pct: float = 3.0
-    dispatch: str = "dynamic"  # "dynamic" (system assigns) or "fixed" (truck bound to excavator)
+    # how trucks pick an excavator after dumping:
+    #   natural – today's practice: back to "own" excavator, sometimes elsewhere, no information
+    #   fixed   – always the own excavator
+    #   dynamic – system heuristic: where the truck will be loaded soonest
+    #   rl      – policy learned by reinforcement learning (rl_weights)
+    dispatch: str = "dynamic"
+    natural_switch_prob: float = 0.25
+    rl_weights: list | None = None
     seed: int = 42
     variability: Variability = field(default_factory=Variability)
     costs: Costs = field(default_factory=Costs)
     stockpile: Stockpile = field(default_factory=Stockpile)
     pacing: Pacing = field(default_factory=Pacing)
     site: dict | None = None  # map geometry (see site.py)
+    links: dict = field(default_factory=dict)  # "K-1>K-2" -> Route between two excavators
 
     @property
     def truck_count(self) -> int:
@@ -152,8 +167,23 @@ class Scenario:
             raise ValueError("Scenariusz musi mieć co najmniej jedną koparkę")
         if self.truck_count < 1:
             raise ValueError("Scenariusz musi mieć co najmniej jedno wozidło")
-        if self.dispatch not in ("dynamic", "fixed"):
-            raise ValueError("dispatch musi być 'dynamic' albo 'fixed'")
+        if self.dispatch not in DISPATCH_MODES:
+            raise ValueError(f"dispatch musi być jednym z: {', '.join(DISPATCH_MODES)}")
+        if self.dispatch == "rl" and not self.rl_weights:
+            raise ValueError("Przydział 'rl' wymaga wytrenowanej polityki (rl_weights)")
+        ex_ids = {e.id for e in self.excavators}
+        for f in self.trucks:
+            bad = [x for x in list(f.excavators) + list(f.blend) if x not in ex_ids]
+            if bad:
+                raise ValueError(f"Wozidła {f.model}: nieznane koparki {', '.join(bad)}")
+            if f.blend:
+                if sum(f.blend.values()) <= 0:
+                    raise ValueError(f"Wozidła {f.model}: udziały mieszania muszą być > 0")
+                stops = list(f.blend)
+                for a, b in zip(stops, stops[1:]):
+                    if f"{a}>{b}" not in self.links:
+                        raise ValueError(f"Wozidła {f.model}: brak połączenia {a} → {b} "
+                                         "(zbuduj trasy z mapy, żeby wyznaczyć przejazd między koparkami)")
         if self.crusher.hopper_t < max(f.payload_t for f in self.trucks if f.count > 0):
             raise ValueError("Kosz kruszarki mniejszy niż ładowność wozidła")
         for r in self.routes.values():
@@ -186,11 +216,13 @@ def load_scenario(path: str | Path) -> Scenario:
     return scenario_from_dict(raw)
 
 
+def _routes(raw_routes: dict | None) -> dict[str, Route]:
+    return {rid: Route(rid, [_build(Segment, s) for s in r["segments"]], r.get("path"))
+            for rid, r in (raw_routes or {}).items()}
+
+
 def scenario_from_dict(raw: dict) -> Scenario:
-    routes = {
-        rid: Route(rid, [_build(Segment, s) for s in r["segments"]], r.get("path"))
-        for rid, r in raw["routes"].items()
-    }
+    routes = _routes(raw["routes"])
     sc = Scenario(
         name=raw.get("name", "scenariusz"),
         shift_hours=raw["shift_hours"],
@@ -208,6 +240,9 @@ def scenario_from_dict(raw: dict) -> Scenario:
         stockpile=_build(Stockpile, raw.get("stockpile", {})),
         pacing=_build(Pacing, raw.get("pacing", {})),
         site=raw.get("site"),
+        links=_routes(raw.get("links")),
+        natural_switch_prob=raw.get("natural_switch_prob", 0.25),
+        rl_weights=raw.get("rl_weights"),
     )
     sc.validate()
     return sc
@@ -217,12 +252,26 @@ def scenario_to_dict(sc: Scenario) -> dict:
     """Inverse of scenario_from_dict (for saving edited scenarios to YAML)."""
     from dataclasses import asdict
 
-    d = {k: v for k, v in asdict(sc).items() if k not in ("routes", "site")}
-    d["routes"] = {}
-    for rid, r in sc.routes.items():
-        d["routes"][rid] = {"segments": [asdict(s) for s in r.segments]}
-        if r.path:
-            d["routes"][rid]["path"] = r.path
+    d = {k: v for k, v in asdict(sc).items() if k not in ("routes", "site", "links", "rl_weights")}
+
+    def routes(rs: dict) -> dict:
+        out = {}
+        for rid, r in rs.items():
+            out[rid] = {"segments": [asdict(s) for s in r.segments]}
+            if r.path:
+                out[rid]["path"] = r.path
+        return out
+
+    d["routes"] = routes(sc.routes)
+    if sc.links:
+        d["links"] = routes(sc.links)
+    if sc.rl_weights:
+        d["rl_weights"] = [float(w) for w in sc.rl_weights]
+    for f in d["trucks"]:
+        if not f["excavators"]:
+            f.pop("excavators")
+        if not f["blend"]:
+            f.pop("blend")
     d["blasts"] = [{k: v for k, v in b.items() if v not in (None, "")} for b in d["blasts"]]
     if sc.site:
         d["site"] = sc.site

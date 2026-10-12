@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --bg:#ffffff; --fg:#1d2433; --muted:#6b7280; --card:#f5f6f8; --line:#e3e6ea; --accent:#d62828; --good:#2a9d8f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--fg); }
+  #wrap { display:flex; gap:10px; height: 100vh; padding: 0; }
+  #map { flex: 3; min-height: 420px; border-radius: 8px; }
+  #panel { flex: 1; min-width: 270px; max-width: 360px; overflow-y: auto; font-size: 13px; }
+  @media (max-width: 760px) { #wrap { flex-direction: column; height:auto; } #map { height: 60vh; } #panel { max-width:none; } }
+  .card { background: var(--card); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .clock { font-size: 26px; font-weight: 700; }
+  .row { display:flex; justify-content:space-between; padding: 2px 0; }
+  .row b { font-variant-numeric: tabular-nums; }
+  .big { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  .good { color: var(--good); } .bad { color: var(--accent); }
+  button, select { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  input[type=range] { width: 100%; }
+  .legend span { display:inline-flex; align-items:center; gap:4px; margin: 2px 8px 2px 0; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; border:1px solid #0003; }
+  .lbl { background: transparent; border: 0; box-shadow: none; color: #fff; font-weight: 700; font-size: 11px;
+         text-shadow: 0 0 3px #000, 0 0 3px #000; padding: 0; }
+  .lbl::before { display:none; }
+  .tag { color:#fff; font-weight:700; font-size:12px; text-shadow:0 0 3px #000,0 0 3px #000; white-space:nowrap; }
+  canvas { width: 100%; height: 120px; background: #fff; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="map"></div>
+  <div id="panel">
+    <div class="card">
+      <div class="clock" id="clock">06:00</div>
+      <div class="muted" id="policy"></div>
+      <div style="display:flex; gap:6px; margin:6px 0">
+        <button class="primary" id="play">▶ Start</button>
+        <button id="reset">⟲</button>
+        <select id="speed">
+          <option value="60">×60</option><option value="120">×120</option><option value="300" selected>×300</option>
+          <option value="600">×600</option><option value="1200">×1200</option>
+        </select>
+      </div>
+      <input type="range" id="time" min="0" step="10" value="0">
+    </div>
+    <div class="card">
+      <div class="row"><span>Koszt na tonę</span><span class="big" id="cpt">–</span></div>
+      <div class="row muted"><span id="blabel">naturalny</span><b id="bcpt">–</b></div>
+      <div class="row"><span>Różnica</span><b id="delta">–</b></div>
+    </div>
+    <div class="card">
+      <div class="row"><span>Wywiezione</span><b id="dumped">0 t</b></div>
+      <div class="row"><span>Koszt narastająco</span><b id="cost">0 zł</b></div>
+      <div class="row"><span>Paliwo</span><b id="fuel">0 l</b></div>
+      <div class="row"><span>Paliwo na tonę</span><b id="fuelt">–</b></div>
+      <div class="row"><span>Kosz kruszarki</span><b id="hopper">0 t</b></div>
+      <div class="row"><span>Wozidła w kolejce teraz</span><b id="queue">0</b></div>
+      <div class="row"><span>Jadą / ładują / czekają</span><b id="mix">–</b></div>
+    </div>
+    <div class="card">
+      <div class="muted">Koszt zł/t w czasie zmiany (czerwony: ten przydział, szary: naturalny)</div>
+      <canvas id="chart" width="600" height="220"></canvas>
+    </div>
+    <div class="card legend" id="legend"></div>
+  </div>
+</div>
+<script>
+const D = __DATA__;
+const map = L.map('map', { zoomControl: true });
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { maxZoom: 21, maxNativeZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics' }).addTo(map);
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap' });
+L.control.layers({ 'Satelita': sat, 'Mapa': osm }).addTo(map);
+L.control.scale({ imperial: false }).addTo(map);
+
+const bounds = [];
+const N = D.net;
+N.roads.forEach(r => {
+  const c = r.kind === 'rampa' ? '#ff8800' : '#ffe600';
+  L.polyline(r.coords, { color: c, weight: 6, opacity: 0.9 }).bindTooltip(`${r.name} · ${r.grade} %`).addTo(map);
+  r.coords.forEach(p => bounds.push(p));
+});
+N.piles.forEach(p => {
+  p.polygon.forEach(q => bounds.push(q));
+  L.polygon(p.polygon, { color: '#00e5ff', weight: 2, fillOpacity: 0.25 }).addTo(map);
+  const c = p.polygon.reduce((a, q) => [a[0] + q[0] / p.polygon.length, a[1] + q[1] / p.polygon.length], [0, 0]);
+  L.marker(c, { icon: L.divIcon({ className: '', html: `<div class="tag">${p.id} · ${p.material}</div>` }) }).addTo(map);
+});
+N.junctions.forEach(j => L.circleMarker([j.lat, j.lon], { radius: 5, color: '#000', weight: 1, fillColor: '#fff', fillOpacity: 1 })
+  .bindTooltip(`węzeł · rzędna ${j.elev} m`).addTo(map));
+N.excavators.forEach(e => L.marker([e.lat, e.lon], { icon: L.divIcon({ className: '',
+  html: `<div class="tag" style="transform:translate(-50%,-30px)">⛏️ ${e.id}${e.elev !== null && e.elev !== undefined ? ' · ' + e.elev + ' m' : ''}</div>` }) }).addTo(map));
+N.excavators.forEach(e => bounds.push([e.lat, e.lon]));
+if (N.crusher) bounds.push([N.crusher.lat, N.crusher.lon]);
+if (N.crusher) L.marker([N.crusher.lat, N.crusher.lon], { icon: L.divIcon({ className: '', html: '<div class="tag" style="transform:translate(-50%,-30px)">🏭 kruszarka</div>' }) }).addTo(map);
+if (bounds.length) map.fitBounds(bounds, { padding: [50, 50] }); else map.setView(N.center || [52, 19], N.zoom || 15);
+
+const trucks = Object.entries(D.trucks).map(([id, f]) => {
+  const m = L.circleMarker([f[0][1], f[0][2]], { radius: 7, color: '#000', weight: 1, fillOpacity: 1, fillColor: '#aaa' })
+    .bindTooltip(id, { permanent: true, direction: 'right', offset: [6, 0], className: 'lbl' }).addTo(map);
+  return { id, f, m, i: 0, code: -1 };
+});
+
+function locate(tr, t) {
+  const f = tr.f;
+  if (t < f[tr.i][0]) tr.i = 0;
+  while (tr.i < f.length - 2 && f[tr.i + 1][0] <= t) tr.i++;
+  const a = f[tr.i], b = f[Math.min(tr.i + 1, f.length - 1)];
+  if (t >= b[0] || b[0] === a[0]) return [b[1], b[2], t >= b[0] ? b[3] : a[3]];
+  const k = (t - a[0]) / (b[0] - a[0]);
+  return [a[1] + k * (b[1] - a[1]), a[2] + k * (b[2] - a[2]), a[3] === b[3] ? a[3] : a[3]];
+}
+
+const S = D.series, B = D.baseline;
+const el = id => document.getElementById(id);
+const fmt = (v, d = 0) => v === null || v === undefined ? '–' : v.toLocaleString('pl-PL', { minimumFractionDigits: d, maximumFractionDigits: d });
+el('policy').textContent = D.label;
+el('blabel').textContent = D.baseline_label + ' (ten sam dzień)';
+el('time').max = D.shift_s;
+const drive = new Set([0, 1, 2]), load = new Set([4, 5]), queues = new Set(D.queue_codes);
+el('legend').innerHTML = D.states.filter(s => s !== 'start').map(s =>
+  `<span><i class="dot" style="background:${D.colors[s]}"></i>${D.labels[s]}</span>`).join('');
+
+let t = 0, playing = false, last = null, lastPanel = 0;
+function draw() {
+  let q = 0, nd = 0, nl = 0;
+  trucks.forEach(tr => {
+    const [lat, lon, c] = locate(tr, t);
+    tr.m.setLatLng([lat, lon]);
+    if (c !== tr.code) { tr.code = c; tr.m.setStyle({ fillColor: D.colors[D.states[c]] }); }
+    if (queues.has(c)) q++; else if (drive.has(c)) nd++; else if (load.has(c)) nl++;
+  });
+  const now = performance.now();
+  if (now - lastPanel < 90 && playing) return;
+  lastPanel = now;
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
+  el('clock').textContent = `${String(6 + h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  el('time').value = t;
+  el('queue').textContent = q;
+  el('queue').className = q > 2 ? 'bad' : '';
+  el('mix').textContent = `${nd} / ${nl} / ${q}`;
+  if (!S.t) return;
+  const i = Math.min(Math.floor(t / 60), S.t.length - 1);
+  el('dumped').textContent = fmt(S.dumped[i]) + ' t';
+  el('cost').textContent = fmt(S.cost[i]) + ' zł';
+  el('fuel').textContent = fmt(S.fuel[i]) + ' l';
+  el('fuelt').textContent = S.dumped[i] ? fmt(S.fuel[i] / S.dumped[i], 3) + ' l/t' : '–';
+  el('hopper').textContent = fmt(S.hopper[i]) + ' / ' + fmt(D.hopper_cap) + ' t';
+  el('cpt').textContent = S.cpt[i] ? fmt(S.cpt[i], 2) + ' zł/t' : '–';
+  if (B && B.t) {
+    const j = Math.min(i, B.t.length - 1);
+    el('bcpt').textContent = B.cpt[j] ? fmt(B.cpt[j], 2) + ' zł/t' : '–';
+    if (S.cpt[i] && B.cpt[j]) {
+      const d = 100 * (S.cpt[i] / B.cpt[j] - 1);
+      el('delta').textContent = (d > 0 ? '+' : '') + fmt(d, 1) + ' %';
+      el('delta').className = d < 0 ? 'good' : 'bad';
+    }
+  }
+  chart(i);
+}
+
+function chart(i) {
+  const c = el('chart'), g = c.getContext('2d'), W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  const n = S.t.length, start = Math.min(45, n - 1);  // first minutes: cost/t is meaningless
+  const vals = [...S.cpt.slice(start), ...(B ? B.cpt.slice(start) : [])].filter(v => v);
+  if (!vals.length) return;
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.1 || 1; lo -= pad; hi += pad;
+  const x = k => 30 + (W - 40) * k / (n - 1), y = v => H - 18 - (H - 30) * (v - lo) / (hi - lo);
+  g.strokeStyle = '#e3e6ea'; g.fillStyle = '#6b7280'; g.font = '18px system-ui';
+  [lo + pad, hi - pad].forEach(v => { g.beginPath(); g.moveTo(30, y(v)); g.lineTo(W - 10, y(v)); g.stroke(); g.fillText(v.toFixed(1), 0, y(v) + 5); });
+  const line = (arr, to, color, w) => {
+    g.strokeStyle = color; g.lineWidth = w; g.beginPath(); let on = false;
+    for (let k = start; k <= to; k++) { if (!arr[k]) continue; on ? g.lineTo(x(k), y(arr[k])) : g.moveTo(x(k), y(arr[k])); on = true; }
+    g.stroke();
+  };
+  if (B) line(B.cpt, Math.min(i, B.t.length - 1), '#9aa0a6', 3);
+  line(S.cpt, i, '#d62828', 4);
+  g.lineWidth = 1;
+}
+
+function loop(ts) {
+  if (playing) {
+    if (last !== null) t = Math.min(D.shift_s, t + (ts - last) / 1000 * Number(el('speed').value));
+    if (t >= D.shift_s) { playing = false; el('play').textContent = '▶ Start'; }
+    draw();
+  }
+  last = ts;
+  requestAnimationFrame(loop);
+}
+el('play').onclick = () => { playing = !playing; el('play').textContent = playing ? '⏸ Pauza' : '▶ Start'; if (t >= D.shift_s) t = 0; };
+el('reset').onclick = () => { t = 0; trucks.forEach(tr => tr.i = 0); draw(); };
+el('time').oninput = e => { t = Number(e.target.value); trucks.forEach(tr => tr.i = 0); draw(); };
+draw();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

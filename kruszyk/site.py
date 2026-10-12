@@ -14,7 +14,10 @@ Stored in the scenario YAML under `site`:
         - {id, name, kind: droga|rampa, grade_pct, speed_limit_kmh, coords: [[lat, lon], ...]}
 
 `grade_pct` of a road is the grade in the direction TOWARDS THE CRUSHER (+ = uphill when loaded),
-so the drawing direction does not matter.
+so the drawing direction does not matter. Roads form a network: an end of a road placed on another
+road (≤ SNAP_M) – also in the middle of it – becomes a junction. Elevations of all junctions are
+computed from the crusher (crusher.elev_m, default 0) along the grades, so a branch half-way down
+a ramp starts at the right level and every excavator knows its level.
 """
 from __future__ import annotations
 
@@ -83,35 +86,104 @@ def parse_coords(text: str) -> tuple[float, float] | None:
 
 
 # ---------------------------------------------------------------- road graph
+def _local(p, lat0: float) -> tuple[float, float]:
+    k = math.cos(math.radians(lat0))
+    return math.radians(p[1]) * R_EARTH * k, math.radians(p[0]) * R_EARTH
+
+
+def project_on_segment(p, a, b) -> tuple[tuple[float, float], float, float]:
+    """Closest point to p on segment a-b: (point, t in 0..1, distance m)."""
+    lat0 = (a[0] + b[0]) / 2
+    px, py = _local(p, lat0)
+    ax, ay = _local(a, lat0)
+    bx, by = _local(b, lat0)
+    dx, dy = bx - ax, by - ay
+    L2 = dx * dx + dy * dy
+    t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / L2))
+    q = (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]))
+    return q, t, haversine_m(p, q)
+
+
 class RoadGraph:
-    """Road polylines as a graph; vertices of different roads within SNAP_M are merged."""
+    """Road polylines as a graph.
+
+    * vertices of different roads within SNAP_M are merged into one node,
+    * a dead end lying on another road (also mid-segment) splits that road -> T-junction,
+    * extra points (excavators, crusher) are attached to the closest point of the network.
+    """
 
     def __init__(self, roads: list[dict]):
         self.nodes: list[tuple[float, float]] = []
-        self.adj: dict[int, list[tuple[int, float, int]]] = {}  # node -> [(node, length, road index)]
+        self.edges: dict[tuple[int, int], tuple[float, int]] = {}  # (u<v) -> (length, road index)
         self.roads = roads
         for ri, road in enumerate(roads):
             ids = [self._node(tuple(c)) for c in road["coords"]]
             for a, b in zip(ids, ids[1:]):
-                if a == b:
-                    continue
-                d = haversine_m(self.nodes[a], self.nodes[b])
-                self.adj.setdefault(a, []).append((b, d, ri))
-                self.adj.setdefault(b, []).append((a, d, ri))
+                if a != b:
+                    self._add_edge(a, b, ri)
+        self._join_dead_ends()
 
-    def _node(self, p: tuple[float, float]) -> int:
+    # -- construction
+    def _node(self, p) -> int:
         for i, q in enumerate(self.nodes):
             if haversine_m(p, q) < SNAP_M:
                 return i
-        self.nodes.append(p)
+        self.nodes.append(tuple(p))
         return len(self.nodes) - 1
 
-    def nearest(self, p: tuple[float, float]) -> tuple[int, float]:
-        best = min(range(len(self.nodes)), key=lambda i: haversine_m(p, self.nodes[i]))
-        return best, haversine_m(p, self.nodes[best])
+    def _add_edge(self, a: int, b: int, ri: int):
+        self.edges[(min(a, b), max(a, b))] = (haversine_m(self.nodes[a], self.nodes[b]), ri)
 
+    def degree(self, n: int) -> int:
+        return sum(1 for (a, b) in self.edges if n in (a, b))
+
+    def _split(self, edge: tuple[int, int], n: int):
+        _, ri = self.edges.pop(edge)
+        self._add_edge(edge[0], n, ri)
+        self._add_edge(n, edge[1], ri)
+
+    def _nearest_edge(self, p, exclude_node: int | None = None):
+        best = None
+        for (a, b) in self.edges:
+            if exclude_node in (a, b):
+                continue
+            q, t, d = project_on_segment(p, self.nodes[a], self.nodes[b])
+            if best is None or d < best[3]:
+                best = ((a, b), q, t, d)
+        return best
+
+    def _join_dead_ends(self):
+        for n in range(len(self.nodes)):
+            if self.degree(n) != 1:
+                continue
+            hit = self._nearest_edge(self.nodes[n], exclude_node=n)
+            if hit and hit[3] < SNAP_M and 0.0 < hit[2] < 1.0:
+                self._split(hit[0], n)  # T-junction: the dead end becomes a node of the other road
+
+    def attach(self, p) -> tuple[int, float]:
+        """Node for an outside point (excavator, crusher): closest network point, split if needed.
+        Returns (node, distance from p to the network)."""
+        if not self.edges:
+            raise ValueError("Na mapie nie ma dróg")
+        edge, q, t, d = self._nearest_edge(p)
+        if t <= 0.0 or t >= 1.0 or haversine_m(q, self.nodes[edge[0] if t <= 0.5 else edge[1]]) < 3:
+            return (edge[0] if t <= 0.5 else edge[1]), d
+        self.nodes.append(q)
+        n = len(self.nodes) - 1
+        self._split(edge, n)
+        return n, d
+
+    def adj(self) -> dict[int, list[tuple[int, float, int]]]:
+        out: dict[int, list] = {}
+        for (a, b), (w, ri) in self.edges.items():
+            out.setdefault(a, []).append((b, w, ri))
+            out.setdefault(b, []).append((a, w, ri))
+        return out
+
+    # -- analysis
     def shortest_path(self, src: int, dst: int) -> list[tuple[int, int, float, int]] | None:
         """Edges (from, to, length, road) of the shortest path, or None if not connected."""
+        adj = self.adj()
         dist, prev = {src: 0.0}, {}
         pq = [(0.0, src)]
         while pq:
@@ -120,7 +192,7 @@ class RoadGraph:
                 break
             if d > dist.get(u, math.inf):
                 continue
-            for v, w, ri in self.adj.get(u, []):
+            for v, w, ri in adj.get(u, []):
                 nd = d + w
                 if nd < dist.get(v, math.inf):
                     dist[v], prev[v] = nd, (u, w, ri)
@@ -134,48 +206,142 @@ class RoadGraph:
             v = u
         return list(reversed(edges))
 
+    def elevations(self, root: int, root_elev: float) -> tuple[dict[int, float], list[str]]:
+        """Node elevations from the crusher along the shortest-path tree. Going away from the
+        crusher on a road with grade g (towards the crusher) changes the height by -g*len/100.
+        Returns elevations and warnings about loops whose grades do not close (> 3 m)."""
+        adj = self.adj()
+        elev, dist = {root: root_elev}, {root: 0.0}
+        pq = [(0.0, root)]
+        while pq:
+            d, u = heapq.heappop(pq)
+            if d > dist.get(u, math.inf):
+                continue
+            for v, w, ri in adj.get(u, []):
+                if d + w < dist.get(v, math.inf):
+                    dist[v] = d + w
+                    elev[v] = elev[u] - float(self.roads[ri].get("grade_pct", 0.0)) * w / 100
+                    heapq.heappush(pq, (d + w, v))
+        warnings = []
+        for (a, b), (w, ri) in self.edges.items():
+            if a in elev and b in elev:
+                g = float(self.roads[ri].get("grade_pct", 0.0))
+                if g == 0 and abs(elev[a] - elev[b]) > 3:
+                    name = self.roads[ri].get("name") or self.roads[ri].get("id")
+                    warnings.append(f"Droga „{name}”: płaska, a jej końce wyszły na różnych wysokościach "
+                                    f"({elev[a]:.0f} / {elev[b]:.0f} m) – sprawdź nachylenia w pętli")
+        return elev, sorted(set(warnings))
 
-def build_route(site: dict, start: tuple[float, float], route_id: str) -> dict:
-    """Route from a loading point to the crusher: segments (grouped per road) + geometry."""
+
+def _grade(dz: float, length: float) -> float:
+    return round(100 * dz / length, 2) if length > 0 else 0.0
+
+
+def path_between(g: RoadGraph, start, end, elev: dict[int, float],
+                 start_name: str = "front", end_name: str = "plac_kruszarki") -> dict:
+    """Route start -> end over the network. Segments are grouped per road; each segment's grade is
+    computed from node elevations IN THE DIRECTION OF TRAVEL (+ = uphill)."""
+    s_node, s_off = g.attach(start)
+    e_node, e_off = g.attach(end)
+    path = g.shortest_path(s_node, e_node)
+    if path is None:
+        return None
+    segments, geometry = [], [list(start)]
+    if s_off > 5:
+        segments.append({"name": start_name, "length_m": round(s_off, 1), "grade_pct": 0.0, "speed_limit_kmh": 15.0})
+    geometry.append(list(g.nodes[s_node]))
+    run = None
+    for u, v, w, ri in path:
+        road = g.roads[ri]
+        name = road.get("name") or road.get("id") or f"droga {ri + 1}"
+        dz = elev.get(v, 0.0) - elev.get(u, 0.0)
+        if run and run["_road"] == ri:
+            run["length_m"] += w
+            run["_dz"] += dz
+        else:
+            run = {"name": name, "length_m": w, "_dz": dz, "speed_limit_kmh": float(road.get("speed_limit_kmh", 30.0)),
+                   "_road": ri, "kind": road.get("kind", "droga")}
+            segments.append(run)
+        geometry.append(list(g.nodes[v]))
+    if e_off > 5:
+        segments.append({"name": end_name, "length_m": round(e_off, 1), "grade_pct": 0.0, "speed_limit_kmh": 15.0})
+    geometry.append(list(end))
+    for sgm in segments:
+        if "_road" in sgm:
+            sgm["grade_pct"] = _grade(sgm.pop("_dz"), sgm["length_m"])
+            sgm["length_m"] = round(sgm["length_m"], 1)
+            sgm.pop("_road")
+            sgm.pop("kind")
+    return {"segments": segments, "path": geometry,
+            "elev_start_m": round(elev.get(s_node, 0.0), 1), "elev_end_m": round(elev.get(e_node, 0.0), 1)}
+
+
+def analyze_site(site: dict) -> dict:
+    """Network built from the drawing: graph, elevations, levels of excavators/piles, warnings."""
+    roads = site.get("roads", [])
+    out = {"graph": None, "elev": {}, "warnings": [], "levels": {}, "junctions": [], "dead_ends": []}
+    if not roads:
+        out["warnings"].append("Na mapie nie ma dróg")
+        return out
+    g = RoadGraph(roads)
+    out["graph"] = g
+    if not site.get("crusher"):
+        out["warnings"].append("Na mapie nie ma kruszarki")
+        return out
+    c = site["crusher"]
+    c_node, _ = g.attach((c["lat"], c["lon"]))
+    attached = {c_node}
+    for e in site.get("excavators", []):
+        attached.add(g.attach((e["lat"], e["lon"]))[0])
+    elev, warns = g.elevations(c_node, float(c.get("elev_m", 0.0)))
+    out["elev"], out["warnings"] = elev, warns
+    adj = g.adj()
+    for n in range(len(g.nodes)):
+        deg = len(adj.get(n, []))
+        if deg >= 3:
+            out["junctions"].append(n)
+        elif deg == 1 and n not in attached:
+            out["dead_ends"].append(n)
+    unreachable = {g.roads[ri].get("name") or g.roads[ri].get("id")
+                   for (a, b), (w, ri) in g.edges.items() if a not in elev}
+    for name in sorted(unreachable):
+        out["warnings"].append(f"Droga „{name}” nie ma połączenia z kruszarką")
+    for e in site.get("excavators", []):
+        n, d = g.attach((e["lat"], e["lon"]))
+        out["levels"][e["id"]] = {"elev_m": round(elev[n], 1) if n in elev else None, "dist_to_road_m": round(d)}
+        if n not in elev:
+            out["warnings"].append(f"Koparka {e['id']}: brak dojazdu do kruszarki")
+        elif d > 150:
+            out["warnings"].append(f"Koparka {e['id']} stoi {d:.0f} m od najbliższej drogi")
+    return out
+
+
+def build_route(site: dict, start: tuple[float, float], route_id: str, end=None, end_name="plac_kruszarki") -> dict:
+    """Route from a loading point to the crusher (or to `end`)."""
     roads = site.get("roads", [])
     if not roads:
         raise ValueError("Na mapie nie ma dróg")
     if not site.get("crusher"):
         raise ValueError("Na mapie nie ma kruszarki")
-    crusher = (site["crusher"]["lat"], site["crusher"]["lon"])
+    c = site["crusher"]
     g = RoadGraph(roads)
-    s_node, s_off = g.nearest(start)
-    c_node, c_off = g.nearest(crusher)
-    path = g.shortest_path(s_node, c_node)
-    if path is None:
-        raise ValueError(f"{route_id}: brak połączenia drogowego do kruszarki – połącz końce dróg (≤ {SNAP_M:.0f} m)")
-
-    segments, geometry = [], [list(start)]
-    if s_off > 5:
-        segments.append({"name": "front", "length_m": round(s_off, 1), "grade_pct": 0.0, "speed_limit_kmh": 15.0})
-    geometry.append(list(g.nodes[s_node]))
-    for u, v, w, ri in path:
-        road = roads[ri]
-        name = road.get("name") or road.get("id") or f"droga {ri + 1}"
-        if segments and segments[-1].get("_road") == ri:
-            segments[-1]["length_m"] = round(segments[-1]["length_m"] + w, 1)
-        else:
-            segments.append({"name": name, "length_m": round(w, 1),
-                             "grade_pct": float(road.get("grade_pct", 0.0)),
-                             "speed_limit_kmh": float(road.get("speed_limit_kmh", 30.0)), "_road": ri})
-        geometry.append(list(g.nodes[v]))
-    if c_off > 5:
-        segments.append({"name": "plac_kruszarki", "length_m": round(c_off, 1), "grade_pct": 0.0,
-                         "speed_limit_kmh": 15.0})
-    geometry.append(list(crusher))
-    for s in segments:
-        s.pop("_road", None)
-    return {"segments": segments, "path": geometry}
+    c_node, _ = g.attach((c["lat"], c["lon"]))
+    target = tuple(end) if end is not None else (c["lat"], c["lon"])
+    # attach the end points first: splitting a road creates nodes that need an elevation too
+    g.attach(tuple(start))
+    g.attach(target)
+    elev, _ = g.elevations(c_node, float(c.get("elev_m", 0.0)))
+    r = path_between(g, start, target, elev, end_name=end_name)
+    if r is None:
+        raise ValueError(f"{route_id}: brak połączenia drogowego – połącz drogi (koniec drogi ≤ {SNAP_M:.0f} m "
+                         "od innej drogi tworzy węzeł)")
+    return r
 
 
 def site_to_scenario(site: dict, raw: dict) -> dict:
     """Replace blasts/excavators/routes of a raw scenario with what is drawn on the map.
-    Trucks, crusher parameters, costs etc. stay as they are."""
+    Trucks, crusher parameters, costs etc. stay as they are. Also builds links between every pair
+    of excavators (for trucks that load at two piles in one trip)."""
     piles = site.get("piles", [])
     excavators = site.get("excavators", [])
     if not piles:
@@ -191,7 +357,7 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
             b["loose_density_t_m3"] = float(p["loose_density_t_m3"])
         new["blasts"].append(b)
     pile_ids = {p["id"] for p in piles}
-    new["excavators"], new["routes"] = [], {}
+    new["excavators"], new["routes"], new["links"] = [], {}, {}
     for e in excavators:
         pos = (e["lat"], e["lon"])
         pile = e.get("pile")
@@ -202,5 +368,20 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
         new["excavators"].append({"id": e["id"], "bucket_m3": float(e.get("bucket_m3", 5.0)),
                                   "swing_cycle_s": float(e.get("swing_cycle_s", 30.0)),
                                   "blast": pile, "route": rid})
+    for a in excavators:
+        for b in excavators:
+            if a["id"] != b["id"]:
+                try:
+                    new["links"][f"{a['id']}>{b['id']}"] = build_route(
+                        site, (a["lat"], a["lon"]), f"{a['id']}>{b['id']}", end=(b["lat"], b["lon"]), end_name="dojazd")
+                except ValueError:
+                    pass  # not connected – such a pair can't be used for two-pile trips
+    # keep fleet assignments only if they still point to existing excavators
+    ex_ids = {e["id"] for e in excavators}
+    for f in new.get("trucks", []):
+        if f.get("excavators"):
+            f["excavators"] = [x for x in f["excavators"] if x in ex_ids]
+        if f.get("blend"):
+            f["blend"] = {k: v for k, v in f["blend"].items() if k in ex_ids}
     new["site"] = site
     return new

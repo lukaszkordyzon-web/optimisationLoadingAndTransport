@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 import yaml
 
 from kruszyk.analytics import match_factor_report
@@ -15,6 +16,10 @@ from kruszyk.config import dump_scenario, scenario_from_dict
 from kruszyk.ml import generate_dataset, train_travel_model
 from kruszyk.optimize import replicate, sweep_fragmentation, sweep_trucks
 from kruszyk.sim import simulate
+from kruszyk.anim import animation_html
+from kruszyk.rl import POLICIES
+from kruszyk.rl import explain as rl_explain
+from kruszyk.rl import train as rl_train
 from kruszyk.views import STATE_LABELS, driver_instruction, operator_view, route_profile, snapshot
 
 from app_map import render_live_map, render_map_tab
@@ -129,10 +134,13 @@ def editor() -> dict:
     c1, c2, c3, c4 = st.columns(4)
     new["name"] = c1.text_input("Nazwa scenariusza", raw.get("name", ""), key=k("name"))
     new["shift_hours"] = c2.number_input("Długość zmiany [h]", 1.0, 24.0, float(raw["shift_hours"]), 0.5, key=k("shift"))
-    new["dispatch"] = c3.radio("Przydział wozideł", ["dynamic", "fixed"],
-                               index=0 if raw.get("dispatch", "dynamic") == "dynamic" else 1, key=k("disp"),
-                               format_func=lambda x: {"dynamic": "automatyczny (system)", "fixed": "stały do koparki"}[x],
-                               horizontal=True)
+    modes = ["natural", "fixed", "dynamic"] + (["rl"] if raw.get("rl_weights") else [])
+    cur = raw.get("dispatch", "dynamic")
+    new["dispatch"] = c3.selectbox("Przydział wozideł", modes, index=modes.index(cur) if cur in modes else 2,
+                                   key=k("disp"), format_func=POLICIES.get,
+                                   help="naturalny = obecna praktyka (kierowca wraca do „swojej” koparki, czasem jedzie "
+                                        "gdzie indziej, bez informacji); heurystyka = system wysyła tam, gdzie najszybciej "
+                                        "załadują; RL = polityka wyuczona w zakładce „Uczenie RL”")
     new["loose_density_t_m3"] = c4.number_input("Gęstość urobku spulchn. [t/m³]", 1.0, 3.0,
                                                 float(raw.get("loose_density_t_m3", 1.75)), 0.05, key=k("dens"))
     new["seed"] = int(seed)
@@ -157,15 +165,33 @@ def editor() -> dict:
                        "fill_factor": "Wsp. napełnienia", "spot_time_s": "Podstawienie [s]"}))
 
     st.subheader("Wozidła")
+    st.caption("**Koparki** – do których koparek grupa może jeździć, np. `K-1, K-2` (puste = wszystkie). "
+               "**Dwa usypy w kursie** – np. `K-1:0.5, K-2:0.5` = pół ładunku z K-1, potem przejazd i pół z K-2 "
+               "(wymaga tras z mapy).")
     tr_df = pd.DataFrame(raw["trucks"])
+    tr_df["excavators"] = [", ".join(x) if isinstance(x, list) else "" for x in tr_df.get("excavators", [None] * len(tr_df))]
+    tr_df["blend"] = [", ".join(f"{a}:{b:g}" for a, b in x.items()) if isinstance(x, dict) else ""
+                      for x in tr_df.get("blend", [None] * len(tr_df))]
     new["trucks"] = records(st.data_editor(tr_df, num_rows="dynamic", key=k("trucks"), use_container_width=True,
         column_config={"model": "Model", "count": st.column_config.NumberColumn("Liczba", min_value=0, step=1),
+                       "excavators": st.column_config.TextColumn("Koparki (dozwolone)"),
+                       "blend": st.column_config.TextColumn("Dwa usypy w kursie"),
                        "payload_t": "Ładowność [t]", "empty_mass_t": "Masa własna [t]", "power_kw": "Moc [kW]",
                        "max_speed_kmh": "V max [km/h]", "drive_efficiency": "Sprawność napędu",
                        "fuel_lph_loaded": "Paliwo pełny [l/h]", "fuel_lph_empty": "Paliwo pusty [l/h]",
                        "fuel_lph_idle": "Paliwo postój [l/h]"}))
     for t in new["trucks"]:
         t["count"] = int(t.get("count", 0))
+        t["excavators"] = [x.strip() for x in str(t.get("excavators", "")).split(",") if x.strip()]
+        blend = {}
+        for part in str(t.get("blend", "")).split(","):
+            if ":" in part:
+                a, b = part.split(":", 1)
+                try:
+                    blend[a.strip()] = float(b.replace("%", "").strip())
+                except ValueError:
+                    pass
+        t["blend"] = blend
 
     st.subheader("Trasy (od frontu do kosza kruszarki; nachylenie + = pod górę z ładunkiem)")
     seg_rows = [{"route": rid, **s} for rid, r in raw["routes"].items() for s in r["segments"]]
@@ -231,10 +257,10 @@ def editor() -> dict:
     return new
 
 
-tabs = st.tabs(["🗺️ Mapa kopalni", "⚙️ Scenariusz", "📊 Wyniki zmiany", "📍 Podgląd na żywo", "⚖️ Porównanie wariantów",
-                "💥 Odstrzał ↔ kruszarka", "🤖 Model ETA"])
+tabs = st.tabs(["🗺️ Mapa kopalni", "🎬 Animacja", "⚙️ Scenariusz", "📊 Wyniki zmiany", "📍 Podgląd na żywo",
+                "⚖️ Porównanie wariantów", "🧠 Uczenie RL", "💥 Odstrzał ↔ kruszarka", "🤖 Model ETA"])
 
-with tabs[1]:
+with tabs[2]:
     edited = editor()
     try:
         sc = scenario_from_dict(copy.deepcopy(edited))
@@ -282,7 +308,7 @@ def gantt(res) -> go.Figure:
     return fig
 
 
-with tabs[2]:
+with tabs[3]:
     res = run_sim(yaml_text, int(seed))
     kp = res.kpi
     st.caption(f"Jedna zmiana {sc.shift_hours:g} h · {'deszcz' if kp['rain'] else 'sucho'} · ziarno {seed} "
@@ -362,7 +388,7 @@ def profile_figure(snap: pd.DataFrame) -> go.Figure:
     return fig
 
 
-with tabs[3]:
+with tabs[4]:
     shift_min = int(sc.shift_hours * 60)
     minute = st.slider("Moment zmiany [min od startu]", 0, shift_min - 1, min(180, shift_min - 1), 1)
     t = minute * 60.0
@@ -430,7 +456,7 @@ def variant_yaml(base_raw: dict, **changes) -> str:
     return dump_scenario(scenario_from_dict(r))
 
 
-with tabs[4]:
+with tabs[5]:
     base_raw = st.session_state.raw_edited
     st.subheader("Ile wozideł? – przegląd liczby wozideł dla wariantów organizacji")
     c = st.columns(4)
@@ -440,6 +466,7 @@ with tabs[4]:
     target = c[3].number_input("Cel wydajności [t/h] (0 = brak)", 0, 20000, 0)
     variants = {
         "obecny scenariusz": {},
+        "przydział naturalny": {"dispatch": "natural"},
         "przydział stały do koparki": {"dispatch": "fixed"},
         "przydział automatyczny": {"dispatch": "dynamic"},
         "+ hałda buforowa": {"stockpile": True},
@@ -510,7 +537,7 @@ with tabs[4]:
 
 
 # ---------------------------------------------------------------- blast vs crusher
-with tabs[5]:
+with tabs[7]:
     st.subheader("Mine-to-mill: ile warto dopłacić do odstrzału?")
     st.caption("Lepsze rozdrobnienie (0) = droższe wiercenie i strzelanie, ale szybszy załadunek, wyższa wydajność "
                "i mniej energii na kruszarce. Wszystkie odstrzały w scenariuszu dostają tę samą wartość.")
@@ -540,7 +567,7 @@ with tabs[5]:
 
 
 # ---------------------------------------------------------------- ML
-with tabs[6]:
+with tabs[8]:
     st.subheader("Model czasu przejazdu i ETA pod koparkę")
     st.caption("Uczy się na danych z wielu symulowanych zmian – tak samo będzie uczył się na danych z telefonów. "
                "Porównanie z modelem czysto fizycznym (bez stylu kierowcy, deszczu, pory zmiany).")
@@ -571,3 +598,139 @@ with tabs[6]:
         rain = c[4].toggle("Deszcz")
         eta = model.eta_to_excavator_s(sc, tr, ex_id, seg_i, prog, rain, 2.0)
         st.info(f"🚚 {tr} będzie pod {ex_id} za **{int(eta // 60)} min {int(eta % 60)} s**")
+
+
+# ---------------------------------------------------------------- animation on the map
+@st.cache_data(show_spinner=False)
+def run_policy(yaml_text: str, seed: int, policy: str):
+    sc_ = scenario_from_dict(yaml.safe_load(yaml_text))
+    sc_.dispatch = policy
+    return simulate(sc_, seed=seed)
+
+
+@st.cache_data(show_spinner=False)
+def animation_page(yaml_text: str, seed: int, policy: str) -> str:
+    res_p = run_policy(yaml_text, seed, policy)
+    base = run_policy(yaml_text, seed, "natural")
+    return animation_html(res_p, base, f"Przydział: {POLICIES[policy]}", "naturalny")
+
+
+with tabs[1]:
+    if not any(r.path for r in sc.routes.values()):
+        st.info("Animacja jeździ po drogach narysowanych na mapie. Narysuj kopalnię w zakładce **🗺️ Mapa kopalni** "
+                "i kliknij **Zbuduj trasy**, albo wczytaj w panelu bocznym scenariusz **„mapa demo”**.")
+    else:
+        options = ["natural", "fixed", "dynamic"] + (["rl"] if sc.rl_weights else [])
+        c1, c2 = st.columns([3, 2])
+        policy = c1.radio("Przydział wozideł w animacji", options, horizontal=True, format_func=POLICIES.get,
+                          index=options.index(sc.dispatch) if sc.dispatch in options else 0, key="anim_policy")
+        c2.caption("Cała zmiana symulowana w ułamku sekundy, odtwarzana przyspieszona. Koszty liczone na bieżąco; "
+                   "porównanie z przydziałem naturalnym **tego samego dnia** (ta sama pogoda, awarie, kierowcy)."
+                   + ("" if sc.rl_weights else " Polityka RL pojawi się po treningu w zakładce 🧠 Uczenie RL."))
+        components.html(animation_page(yaml_text, int(seed), policy), height=780, scrolling=False)
+        a, b = run_policy(yaml_text, int(seed), policy).kpi, run_policy(yaml_text, int(seed), "natural").kpi
+        rows = [("Wywiezione [t]", "hauled_t", 0), ("Wydajność [t/h]", "throughput_tph", 0), ("Koszt [zł/t]", "cost_per_t", 2),
+                ("Paliwo [l/t]", "fuel_l_per_t", 3), ("Kolejki [min/cykl]", "avg_queue_per_cycle_min", 1),
+                ("Kolejka pod kruszarką [h]", "truck_queue_crusher_h", 1), ("Kolejka pod koparkami [h]", "truck_queue_excavator_h", 1)]
+        st.dataframe(pd.DataFrame([{"wskaźnik (cała zmiana)": n, POLICIES[policy]: round(a[key] or 0, d),
+                                    "naturalny": round(b[key] or 0, d)} for n, key, d in rows]),
+                     hide_index=True, use_container_width=True)
+
+
+# ---------------------------------------------------------------- reinforcement learning
+with tabs[6]:
+    st.subheader("Uczenie ze wzmocnieniem – przydział wozideł do koparek")
+    st.markdown(
+        "Agent decyduje po każdym wyładunku, **do której koparki** jedzie wozidło. Widzi to, co system wie w tej chwili: "
+        "przewidywane czekanie pod każdą koparką, dojazd, odwóz, czas załadunku, pozostały urobek, ile wozideł już tam "
+        "jedzie i czy to „własna” koparka kierowcy. Uczy się na tysiącach symulowanych zmian z losowością "
+        "(pogoda, kierowcy, awarie, czasy załadunku) – nagrodą jest **niższy koszt na tonę**. "
+        "Metoda: przeszukiwanie polityk metodą entropii krzyżowej (CEM).")
+    allowed_multi = any(len(f.excavators or [e.id for e in sc.excavators]) > 1 and not f.blend for f in sc.trucks)
+    if len(sc.excavators) < 2 or not allowed_multi:
+        st.warning("Agent ma czego się uczyć dopiero wtedy, gdy wozidła mogą wybierać spośród co najmniej dwóch koparek.")
+    c = st.columns(5)
+    iters = c[0].number_input("Iteracje", 2, 60, 10)
+    pop = c[1].number_input("Polityk na iterację", 4, 40, 12)
+    eps = c[2].number_input("Zmian na politykę", 1, 10, 2)
+    ep_h = c[3].number_input("Długość zmiany w nauce [h]", 1.0, 12.0, min(4.0, float(sc.shift_hours)), 1.0)
+    ev = c[4].number_input("Zmian w teście końcowym", 1, 20, 4)
+    n_sims = int(iters * (pop + 2) * eps + eps * 2 + 4 * ev)
+    st.caption(f"≈ {n_sims} symulowanych zmian, zwykle 15–60 s.")
+    if st.button("🧠 Ucz agenta", type="primary"):
+        bar, live = st.progress(0.0, "start"), st.empty()
+        rows: list[dict] = []
+
+        def cb(it, n, row):
+            rows.append(row)
+            bar.progress(it / n, f"iteracja {it}/{n}: polityka {row['koszt_polityka']:.2f} zł/t, "
+                                  f"naturalny {row['koszt_naturalny']:.2f} zł/t")
+            live.line_chart(pd.DataFrame(rows).set_index("iteracja")[["koszt_polityka", "koszt_naturalny"]])
+
+        result = rl_train(sc, iterations=int(iters), population=int(pop), episodes=int(eps), shift_hours=float(ep_h),
+                          eval_episodes=int(ev), callback=cb)
+        live.empty()
+        bar.empty()
+        st.session_state.rl_result = {"result": result, "scenario": sc.name}
+
+    rr = st.session_state.get("rl_result")
+    if rr:
+        r = rr["result"]
+        h = r.history
+        st.markdown(f"#### Przebieg uczenia · {rr['scenario']}")
+        c1, c2 = st.columns(2)
+        fig = go.Figure()
+        fig.add_scatter(x=h["iteracja"], y=h["koszt_naturalny"], name="naturalny (te same zmiany)", line=dict(color="#9aa0a6", dash="dot"))
+        fig.add_scatter(x=h["iteracja"], y=h["koszt_populacja_sredni"], name="próbowane polityki (średnio)", line=dict(color="#f4a261"))
+        fig.add_scatter(x=h["iteracja"], y=h["koszt_polityka"], name="polityka agenta", line=dict(color="#d62828", width=4))
+        fig.update_layout(title="Koszt na tonę [zł/t]", height=340, xaxis_title="iteracja (0 = agent nienauczony)",
+                          legend=dict(orientation="h", y=-0.3), margin=dict(t=40))
+        c1.plotly_chart(fig, use_container_width=True)
+        hh = h[h["iteracja"] > 0]
+        fig = go.Figure(go.Bar(x=hh["iteracja"], y=hh["oszczednosc_pct"],
+                               marker_color=["#2a9d8f" if v > 0 else "#d62828" for v in hh["oszczednosc_pct"]]))
+        fig.update_layout(title="Oszczędność vs przydział naturalny na tych samych zmianach [%]", height=340,
+                          xaxis_title="iteracja", yaxis_title="%", margin=dict(t=40))
+        c2.plotly_chart(fig, use_container_width=True)
+        c = st.columns(4)
+        for col, (key, title) in zip(c, [("throughput_tph", "Wydajność [t/h]"), ("fuel_l_per_t", "Paliwo [l/t]"),
+                                         ("avg_queue_per_cycle_min", "Kolejki [min/cykl]"),
+                                         ("excavator_utilization", "Wykorzystanie koparek")]):
+            fig = go.Figure()
+            fig.add_scatter(x=h["iteracja"], y=h[f"naturalny_{key}"], name="naturalny", line=dict(color="#9aa0a6", dash="dot"))
+            fig.add_scatter(x=h["iteracja"], y=h[key], name="agent", line=dict(color="#d62828", width=3))
+            fig.update_layout(title=title, height=260, showlegend=False, margin=dict(t=40, l=10, r=10))
+            col.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### Test końcowy na nowych, pełnych zmianach")
+        comp = r.comparison
+        nat = comp.iloc[0]
+        show = pd.DataFrame({
+            "polityka": comp["polityka"],
+            "koszt [zł/t]": comp["cost_per_t"].round(2),
+            "vs naturalny": (100 * (comp["cost_per_t"] / nat["cost_per_t"] - 1)).round(1).astype(str) + " %",
+            "wydajność [t/h]": comp["throughput_tph"].round(0),
+            "paliwo [l/t]": comp["fuel_l_per_t"].round(3),
+            "kolejki [min/cykl]": comp["avg_queue_per_cycle_min"].round(1),
+            "wykorzystanie koparek": comp["excavator_utilization"].round(2),
+        })
+        st.dataframe(show, hide_index=True, use_container_width=True)
+        best = comp.iloc[3]
+        hours = sc.shift_hours
+        saving = (nat["cost_per_t"] - best["cost_per_t"]) * best["hauled_t"]
+        st.success(f"Polityka RL: {best['cost_per_t']:.2f} zł/t vs {nat['cost_per_t']:.2f} zł/t przy przydziale naturalnym, "
+                   f"wydajność {best['throughput_tph']:.0f} vs {nat['throughput_tph']:.0f} t/h. "
+                   f"Przy tej samej ilości urobku to ok. **{saving:,.0f} zł na zmianę** ({hours:g} h).".replace(",", " "))
+        c1, c2 = st.columns([3, 2])
+        c1.markdown("**Czego nauczył się agent** (dodatnia waga = unika koparek z dużą wartością cechy)")
+        c1.dataframe(rl_explain(r.weights), hide_index=True, use_container_width=True)
+        with c2:
+            st.markdown("**Wdrożenie polityki**")
+            st.caption("Zapisuje wyuczone wagi w scenariuszu i ustawia przydział „polityka RL”. Potem zobaczysz ją "
+                       "w 🎬 Animacji, wynikach i porównaniach.")
+            if st.button("✅ Zastosuj politykę RL w scenariuszu"):
+                new_raw = copy.deepcopy(st.session_state.raw_edited)
+                new_raw["rl_weights"] = r.weights
+                new_raw["dispatch"] = "rl"
+                set_raw(new_raw)
+                st.rerun()

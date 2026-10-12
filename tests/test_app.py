@@ -30,3 +30,13 @@ def test_switching_draw_mode_keeps_map():
         at.radio(key="draw_mode").set_value(mode).run()
         assert not at.exception, (mode, at.exception)
         assert at.session_state["map_key"] == key_before  # map not rebuilt
+
+
+def test_demo_map_tabs_render():
+    at = AppTest.from_file(APP, default_timeout=180).run()
+    name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
+    at.sidebar.selectbox[0].select(name).run()
+    at.sidebar.button[0].click().run()
+    assert not at.exception, at.exception
+    at.radio(key="anim_policy").set_value("dynamic").run()
+    assert not at.exception, at.exception

@@ -1,0 +1,545 @@
+# Wygenerowane przez tools/make_demo_map.py – geometria przykładowa (nie rzeczywisty teren)
+name: Kopalnia Kruszyk – mapa demo (sieć dróg, 3 usypy, mieszanka)
+shift_hours: 8
+seed: 42
+dispatch: natural
+loose_density_t_m3: 1.75
+rolling_resistance_pct: 3.0
+blasts:
+- id: U-01
+  tonnage_t: 9000.0
+  fragmentation: 0.3
+  material: wapień
+  loose_density_t_m3: 1.75
+- id: U-02
+  tonnage_t: 9000.0
+  fragmentation: 0.5
+  material: dolomit
+  loose_density_t_m3: 1.85
+- id: U-03
+  tonnage_t: 12000.0
+  fragmentation: 0.35
+  material: wapień
+  loose_density_t_m3: 1.75
+excavators:
+- id: K-1
+  bucket_m3: 6.0
+  swing_cycle_s: 30.0
+  blast: U-01
+  route: T-K-1
+- id: K-2
+  bucket_m3: 4.5
+  swing_cycle_s: 28.0
+  blast: U-02
+  route: T-K-2
+- id: K-3
+  bucket_m3: 7.5
+  swing_cycle_s: 34.0
+  blast: U-03
+  route: T-K-3
+trucks:
+- model: wozidło 55 t
+  count: 7
+  payload_t: 55
+  empty_mass_t: 40
+  power_kw: 520
+  max_speed_kmh: 45
+  fuel_lph_loaded: 60
+  fuel_lph_empty: 32
+  fuel_lph_idle: 10
+- model: wozidło 40 t – mieszanka K-1 + K-2
+  count: 2
+  payload_t: 40
+  empty_mass_t: 30
+  power_kw: 400
+  max_speed_kmh: 48
+  fuel_lph_loaded: 45
+  fuel_lph_empty: 24
+  fuel_lph_idle: 8
+  blend:
+    K-1: 0.5
+    K-2: 0.5
+routes:
+  T-K-1:
+    segments:
+    - name: front
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: zjazd na poziom pośredni
+      length_m: 494.0
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99665
+      - 20.0085
+    - - 49.9968
+      - 20.0085
+    - - 49.9972
+      - 20.011
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -37.6
+    elev_end_m: 0.0
+  T-K-2:
+    segments:
+    - name: front
+      length_m: 27.4
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 331.2
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 636.3
+      speed_limit_kmh: 25.0
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99475
+      - 20.0225
+    - - 49.99499274827544
+      - 20.022565265520978
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3:
+    segments:
+    - name: front
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 636.3
+      speed_limit_kmh: 25.0
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99435
+      - 20.027
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+crusher:
+  capacity_tph: 2600
+  hopper_t: 250
+  dump_time_s: 50
+  fragmentation_penalty: 0.4
+  kwh_per_t: 1.1
+  kwh_fragmentation_extra: 0.6
+variability:
+  driver_sd: 0.07
+  trip_sd: 0.08
+  load_sd: 0.1
+  rain_probability: 0.2
+  rain_slowdown: 0.12
+  truck_mtbf_h: 40
+  truck_mttr_min: 35
+stockpile:
+  enabled: false
+  divert_wait_s: 180
+  dump_time_s: 40
+  loader_tph: 450
+  feed_below_t: 60
+  initial_t: 0
+  loader_per_h: 350
+  rehandle_cost_per_t: 1.5
+pacing:
+  enabled: false
+  max_slowdown: 0.25
+costs:
+  truck_per_h: 300
+  excavator_per_h: 900
+  crusher_per_h: 1200
+  fuel_per_l: 6.5
+  energy_per_kwh: 0.9
+  drill_blast_per_t: 3.0
+  drill_blast_fine_extra_per_t: 2.5
+links:
+  K-1>K-2:
+    segments:
+    - name: front
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: zjazd na poziom pośredni
+      length_m: 494.0
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      grade_pct: -9.0
+    - name: poziom dolny
+      length_m: 331.2
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: dojazd
+      length_m: 27.4
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 49.99665
+      - 20.0085
+    - - 49.9968
+      - 20.0085
+    - - 49.9972
+      - 20.011
+    - - 49.997749999999996
+      - 20.01525
+    - - 49.9955
+      - 20.018
+    - - 49.995
+      - 20.0225
+    - - 49.99499274827544
+      - 20.022565265520978
+    - - 49.99475
+      - 20.0225
+    elev_start_m: -37.6
+    elev_end_m: -66.2
+  K-1>K-3:
+    segments:
+    - name: front
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: zjazd na poziom pośredni
+      length_m: 494.0
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      grade_pct: -9.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: dojazd
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 49.99665
+      - 20.0085
+    - - 49.9968
+      - 20.0085
+    - - 49.9972
+      - 20.011
+    - - 49.997749999999996
+      - 20.01525
+    - - 49.9955
+      - 20.018
+    - - 49.995
+      - 20.0225
+    - - 49.9945
+      - 20.027
+    - - 49.99435
+      - 20.027
+    elev_start_m: -37.6
+    elev_end_m: -66.2
+  K-2>K-1:
+    segments:
+    - name: front
+      length_m: 27.4
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 331.2
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      grade_pct: 9.0
+    - name: zjazd na poziom pośredni
+      length_m: 494.0
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: dojazd
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 49.99475
+      - 20.0225
+    - - 49.99499274827544
+      - 20.022565265520978
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 49.9972
+      - 20.011
+    - - 49.9968
+      - 20.0085
+    - - 49.99665
+      - 20.0085
+    elev_start_m: -66.2
+    elev_end_m: -37.6
+  K-2>K-3:
+    segments:
+    - name: front
+      length_m: 27.4
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 321.7
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: dojazd
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 49.99475
+      - 20.0225
+    - - 49.99499274827544
+      - 20.022565265520978
+    - - 49.9945
+      - 20.027
+    - - 49.99435
+      - 20.027
+    elev_start_m: -66.2
+    elev_end_m: -66.2
+  K-3>K-1:
+    segments:
+    - name: front
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      grade_pct: 9.0
+    - name: zjazd na poziom pośredni
+      length_m: 494.0
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: dojazd
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 49.99435
+      - 20.027
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 49.9972
+      - 20.011
+    - - 49.9968
+      - 20.0085
+    - - 49.99665
+      - 20.0085
+    elev_start_m: -66.2
+    elev_end_m: -37.6
+  K-3>K-2:
+    segments:
+    - name: front
+      length_m: 16.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 321.7
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: dojazd
+      length_m: 27.4
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 49.99435
+      - 20.027
+    - - 49.9945
+      - 20.027
+    - - 49.99499274827544
+      - 20.022565265520978
+    - - 49.99475
+      - 20.0225
+    elev_start_m: -66.2
+    elev_end_m: -66.2
+site:
+  center:
+  - 49.9975
+  - 20.01
+  zoom: 15
+  crusher:
+    lat: 50.0
+    lon: 20.0
+    elev_m: 0.0
+  roads:
+  - id: R1
+    name: droga główna
+    kind: droga
+    grade_pct: 1.0
+    speed_limit_kmh: 40
+    coords:
+    - - 50.0
+      - 20.0
+    - - 50.0003
+      - 20.006
+    - &id001
+      - 50.0
+      - 20.0125
+  - id: R2
+    name: rampa główna
+    kind: rampa
+    grade_pct: 9.0
+    speed_limit_kmh: 25
+    coords:
+    - *id001
+    - &id002
+      - 49.9955
+      - 20.018
+  - id: R3
+    name: zjazd na poziom pośredni
+    kind: droga
+    grade_pct: 0.0
+    speed_limit_kmh: 30
+    coords:
+    - - 49.997749999999996
+      - 20.01525
+    - - 49.9972
+      - 20.011
+    - - 49.9968
+      - 20.0085
+  - id: R4
+    name: poziom dolny
+    kind: droga
+    grade_pct: 0.0
+    speed_limit_kmh: 30
+    coords:
+    - *id002
+    - - 49.995
+      - 20.0225
+    - - 49.9945
+      - 20.027
+  piles:
+  - id: U-01
+    material: wapień
+    tonnage_t: 9000
+    fragmentation: 0.3
+    loose_density_t_m3: 1.75
+    polygon:
+    - - 49.9962
+      - 20.0078
+    - - 49.9962
+      - 20.0092
+    - - 49.9957
+      - 20.0092
+    - - 49.9957
+      - 20.0078
+  - id: U-02
+    material: dolomit
+    tonnage_t: 9000
+    fragmentation: 0.5
+    loose_density_t_m3: 1.85
+    polygon:
+    - - 49.9944
+      - 20.0218
+    - - 49.9944
+      - 20.0232
+    - - 49.9939
+      - 20.0232
+    - - 49.9939
+      - 20.0218
+  - id: U-03
+    material: wapień
+    tonnage_t: 12000
+    fragmentation: 0.35
+    loose_density_t_m3: 1.75
+    polygon:
+    - - 49.994
+      - 20.0265
+    - - 49.994
+      - 20.028
+    - - 49.9935
+      - 20.028
+    - - 49.9935
+      - 20.0265
+  excavators:
+  - id: K-1
+    lat: 49.99665
+    lon: 20.0085
+    pile: U-01
+    bucket_m3: 6.0
+    swing_cycle_s: 30
+  - id: K-2
+    lat: 49.99475
+    lon: 20.0225
+    pile: U-02
+    bucket_m3: 4.5
+    swing_cycle_s: 28
+  - id: K-3
+    lat: 49.99435
+    lon: 20.027
+    pile: U-03
+    bucket_m3: 7.5
+    swing_cycle_s: 34

@@ -53,14 +53,33 @@ aplikacji (Sharing) można ograniczyć dostęp do wskazanych adresów e-mail.
 | Zakładka | Co robi |
 |---|---|
 | 🗺️ Mapa kopalni | Kalibracja (link z Google Maps lub współrzędne), rysowanie na zdjęciu satelitarnym: drogi i rampy (nachylenie, limit), usypy (materiał, tonaż, rozdrobnienie, gęstość), koparki, kruszarka. Przycisk **„Zbuduj trasy”** wyznacza najkrótszą drogę każda koparka → kruszarka i wstawia ją do scenariusza |
+| 🎬 Animacja | Cała zmiana odtwarzana przyspieszona na mapie (×60…×1200): wozidła jadą po narysowanych drogach, kolor = stan (jedzie, ładowany, czeka…). Na żywo: koszt narastająco i zł/t, paliwo, tony, kosz kruszarki, kolejki – z porównaniem do przydziału naturalnego **tego samego dnia** |
 | ⚙️ Scenariusz | Edycja wszystkich parametrów w tabelach + szybki kalkulator match factor; zapis do YAML |
 | 📊 Wyniki zmiany | KPI, koparki, oś czasu wozideł (gdzie czekają), kosz kruszarki i hałda, struktura kosztu, eksport CSV |
 | 📍 Podgląd na żywo | Suwak czasu: wozidła na mapie i na profilu trasy, **ekran operatora koparki** (kto pod łyżką, kto czeka, kto nadjeżdża i za ile), **ekrany kierowców** (polecenia), animacja zmiany |
+| 🧠 Uczenie RL | Uczenie ze wzmocnieniem polityki przydziału wozideł do koparek na tysiącach symulowanych zmian; wykresy: koszt zł/t, oszczędność vs naturalny, wydajność, paliwo, kolejki, wykorzystanie koparek w kolejnych iteracjach; test końcowy; „Zastosuj politykę RL” |
 | ⚖️ Porównanie wariantów | Liczba wozideł × warianty (przydział stały/automatyczny, hałda, doradztwo prędkości) z rekomendacją; porównanie zapisanych scenariuszy |
 | 💥 Odstrzał ↔ kruszarka | Mine-to-mill: koszt całkowity na tonę w funkcji rozdrobnienia (droższy odstrzał vs szybszy załadunek i kruszenie) |
 | 🤖 Model ETA | Trening modelu czasów przejazdu na danych z wielu zmian, kalkulator ETA |
 
-Podkład mapy: zdjęcia satelitarne Esri World Imagery + OpenStreetMap (bez klucza API).
+### Sieć dróg, poziomy, przypisania
+
+- Drogi tworzą **sieć z węzłami**: koniec drogi postawiony ≤ 30 m od innej drogi – także w jej środku – tworzy
+  skrzyżowanie. Wspólny odcinek (np. kruszarka → rampa) rysuje się raz, a do usypów tylko odgałęzienia.
+- **Rzędne** wszystkich węzłów liczone są od kruszarki (jej rzędna do ustawienia) wzdłuż nachyleń dróg. Odgałęzienie
+  w połowie rampy startuje na właściwej wysokości, każda koparka ma swój poziom, a nachylenie każdego odcinka trasy
+  wynika z różnicy wysokości w kierunku jazdy (zjazd = minus, wyjazd = plus).
+- **Przypisania wozideł** (zakładka Scenariusz → Wozidła): `Koparki` = do których koparek grupa może jeździć;
+  `Dwa usypy w kursie` = np. `K-1:0.5, K-2:0.5` – pół ładunku z K-1, przejazd po sieci, pół z K-2, potem do kruszarki.
+- **Przydział wozideł**: *naturalny* (obecna praktyka – „swoja” koparka, czasem gdzie indziej, bez informacji),
+  *stały*, *heurystyka systemu* (tam, gdzie najszybciej załadują), *polityka RL*.
+
+Scenariusz **„mapa demo”** (`scenarios/kruszyk_mapa_demo.yaml`, generowany przez `tools/make_demo_map.py`) pokazuje
+to wszystko na przykładowej, syntetycznej geometrii: droga główna, rampa 9 %, zjazd z połowy rampy na poziom pośredni
+(−37,6 m), poziom dolny (−66,2 m) z dwoma usypami, 3 koparki na wapieniu i dolomicie, grupa wozideł jeżdżąca na dwa usypy.
+
+Podkład mapy: zdjęcia satelitarne Esri World Imagery + OpenStreetMap (bez klucza API). Leaflet do animacji jest
+dołączony w `kruszyk/vendor` (licencja BSD-2), więc animacja nie wymaga dostępu do CDN.
 Nachylenia dróg podaje się ręcznie – w kierunku do kruszarki, „+” = pod górę z ładunkiem
 (zdjęcie satelitarne nie zawiera wysokości). Końce dróg, które się łączą, muszą być ≤ 30 m od siebie.
 
@@ -75,6 +94,8 @@ Nachylenia dróg podaje się ręcznie – w kierunku do kruszarki, „+” = pod
 | `kruszyk/optimize.py` | Przegląd liczby wozideł z replikacjami, rekomendacja (min. PLN/t, opcjonalnie z celem t/h) |
 | `kruszyk/site.py` | Mapa: geometria (odległości, pola), parsowanie linków Google Maps, graf dróg, najkrótsza trasa, mapa → scenariusz |
 | `kruszyk/views.py` | Stan wozideł w danej chwili, pozycja na trasie/mapie, ETA, ekran operatora i polecenia kierowców |
+| `kruszyk/rl.py` | Uczenie ze wzmocnieniem polityki przydziału (CEM, wspólne liczby losowe), porównanie polityk, wyjaśnienie wag |
+| `kruszyk/anim.py` | Trajektorie wozideł po geometrii dróg + przebieg kosztów minuta po minucie → odtwarzacz HTML/Leaflet |
 | `kruszyk/ml.py` | Generowanie zbioru danych, model czasu przejazdu odcinka (gradient boosting), ETA wozidła pod koparkę |
 
 ### Dyspozycja bez dyspozytora

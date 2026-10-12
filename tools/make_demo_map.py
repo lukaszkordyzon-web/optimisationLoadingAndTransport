@@ -1,0 +1,67 @@
+"""Builds scenarios/kruszyk_mapa_demo.yaml – a synthetic pit drawn as on the map screen.
+
+Geometry is illustrative (not a real site): main road, a ramp, a branch leaving the ramp half-way
+down to an intermediate level, a bottom level with two piles, three excavators, mixed fleet.
+"""
+import sys
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from kruszyk.site import analyze_site, site_to_scenario  # noqa: E402
+
+C = [50.0000, 20.0000]          # crusher
+J1 = [50.0000, 20.0125]         # end of the main road, top of the ramp (~900 m east)
+B = [49.9955, 20.0180]          # bottom of the ramp (~640 m)
+MID = [(J1[0] + B[0]) / 2, (J1[1] + B[1]) / 2]  # half-way down the ramp – branch starts mid-segment
+
+site = {
+    "center": [49.9975, 20.0100], "zoom": 15,
+    "crusher": {"lat": C[0], "lon": C[1], "elev_m": 0.0},
+    "roads": [
+        {"id": "R1", "name": "droga główna", "kind": "droga", "grade_pct": 1.0, "speed_limit_kmh": 40,
+         "coords": [C, [50.0003, 20.0060], J1]},
+        {"id": "R2", "name": "rampa główna", "kind": "rampa", "grade_pct": 9.0, "speed_limit_kmh": 25,
+         "coords": [J1, B]},
+        {"id": "R3", "name": "zjazd na poziom pośredni", "kind": "droga", "grade_pct": 0.0, "speed_limit_kmh": 30,
+         "coords": [MID, [49.9972, 20.0110], [49.9968, 20.0085]]},
+        {"id": "R4", "name": "poziom dolny", "kind": "droga", "grade_pct": 0.0, "speed_limit_kmh": 30,
+         "coords": [B, [49.9950, 20.0225], [49.9945, 20.0270]]},
+    ],
+    "piles": [
+        {"id": "U-01", "material": "wapień", "tonnage_t": 9000, "fragmentation": 0.3, "loose_density_t_m3": 1.75,
+         "polygon": [[49.9962, 20.0078], [49.9962, 20.0092], [49.9957, 20.0092], [49.9957, 20.0078]]},
+        {"id": "U-02", "material": "dolomit", "tonnage_t": 9000, "fragmentation": 0.5, "loose_density_t_m3": 1.85,
+         "polygon": [[49.9944, 20.0218], [49.9944, 20.0232], [49.9939, 20.0232], [49.9939, 20.0218]]},
+        {"id": "U-03", "material": "wapień", "tonnage_t": 12000, "fragmentation": 0.35, "loose_density_t_m3": 1.75,
+         "polygon": [[49.9940, 20.0265], [49.9940, 20.0280], [49.9935, 20.0280], [49.9935, 20.0265]]},
+    ],
+    "excavators": [
+        {"id": "K-1", "lat": 49.99665, "lon": 20.0085, "pile": "U-01", "bucket_m3": 6.0, "swing_cycle_s": 30},
+        {"id": "K-2", "lat": 49.99475, "lon": 20.0225, "pile": "U-02", "bucket_m3": 4.5, "swing_cycle_s": 28},
+        {"id": "K-3", "lat": 49.99435, "lon": 20.0270, "pile": "U-03", "bucket_m3": 7.5, "swing_cycle_s": 34},
+    ],
+}
+
+raw = yaml.safe_load((ROOT / "scenarios" / "kruszyk_bazowy.yaml").read_text(encoding="utf-8"))
+raw["name"] = "Kopalnia Kruszyk – mapa demo (sieć dróg, 3 usypy, mieszanka)"
+raw["dispatch"] = "natural"
+raw["trucks"] = [
+    {"model": "wozidło 55 t", "count": 7, "payload_t": 55, "empty_mass_t": 40, "power_kw": 520,
+     "max_speed_kmh": 45, "fuel_lph_loaded": 60, "fuel_lph_empty": 32, "fuel_lph_idle": 10},
+    {"model": "wozidło 40 t – mieszanka K-1 + K-2", "count": 2, "payload_t": 40, "empty_mass_t": 30,
+     "power_kw": 400, "max_speed_kmh": 48, "fuel_lph_loaded": 45, "fuel_lph_empty": 24, "fuel_lph_idle": 8,
+     "blend": {"K-1": 0.5, "K-2": 0.5}},
+]
+raw["crusher"]["capacity_tph"] = 2600
+raw["crusher"]["hopper_t"] = 250
+new = site_to_scenario(site, raw)
+info = analyze_site(site)
+print("poziomy koparek:", info["levels"])
+print("węzły:", len(info["junctions"]), "ostrzeżenia:", info["warnings"])
+out = ROOT / "scenarios" / "kruszyk_mapa_demo.yaml"
+out.write_text("# Wygenerowane przez tools/make_demo_map.py – geometria przykładowa (nie rzeczywisty teren)\n"
+               + yaml.safe_dump(new, allow_unicode=True, sort_keys=False), encoding="utf-8")
+print("zapisano", out)

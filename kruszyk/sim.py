@@ -18,6 +18,7 @@ from .physics import (crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_
 
 CRUSHER_TICK_S = 10.0
 LOADER_TICK_S = 30.0
+DRIVE_STATES = {"jazda_pusty", "przejazd_miedzy_usypami", "jazda_pelny"}
 IDLE_STATES = {"kolejka_koparka", "podstawienie", "zaladunek", "kolejka_kruszarka", "wyladunek",
                "wyladunek_halda"}
 
@@ -69,17 +70,17 @@ class Simulation:
                 ex.remaining_t /= len(exs)
 
         self.trucks: list[TruckState] = []
-        ex_ids = list(self.excavators)
         # driver/truck style is persistent across shifts (drawn from the scenario seed, not the shift seed)
         crew_rng = np.random.default_rng(sc.seed)
         i = 0
         for fleet in sc.trucks:
-            for _ in range(fleet.count):
+            allowed = self.allowed_ids(fleet)
+            for j in range(fleet.count):
                 self.trucks.append(TruckState(
                     id=f"WZ-{i + 1:02d}",
                     fleet=fleet,
                     driver_factor=float(np.clip(crew_rng.normal(1.0, v.driver_sd), 0.8, 1.3)),
-                    home_excavator=ex_ids[i % len(ex_ids)],
+                    home_excavator=allowed[(i + j) % len(allowed)],
                 ))
                 i += 1
 
@@ -96,6 +97,8 @@ class Simulation:
         self.stockpile_in_t = 0.0
         self.rehandled_t = 0.0
         self.fuel_l = 0.0
+        self.dumped_t = 0.0
+        self.decisions = 0
 
         self.segments: list[dict] = []
         self.states: list[dict] = []
@@ -137,6 +140,10 @@ class Simulation:
         return max(hopper_wait, queue_wait if extra_t == 0 else 0.0)
 
     # --------------------------------------------------------------- dispatcher
+    def allowed_ids(self, fleet: TruckFleet) -> list[str]:
+        ids = list(fleet.blend) or list(fleet.excavators)
+        return ids or [e.id for e in self.sc.excavators]
+
     def predicted_finish(self, ex: ExcavatorState, arrival: float, service: float) -> float:
         """When would a truck arriving at `arrival` be loaded, given the trucks already sent there."""
         t = max(self.env.now, ex.busy_until)
@@ -144,14 +151,36 @@ class Simulation:
             t = max(t, arr) + srv
         return max(t, arrival) + service
 
+    def features(self, truck: TruckState, ex: ExcavatorState) -> list[float]:
+        """What the dispatcher knows about sending `truck` to `ex` now (RL state for one action)."""
+        sc = self.sc
+        route = sc.routes[ex.cfg.route]
+        travel = route_time_s(route, truck.fleet, False, sc.rolling_resistance_pct)
+        haul = route_time_s(route, truck.fleet, True, sc.rolling_resistance_pct)
+        service = self._expected_service(ex, truck.fleet)
+        wait = self.predicted_finish(ex, self.env.now + travel, service) - (self.env.now + travel) - service
+        initial = max(sc.blast(ex.cfg.blast).tonnage_t, 1.0)
+        return [max(wait, 0.0) / 60, travel / 60, haul / 60, service / 60,
+                (ex.remaining_t - ex.committed_t) / initial, float(len(ex.pending)),
+                float(ex.cfg.id == truck.home_excavator)]
+
     def dispatch(self, truck: TruckState) -> ExcavatorState | None:
-        active = [ex for ex in self.excavators.values() if self._active(ex)]
+        allowed = set(self.allowed_ids(truck.fleet))
+        active = [ex for ex in self.excavators.values() if ex.cfg.id in allowed and self._active(ex)]
         if not active:
             return None
-        if self.sc.dispatch == "fixed":
-            home = self.excavators[truck.home_excavator]
-            if self._active(home):
+        self.decisions += 1
+        mode = self.sc.dispatch
+        home = self.excavators.get(truck.home_excavator)
+        if mode in ("fixed", "natural") and home in active:
+            # natural: drivers mostly go back to "their" excavator, sometimes elsewhere, without information
+            if mode == "fixed" or self.rng.random() >= self.sc.natural_switch_prob:
                 return home
+        if mode == "natural":
+            return active[int(self.rng.integers(len(active)))]
+        if mode == "rl":
+            w = np.asarray(self.sc.rl_weights, dtype=float)
+            return min(active, key=lambda ex: float(np.dot(w, self.features(truck, ex))))
         best, best_finish = None, math.inf
         for ex in active:
             travel = route_time_s(self.sc.routes[ex.cfg.route], truck.fleet, False,
@@ -162,14 +191,17 @@ class Simulation:
         return best
 
     # ---------------------------------------------------------------- processes
-    def _drive(self, truck: TruckState, ex: ExcavatorState, loaded: bool, pace: float = 1.0):
-        route = self.sc.routes[ex.cfg.route]
-        segs = route.segments if loaded else list(reversed(route.segments))
-        payload = truck.fleet.payload_t if loaded else 0.0
-        fuel_rate = truck.fleet.fuel_lph_loaded if loaded else truck.fleet.fuel_lph_empty
+    def _drive(self, truck: TruckState, route, forward: bool, load_t: float, leg: str, ex_id: str,
+               pace: float = 1.0):
+        """Drive a whole route (forward = towards its end). leg: pusty | miedzy | pelny."""
+        idx = range(len(route.segments)) if forward else reversed(range(len(route.segments)))
+        f = truck.fleet
+        share = load_t / f.payload_t if f.payload_t else 0.0
+        fuel_rate = f.fuel_lph_empty + (f.fuel_lph_loaded - f.fuel_lph_empty) * share
         start_state = self.env.now
-        for seg in segs:
-            mean = segment_time_s(seg, truck.fleet, loaded, self.sc.rolling_resistance_pct)
+        for k in idx:
+            seg = route.segments[k]
+            mean = segment_time_s(seg, f, load_t > 0, self.sc.rolling_resistance_pct, forward, load_t)
             natural = mean * truck.driver_factor * self.weather_factor * self._noise(self.sc.variability.trip_sd)
             dur = natural * pace
             start = self.env.now
@@ -177,68 +209,103 @@ class Simulation:
             # slower driving burns roughly the same fuel per km (same climbing energy)
             self.fuel_l += fuel_rate * natural / 3600
             self.segments.append({
-                "truck": truck.id, "truck_model": truck.fleet.model, "trip": truck.trip,
-                "excavator": ex.cfg.id, "route": route.id, "segment": seg.name,
-                "loaded": int(loaded), "payload_t": payload, "length_m": seg.length_m,
-                "grade_pct": seg.grade_pct if loaded else -seg.grade_pct,
+                "truck": truck.id, "truck_model": f.model, "trip": truck.trip,
+                "excavator": ex_id, "route": route.id, "segment": seg.name, "seg_idx": k,
+                "forward": int(forward), "leg": leg,
+                "loaded": int(load_t > 0), "payload_t": load_t, "length_m": seg.length_m,
+                "grade_pct": seg.grade_pct if forward else -seg.grade_pct,
                 "speed_limit_kmh": seg.speed_limit_kmh, "rain": int(self.rain),
                 "hour_of_shift": start / 3600, "pace": pace, "start_s": start, "duration_s": dur,
                 "physics_s": mean,
             })
-        self._log_state(truck, "jazda_pelny" if loaded else "jazda_pusty", start_state, ex.cfg.id)
+        state = {"pusty": "jazda_pusty", "miedzy": "przejazd_miedzy_usypami", "pelny": "jazda_pelny"}[leg]
+        self._log_state(truck, state, start_state, ex_id)
+
+    def _load_at(self, truck: TruckState, ex: ExcavatorState, amount: float, committed: float):
+        """Queue, spot and load `amount` t at `ex`. Returns tonnes actually loaded."""
+        env, sc, fleet = self.env, self.sc, truck.fleet
+        t0 = env.now
+        with ex.resource.request() as req:
+            yield req
+            self._log_state(truck, "kolejka_koparka", t0, ex.cfg.id)
+            ex.pending.pop(truck.id, None)
+            ex.busy_until = env.now + self._expected_service(ex, fleet)
+            tonnes = min(amount, ex.remaining_t)
+            ex.remaining_t -= tonnes
+            ex.committed_t -= committed
+            if tonnes <= 1e-6:
+                return 0.0
+
+            t0 = env.now
+            yield env.timeout(ex.cfg.spot_time_s * self._noise(0.2))
+            ex.spotting_s += env.now - t0
+            self._log_state(truck, "podstawienie", t0, ex.cfg.id)
+
+            blast = sc.blast(ex.cfg.blast)
+            full_load = load_time_s(ex.cfg, fleet, blast, sc.loose_density_t_m3)
+            t0 = env.now
+            yield env.timeout(full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd))
+            ex.loading_s += env.now - t0
+            self._log_state(truck, "zaladunek", t0, ex.cfg.id)
+            self.loads.append({"truck": truck.id, "excavator": ex.cfg.id, "blast": blast.id,
+                               "material": blast.material, "tonnes": tonnes, "fragmentation": blast.fragmentation,
+                               "loaded_at_s": env.now, "trip": truck.trip})
+            if ex.remaining_t <= 1e-6 and ex.depleted_at is None:
+                ex.depleted_at = env.now
+            return tonnes
+
+    def _plan(self, truck: TruckState) -> list[tuple[ExcavatorState, float]] | None:
+        """Loading stops for the next trip: [(excavator, tonnes)]."""
+        fleet = truck.fleet
+        if fleet.blend:
+            stops = [(self.excavators[x], s) for x, s in fleet.blend.items() if self._active(self.excavators[x])]
+            if stops:
+                total = sum(s for _, s in stops)
+                return [(ex, fleet.payload_t * s / total) for ex, s in stops]
+            return None
+        ex = self.dispatch(truck)
+        return [(ex, fleet.payload_t)] if ex else None
 
     def truck_process(self, truck: TruckState):
         env, v, sc = self.env, self.sc.variability, self.sc
         while True:
-            ex = self.dispatch(truck)
-            if ex is None:
+            plan = self._plan(truck)
+            if plan is None:
                 # logged up front: events exactly at shift end are not processed by env.run(until=...)
                 self._log_state(truck, "postoj_brak_urobku", env.now, end=self.shift_s)
                 return
             truck.trip += 1
             fleet = truck.fleet
-            ex.committed_t += fleet.payload_t
-            travel = route_time_s(sc.routes[ex.cfg.route], fleet, False, sc.rolling_resistance_pct)
-            ex.pending[truck.id] = (env.now + travel, self._expected_service(ex, fleet))
+            for ex, amount in plan:
+                ex.committed_t += amount
+            first = plan[0][0]
+            travel = route_time_s(sc.routes[first.cfg.route], fleet, False, sc.rolling_resistance_pct)
+            first.pending[truck.id] = (env.now + travel, self._expected_service(first, fleet))
             cycle_start = env.now
 
-            yield from self._drive(truck, ex, loaded=False)
-
-            t0 = env.now
-            with ex.resource.request() as req:
-                yield req
-                self._log_state(truck, "kolejka_koparka", t0, ex.cfg.id)
-                ex.pending.pop(truck.id, None)
-                ex.busy_until = env.now + self._expected_service(ex, fleet)
-                tonnes = min(fleet.payload_t, ex.remaining_t)
-                ex.remaining_t -= tonnes
-                ex.committed_t -= fleet.payload_t
-
-                t0 = env.now
-                yield env.timeout(ex.cfg.spot_time_s * self._noise(0.2))
-                ex.spotting_s += env.now - t0
-                self._log_state(truck, "podstawienie", t0, ex.cfg.id)
-
-                blast = sc.blast(ex.cfg.blast)
-                full_load = load_time_s(ex.cfg, fleet, blast, sc.loose_density_t_m3)
-                t0 = env.now
-                yield env.timeout(full_load * (tonnes / fleet.payload_t) * self._noise(v.load_sd))
-                ex.loading_s += env.now - t0
-                self._log_state(truck, "zaladunek", t0, ex.cfg.id)
-                self.loads.append({"truck": truck.id, "excavator": ex.cfg.id, "blast": blast.id,
-                                   "tonnes": tonnes, "fragmentation": blast.fragmentation,
-                                   "loaded_at_s": env.now, "trip": truck.trip})
-                if ex.remaining_t <= 1e-6 and ex.depleted_at is None:
-                    ex.depleted_at = env.now
+            yield from self._drive(truck, sc.routes[first.cfg.route], False, 0.0, "pusty", first.cfg.id)
+            tonnes, prev = 0.0, None
+            for ex, amount in plan:
+                if prev is not None:
+                    link = sc.links[f"{prev.cfg.id}>{ex.cfg.id}"]
+                    yield from self._drive(truck, link, True, tonnes, "miedzy", ex.cfg.id)
+                tonnes += yield from self._load_at(truck, ex, amount, amount)
+                prev = ex
+            last = prev
+            if tonnes <= 1e-6:
+                continue  # material ran out while driving there
+            blast = sc.blast(last.cfg.blast)
+            frag = float(np.mean([sc.blast(e.cfg.blast).fragmentation for e, _ in plan]))
 
             # speed advice: if we would only queue at the crusher, drive slower instead
+            route = sc.routes[last.cfg.route]
             pace = 1.0
-            if sc.pacing.enabled:
-                haul = route_time_s(sc.routes[ex.cfg.route], fleet, True, sc.rolling_resistance_pct)
+            if sc.pacing.enabled and sc.dispatch != "natural":
+                haul = route_time_s(route, fleet, True, sc.rolling_resistance_pct)
                 wait = self.expected_dump_wait_s(tonnes, extra_t=self.inbound_t, ahead_s=haul)
                 pace = 1 + min(sc.pacing.max_slowdown, wait / haul)
             self.inbound_t += tonnes
-            yield from self._drive(truck, ex, loaded=True, pace=pace)
+            yield from self._drive(truck, route, True, tonnes, "pelny", last.cfg.id, pace)
             self.inbound_t -= tonnes
 
             sp = sc.stockpile
@@ -256,11 +323,12 @@ class Simulation:
                     yield self.hopper.put(tonnes)  # waits while the hopper is full
                     self.queued_dump_t -= tonnes
                     self._log_state(truck, "kolejka_kruszarka", t0)
-                    self._mix_into_hopper(tonnes, blast.fragmentation)
+                    self._mix_into_hopper(tonnes, frag)
                     t0 = env.now
                     yield env.timeout(sc.crusher.dump_time_s * self._noise(0.15))
                     self._log_state(truck, "wyladunek", t0)
                 self._mark_dumped(truck, env.now, "kosz")
+            self.dumped_t += tonnes
 
             # random breakdown, probability proportional to cycle length
             cycle = env.now - cycle_start
@@ -278,6 +346,7 @@ class Simulation:
             if load["truck"] == truck.id and load["trip"] == truck.trip:
                 load["dumped_at_s"] = t
                 load["dumped_to"] = where
+            elif load["truck"] == truck.id:
                 return
 
     def crusher_process(self):
@@ -296,7 +365,10 @@ class Simulation:
                 self.crusher_starved_s += CRUSHER_TICK_S
             if int(env.now) % 60 == 0:
                 self.hopper_log.append({"t_s": env.now, "level_t": self.hopper.level,
-                                        "stockpile_t": self.stockpile_t, "crushed_t": self.crushed_t})
+                                        "stockpile_t": self.stockpile_t, "crushed_t": self.crushed_t,
+                                        "dumped_t": self.dumped_t, "fuel_l": self.fuel_l,
+                                        "kwh": self.crusher_kwh, "stockpile_in_t": self.stockpile_in_t,
+                                        "rehandled_t": self.rehandled_t})
             yield env.timeout(CRUSHER_TICK_S)
 
     def loader_process(self):
@@ -339,6 +411,23 @@ class SimResult:
         self.hopper = pd.DataFrame(sim.hopper_log)
         self.truck_ids = [t.id for t in sim.trucks]
         self.kpi = self._kpis(sim)
+        self.timeline = self._timeline(sim)
+
+    def _timeline(self, sim: Simulation) -> pd.DataFrame:
+        """Cumulative production and cost minute by minute (what a live dashboard would show)."""
+        sc, c = sim.sc, sim.sc.costs
+        h = self.hopper.copy()
+        if h.empty:
+            return h
+        fixed_per_h = (sc.truck_count * c.truck_per_h + len(sc.excavators) * c.excavator_per_h + c.crusher_per_h
+                       + (sc.stockpile.loader_per_h if sc.stockpile.enabled else 0.0))
+        frag = float(np.mean([b.fragmentation for b in sc.blasts]))
+        h["cost"] = (fixed_per_h * h["t_s"] / 3600 + h["fuel_l"] * c.fuel_per_l + h["kwh"] * c.energy_per_kwh
+                     + h["dumped_t"] * drill_blast_cost_per_t(c, frag)
+                     + (h["stockpile_in_t"] * sc.stockpile.rehandle_cost_per_t if sc.stockpile.enabled else 0.0))
+        h["cost_per_t"] = h["cost"] / h["dumped_t"].where(h["dumped_t"] > 0)
+        h["fuel_l_per_t"] = h["fuel_l"] / h["dumped_t"].where(h["dumped_t"] > 0)
+        return h
 
     def _kpis(self, sim: Simulation) -> dict:
         sc, shift_s = sim.sc, sim.shift_s
@@ -346,7 +435,7 @@ class SimResult:
         done = loads[loads["dumped_at_s"].notna()] if "dumped_at_s" in loads else loads.iloc[0:0]
         dumped = float(done["tonnes"].sum())
         st = self.states.groupby("state")["duration_s"].sum() / 3600 if len(self.states) else pd.Series(dtype=float)
-        n_cycles = len(done)
+        n_cycles = len(done[["truck", "trip"]].drop_duplicates()) if len(done) else 0
 
         ex_rows = []
         for ex in sim.excavators.values():
@@ -385,6 +474,7 @@ class SimResult:
             "throughput_tph": round(dumped / h, 1),
             "crushed_tph": round(sim.crushed_t / h, 1),
             "cycles": n_cycles,
+            "decisions": sim.decisions,
             "truck_queue_excavator_h": round(float(st.get("kolejka_koparka", 0.0)), 2),
             "truck_queue_crusher_h": round(float(st.get("kolejka_kruszarka", 0.0)), 2),
             "truck_breakdown_h": round(float(st.get("awaria", 0.0)), 2),

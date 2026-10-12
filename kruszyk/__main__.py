@@ -84,7 +84,7 @@ def main(argv=None):
     s = sub.add_parser("simulate", help="symulacja jednej zmiany + dane syntetyczne")
     s.add_argument("scenario")
     s.add_argument("--trucks", type=int)
-    s.add_argument("--dispatch", choices=["dynamic", "fixed"])
+    s.add_argument("--dispatch", choices=["natural", "fixed", "dynamic"])
     s.add_argument("--seed", type=int)
     s.add_argument("--out", help="katalog na CSV z danymi syntetycznymi")
     s.set_defaults(func=cmd_simulate)
@@ -94,7 +94,7 @@ def main(argv=None):
     s.add_argument("--min", type=int, default=2)
     s.add_argument("--max", type=int, default=14)
     s.add_argument("--replications", type=int, default=5)
-    s.add_argument("--dispatch", choices=["dynamic", "fixed"])
+    s.add_argument("--dispatch", choices=["natural", "fixed", "dynamic"])
     s.add_argument("--target-tph", type=float)
     s.set_defaults(func=cmd_sweep)
 

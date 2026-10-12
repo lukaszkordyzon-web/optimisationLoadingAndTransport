@@ -12,15 +12,20 @@ from .config import Blast, Crusher, Excavator, Route, Scenario, Segment, TruckFl
 G = 9.81
 
 
-def segment_speed_kmh(seg: Segment, truck: TruckFleet, loaded: bool, rr_pct: float) -> float:
+def segment_speed_kmh(seg: Segment, truck: TruckFleet, loaded: bool, rr_pct: float,
+                      forward: bool | None = None, load_t: float | None = None) -> float:
     """Expected speed on a segment.
 
     Uphill: power-limited speed v = P*eta / (m*g*(grade+rr)).
     Downhill: limited by retarder/safety, the steeper the slower.
+    `forward` = driving in the segment's direction (default: loaded trucks drive forward, i.e. towards
+    the crusher); `load_t` = actual load (default: full when loaded, else empty).
     """
-    mass_kg = (truck.empty_mass_t + (truck.payload_t if loaded else 0.0)) * 1000
-    # grade is defined for the loaded direction; empty trucks drive the other way
-    grade = seg.grade_pct if loaded else -seg.grade_pct
+    forward = loaded if forward is None else forward
+    load = (truck.payload_t if loaded else 0.0) if load_t is None else load_t
+    loaded = load > 0
+    mass_kg = (truck.empty_mass_t + load) * 1000
+    grade = seg.grade_pct if forward else -seg.grade_pct
     resistance = (grade + rr_pct) / 100.0
     cap = min(seg.speed_limit_kmh, truck.max_speed_kmh)
     if resistance > 0:
@@ -34,8 +39,9 @@ def segment_speed_kmh(seg: Segment, truck: TruckFleet, loaded: bool, rr_pct: flo
     return max(5.0, min(v, cap))
 
 
-def segment_time_s(seg: Segment, truck: TruckFleet, loaded: bool, rr_pct: float) -> float:
-    return seg.length_m / (segment_speed_kmh(seg, truck, loaded, rr_pct) / 3.6)
+def segment_time_s(seg: Segment, truck: TruckFleet, loaded: bool, rr_pct: float,
+                   forward: bool | None = None, load_t: float | None = None) -> float:
+    return seg.length_m / (segment_speed_kmh(seg, truck, loaded, rr_pct, forward, load_t) / 3.6)
 
 
 def route_time_s(route: Route, truck: TruckFleet, loaded: bool, rr_pct: float) -> float:

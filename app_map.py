@@ -9,7 +9,8 @@ import streamlit as st
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
-from kruszyk.site import centroid, parse_coords, polygon_area_m2, polyline_length_m, site_to_scenario
+from kruszyk.site import (analyze_site, centroid, parse_coords, polygon_area_m2, polyline_length_m,
+                          site_to_scenario)
 
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 ESRI_ATTR = "Esri, Maxar, Earthstar Geographics"
@@ -46,6 +47,20 @@ def base_map(site: dict, height_zoom: int | None = None) -> folium.Map:
     folium.TileLayer(ESRI, attr=ESRI_ATTR, name="Satelita", max_zoom=21, max_native_zoom=19).add_to(m)
     folium.TileLayer("OpenStreetMap", name="Mapa", max_zoom=21, max_native_zoom=19).add_to(m)
     return m
+
+
+def draw_network(m, info: dict) -> None:
+    """Junctions (white) and dead ends (red) of the road network, with computed elevations."""
+    g = info.get("graph")
+    if g is None:
+        return
+    for n in info.get("junctions", []):
+        folium.CircleMarker(g.nodes[n], radius=6, color="#000", weight=1, fill=True, fill_color="#fff", fill_opacity=1,
+                            tooltip=f"węzeł · rzędna {info['elev'].get(n, float('nan')):.1f} m").add_to(m)
+    for n in info.get("dead_ends", []):
+        folium.CircleMarker(g.nodes[n], radius=6, color="#000", weight=1, fill=True, fill_color="#e63946",
+                            fill_opacity=1, tooltip="ślepy koniec – niepołączona droga? (koniec ≤ 30 m od innej "
+                                                    "drogi tworzy węzeł)").add_to(m)
 
 
 def draw_site(m, site: dict) -> None:
@@ -181,6 +196,7 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
         # objects are pushed as a dynamic layer: the map itself is not rebuilt when they change
         objects = folium.FeatureGroup(name="Obiekty")
         draw_site(objects, site)
+        draw_network(objects, analyze_site(site))
         out = st_folium(editing_map(site), height=620, use_container_width=True,
                         key=f"map_{st.session_state.map_key}", feature_group_to_add=objects,
                         returned_objects=["last_active_drawing"])
@@ -234,7 +250,29 @@ def render_map_tab(raw_for_build: dict, set_raw) -> None:
         else:
             st.caption("brak")
 
-    st.subheader("4. Trasy z mapy → scenariusz")
+    st.subheader("4. Sieć dróg, poziomy i nachylenia")
+    st.caption("Rzędne liczone od kruszarki wzdłuż nachyleń dróg – także dla odgałęzień ze środka rampy. "
+               "Biały punkt = węzeł (skrzyżowanie), czerwony = ślepy koniec drogi.")
+    c1, c2 = st.columns([1, 3])
+    if site.get("crusher"):
+        site["crusher"]["elev_m"] = c1.number_input("Rzędna kruszarki [m]", -500.0, 2000.0,
+                                                    float(site["crusher"].get("elev_m", 0.0)), 1.0,
+                                                    help="np. rzędna terenu n.p.m.; poziomy koparek liczone względem niej")
+    info = analyze_site(site)
+    with c2:
+        if info["graph"] is not None:
+            m = st.columns(3)
+            m[0].metric("Węzły (skrzyżowania)", len(info["junctions"]))
+            m[1].metric("Ślepe końce", len(info["dead_ends"]))
+            m[2].metric("Długość dróg", f"{sum(polyline_length_m(r['coords']) for r in site['roads']):,.0f} m".replace(",", " "))
+        for w in info["warnings"]:
+            st.warning(w)
+        if info["levels"]:
+            st.dataframe(pd.DataFrame([{"koparka": k, "poziom (rzędna) [m]": v["elev_m"],
+                                        "odległość od drogi [m]": v["dist_to_road_m"]} for k, v in info["levels"].items()]),
+                         hide_index=True, use_container_width=True)
+
+    st.subheader("5. Trasy z mapy → scenariusz")
     st.caption("Usypy stają się źródłami urobku, koparki dostają trasy do kruszarki (najkrótsza droga po narysowanej sieci). "
                "Wozidła, kruszarka, koszty zostają ze scenariusza.")
     c1, c2 = st.columns([1, 3])
