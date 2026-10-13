@@ -50,8 +50,9 @@ def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict |
         from kruszyk.site import blast_point
 
         if not blast_point(site or {}):
-            st.info("Ekipa jedzie do usypu ze stanem **„planowany odstrzał”** (grupa „⛏️ Urobek i koparki” → Usyp). "
-                    "Bez takiego usypu ekipa nie jeździ po mapie, ale zamknięcie wyrobiska i tak obowiązuje.")
+            st.info("Ekipa jedzie do najbliższego **planowanego odstrzału** (planuje się go w trybie „🗓️ Harmonogram”). "
+                    "Bez niego ekipa nie jeździ po mapie, ale zamknięcie wyrobiska w podanych godzinach i tak "
+                    "obowiązuje.")
         c = st.columns(5)
         with c[0]:
             bl["crew_arrive"] = _time("Przyjazd ekipy", bl.get("crew_arrive", "09:00"), k("bl_a"))

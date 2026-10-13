@@ -148,7 +148,7 @@ def _direction_arrow(m, pts: list, grade: float, tip: str) -> None:
     ).add_to(m)
 
 
-def draw_site(m, site: dict) -> None:
+def draw_site(m, site: dict, plans: bool = True) -> None:
     """Add site objects to a map or a FeatureGroup."""
     for r in site.get("roads", []):
         pts = [tuple(c) for c in r["coords"]]
@@ -183,7 +183,7 @@ def draw_site(m, site: dict) -> None:
         folium.Marker(centroid(p["polygon"]), tooltip=f"⛰️ {p['id']} · usyp: {p.get('material', '')}", icon=folium.DivIcon(
             html=f"<div style='color:#fff;font-weight:700;text-shadow:0 0 3px #000;white-space:nowrap'>"
                  f"{p['id']} · {p.get('material', '')}</div>")).add_to(m)
-    for a in site.get("areas", []):
+    for a in site.get("areas", []) if plans else []:
         tip = (f"🟧 {a['id']} · obszar wydobycia · {a.get('material', '')} · zasoby {a.get('reserves_t', 0):,.0f} t · "
                f"strzał ≤ {a.get('blast_max_t', 0):,.0f} t".replace(",", " "))
         folium.Polygon([tuple(c) for c in a["polygon"]], color="#ff9f1c", weight=3, dash_array="4 6", fill=True,
@@ -191,7 +191,7 @@ def draw_site(m, site: dict) -> None:
         folium.Marker(centroid(a["polygon"]), tooltip=tip, icon=folium.DivIcon(
             html=f"<div style='color:#ff9f1c;font-weight:800;text-shadow:0 0 3px #000;white-space:nowrap'>"
                  f"🟧 {a['id']}</div>")).add_to(m)
-    for p in site.get("planned_piles", []):
+    for p in site.get("planned_piles", []) if plans else []:
         tip = (f"📅 {p['id']} · planowany strzał w dniu roboczym {p.get('blast_day', 1)} · {p.get('material', '')} · "
                f"{p.get('tonnage_t', 0):,.0f} t".replace(",", " "))
         folium.Polygon([tuple(c) for c in p["polygon"]], color="#ff006e", weight=3, dash_array="8 6", fill=True,
@@ -1108,8 +1108,9 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             st.caption("Narzędzie „linia” (/). Rysuj po osi drogi, zakończ klikając ostatni punkt. "
                        "Końce dróg, które się łączą, stawiaj blisko siebie (≤ 30 m).")
         elif mode == "Usyp (materiał)":
-            planned = st.radio("Stan", ["leży – urobek gotowy", "planowany odstrzał"], horizontal=True,
-                               key="pile_status") == "planowany odstrzał"
+            planned = schedule is not False and st.radio(
+                "Stan", ["leży – urobek gotowy", "planowany odstrzał"], horizontal=True, key="pile_status",
+                help="Planowanie odstrzałów jest w trybie „🗓️ Harmonogram”.") == "planowany odstrzał"
             attrs["status"] = "planned" if planned else "lying"
             n_all = len(site["piles"]) + len(site.get("planned_piles", []))
             attrs["id"] = st.text_input("Oznaczenie usypu", f"{'S' if planned else 'U'}-{n_all + 1:02d}", key=f"pile_id_{planned}")
@@ -1275,7 +1276,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         objects = folium.FeatureGroup(name="Obiekty")
         if mode == EDIT:
             highlight(objects, site, st.session_state.get("sel_box"))
-        draw_site(objects, site)
+        draw_site(objects, site, plans=schedule is not False)
         draw_network(objects, analyze_site(site))
         out = st_folium(editing_map(site), height=620, use_container_width=True,
                         key=f"map_{st.session_state.map_key}", feature_group_to_add=objects,
@@ -1397,29 +1398,6 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             psd_editor(site, max_feed, float(raw_for_build.get("crusher", {}).get("fragmentation_penalty", 0.4)))
         else:
             st.caption("brak usypów")
-        st.markdown("**🧨 Planowane odstrzały** – usypy, które dopiero będą odstrzelone (dzień i godziny strzału).")
-        if site.get("planned_piles"):
-            object_table(site, "planned_piles", lambda: pd.DataFrame(
-                [{"id": p["id"], "material": p.get("material", ""), "level": p.get("level"),
-                  "tonnage_t": p.get("tonnage_t", 0.0),
-                  "blast_day": int(p.get("blast_day", 1)), "target_share": p.get("target_share"),
-                  "t_per_m": p.get("t_per_m", 50.0), "drilled": bool(p.get("drilled")),
-                  **{k: p.get(k) for k in TIME_COLS},
-                  "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "–"}
-                 for p in site["planned_piles"]]),
-                extra=("target_share", "t_per_m", "drilled", "level", *TIME_COLS), disabled=["uziarnienie"],
-                rerun_on=("level",),
-                column_config={"id": "strzał", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
-                               "level": level_col(site),
-                               "tonnage_t": st.column_config.NumberColumn("ilość [t]", min_value=0.0),
-                               "blast_day": st.column_config.NumberColumn("dzień roboczy strzału", min_value=1, step=1),
-                               "target_share": st.column_config.NumberColumn(
-                                   "udział w nadawie [%]", min_value=0.0, max_value=100.0,
-                                   help="ile procent nadawy ma iść z tego usypu, gdy już jest odstrzelony"),
-                           "t_per_m": st.column_config.NumberColumn("t/mb", min_value=5.0),
-                           "drilled": st.column_config.CheckboxColumn("nawiercony"), **TIME_COLS})
-        else:
-            st.caption("brak – narysuj usyp ze stanem „planowany odstrzał”")
     with t_ex:
         if site["excavators"]:
             object_table(site, "excavators", lambda: pd.DataFrame(
@@ -1475,6 +1453,29 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                    "first_drilled": st.column_config.CheckboxColumn("1. pas nawiercony"), **TIME_COLS})
             else:
                 st.caption("brak – narysuj trybem „Obszar wydobycia (strzały automatycznie)”")
+            st.markdown("**🧨 Planowane odstrzały** – usypy, które dopiero będą odstrzelone (dzień i godziny strzału).")
+            if site.get("planned_piles"):
+                object_table(site, "planned_piles", lambda: pd.DataFrame(
+                    [{"id": p["id"], "material": p.get("material", ""), "level": p.get("level"),
+                      "tonnage_t": p.get("tonnage_t", 0.0),
+                      "blast_day": int(p.get("blast_day", 1)), "target_share": p.get("target_share"),
+                      "t_per_m": p.get("t_per_m", 50.0), "drilled": bool(p.get("drilled")),
+                      **{k: p.get(k) for k in TIME_COLS},
+                      "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "–"}
+                     for p in site["planned_piles"]]),
+                    extra=("target_share", "t_per_m", "drilled", "level", *TIME_COLS), disabled=["uziarnienie"],
+                    rerun_on=("level",),
+                    column_config={"id": "strzał", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
+                                   "level": level_col(site),
+                                   "tonnage_t": st.column_config.NumberColumn("ilość [t]", min_value=0.0),
+                                   "blast_day": st.column_config.NumberColumn("dzień roboczy strzału", min_value=1, step=1),
+                                   "target_share": st.column_config.NumberColumn(
+                                       "udział w nadawie [%]", min_value=0.0, max_value=100.0,
+                                       help="ile procent nadawy ma iść z tego usypu, gdy już jest odstrzelony"),
+                               "t_per_m": st.column_config.NumberColumn("t/mb", min_value=5.0),
+                               "drilled": st.column_config.CheckboxColumn("nawiercony"), **TIME_COLS})
+            else:
+                st.caption("brak – narysuj usyp ze stanem „planowany odstrzał”")
 
     st.subheader("4. Sieć dróg, poziomy i nachylenia")
     st.caption("Rzędne liczone od kruszarki wzdłuż nachyleń dróg – także dla odgałęzień ze środka rampy. "

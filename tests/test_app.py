@@ -145,3 +145,19 @@ def test_map_edit_mode_select_and_delete():
     next(b for b in at.button if b.label.startswith("⇅")).click().run()
     assert not at.exception, at.exception
     assert at.session_state["site"]["roads"][0]["grade_draw_pct"] == -g + 0.0
+
+
+def test_planning_only_in_schedule_mode():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
+    at.sidebar.selectbox[0].select(name).run()
+    at.sidebar.button[0].click().run()
+    at.radio(key="draw_group").set_value("⛏️ Urobek i koparki").run()
+    assert not at.exception, at.exception
+    assert not [r for r in at.radio if r.key == "pile_status"]  # one shift: piles only as they lie today
+    assert "📅 Plan strzałów" not in at.radio(key="draw_group").options
+    at.radio(key="work_kind").set_value("🗓️ Harmonogram (tydzień / miesiąc)").run()
+    at.radio(key="draw_group").set_value("⛏️ Urobek i koparki").run()
+    assert not at.exception, at.exception
+    assert [r for r in at.radio if r.key == "pile_status"]  # schedule: a pile can be a planned blast
+    assert "📅 Plan strzałów" in at.radio(key="draw_group").options
