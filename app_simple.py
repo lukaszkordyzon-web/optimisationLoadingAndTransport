@@ -153,8 +153,8 @@ def step_today(sc, yaml_text: str, seed: int, set_raw):
     st.markdown("Odtworzenie **jednej zmiany tak, jak pracujecie obecnie**: kierowca po wyładunku wraca do „swojej” "
                 "koparki, czasem jedzie gdzie indziej, nikt nie wie, gdzie jest kolejka. Do tego losowość: deszcz, "
                 "różni kierowcy, awarie, różne czasy załadunku.")
-    st.caption("📱 Teraz to dane syntetyczne. Po wdrożeniu aplikacji na telefonach w kabinach tu będzie odtworzenie "
-               "prawdziwej zmiany z GPS – ten sam widok, te same liczniki.")
+    st.caption("Źródło danych: model syntetyczny. Po podłączeniu telemetrii (GPS) ten widok odtwarza rzeczywistą "
+               "zmianę – te same wskaźniki.")
     if not _has_map_routes(sc):
         st.info("Najpierw zbuduj kopalnię w kroku **① Kopalnia** (i kliknij „Zapisz kopalnię”) – albo wczytaj przykład.")
         _demo_button(set_raw, "demo_today")
@@ -341,7 +341,7 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
         "jak szybko ładuje dana koparka, ile urobku zostało. Ćwiczy na setkach symulowanych zmian i z rundy na rundę "
         "wybiera lepsze reguły. Wynik porównujemy zawsze z **dziś** (stan obecny, przydział jak dziś). Po wdrożeniu "
         "te decyzje trafiają na żywo na telefony kierowców i operatorów koparek. Nauczona polityka zapisuje się w "
-        "kopalni – w module **🗓️ Harmonogram** zobaczysz, ile daje na cały miesiąc.")
+        "kopalni – w module **Planowanie produkcji** zobaczysz, ile daje na cały miesiąc.")
     if base_yaml is None:
         st.info("Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia**.")
         return
@@ -392,7 +392,7 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
         st.caption("Kliknij przycisk – nauka trwa zwykle 15–40 s.")
         return
     if advise:
-        st.info("**Co dostają ludzie w kabinach (telefony służbowe):**  \n"
+        st.info("**Komunikaty na terminalach operatorów:**  \n"
                 "🚚 **Kierowca:** „Jedź do K-2, zalecana prędkość 22 km/h – będziesz, gdy koparka skończy WZ-04” "
                 "(zamiast pędzić i stać w kolejce: mniej paliwa, mniej zużycia).  \n"
                 "⛏️ **Operator:** „WZ-03 za 1:40 → nabierz łyżkę i czekaj” – pierwsza łyżka gotowa w chwili "
@@ -442,14 +442,14 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     components.html(compare_page(rl_yaml, "rl", base_yaml, seed, f"{which} + nauczony przydział"), height=760, scrolling=False)
 
 
-DAY, SCHEDULE = "🚚 Zmiana – dyspozytornia", "🗓️ Harmonogram – kierownictwo"
+DAY, SCHEDULE = "Analiza zmiany", "Planowanie produkcji"
 
 
 def render_simple(raw: dict, set_raw, render_map_tab) -> None:
     kind = st.radio("Moduł", [DAY, SCHEDULE], horizontal=True, key="work_kind",
-                    help="Zmiana: jak było dziś i optymalizacja ruchu (RL) – zalecenia na żywo dla kierowców i "
-                         "operatorów. Harmonogram: plan na tydzień / miesiąc dla kierownictwa – strzały, flota, "
-                         "zmiany, cel produkcji przy najniższym koszcie.")
+                    help="Analiza zmiany: kalibracja modelu, przebieg zmiany i optymalizacja przydziału (RL). "
+                         "Planowanie produkcji: plan na tydzień / miesiąc – cel produkcyjny, strzelania, flota, "
+                         "zmiany, szansa realizacji.")
     schedule = kind == SCHEDULE
     seed = int(raw.get("seed", 42))
     try:
@@ -461,10 +461,10 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
         sc, yaml_text = None, None
         msg = str(e)
     if schedule:
-        st.markdown("**Dla kierownictwa:** **① kopalnia i plan strzałów** (obszary wydobycia, planowane strzały – grupa "
-                    "„📅 Plan strzałów” na mapie) → **② wariant „co jeśli”** (np. więcej wozideł, nowa droga) → "
-                    "**③ harmonogram**: kalendarz, cel produkcji i dobór planu o najniższym koszcie. Liczone tak, jak "
-                    "jeździcie dziś – obok efekt systemu przydziału na żywo (RL), jeśli jest nauczony.")
+        st.markdown("**① Kopalnia i plan strzałów** (obszary wydobycia, planowane strzały – grupa "
+                    "„📅 Plan strzałów” na mapie) → **② Wariant „co jeśli”** (np. więcej wozideł, nowa droga) → "
+                    "**③ Harmonogram**: kalendarz, cel produkcji i dobór planu o najniższym koszcie. Bazą jest obecny "
+                    "sposób przydziału; obok efekt przydziału RL, jeśli polityka jest nauczona.")
         tabs = st.tabs(["① Kopalnia i plan strzałów", "② Wariant – co jeśli", "③ Harmonogram"])
         with tabs[0]:
             render_map_tab(raw, set_raw, simple=True, schedule=True)
@@ -475,10 +475,9 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
 
             step_period(raw, yaml_text, seed)
         return
-    st.markdown("**Dla dyspozytora, kierowców i operatorów:** **① kopalnia dziś → ② kalibracja** (model dopasowany "
-                "do prawdziwej zmiany) **→ ③ jak było dziś** (odtworzenie zmiany – docelowo z telefonów) **→ ④ "
-                "optymalizacja RL** – czego nauczył się system i co dostają ludzie w kabinach. Szczegóły są w "
-                "**Trybie zaawansowanym** (przełącznik w panelu bocznym).")
+    st.markdown("**① Kopalnia dziś → ② Kalibracja** (model dopasowany do rzeczywistej zmiany) **→ ③ Jak było "
+                "dziś** (odtworzenie zmiany – docelowo z danych telemetrycznych) **→ ④ Optymalizacja RL** – nauczona "
+                "polityka przydziału i komunikaty dla operatorów. Pełne parametry: **Tryb zaawansowany** (panel boczny).")
     tabs = st.tabs(["① Kopalnia dziś", "② Kalibracja", "③ Jak było dziś", "④ Optymalizacja RL"])
     with tabs[0]:
         render_map_tab(raw, set_raw, simple=True, schedule=False)

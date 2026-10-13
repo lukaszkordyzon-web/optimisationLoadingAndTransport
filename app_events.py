@@ -50,7 +50,7 @@ def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict |
         from kruszyk.site import blast_point
 
         if not blast_point(site or {}):
-            st.info("Ekipa jedzie do najbliższego **planowanego odstrzału** (planuje się go w trybie „🗓️ Harmonogram”). "
+            st.info("Ekipa jedzie do najbliższego **planowanego odstrzału** (planuje się go w module „Planowanie produkcji”). "
                     "Bez niego ekipa nie jeździ po mapie, ale zamknięcie wyrobiska w podanych godzinach i tak "
                     "obowiązuje.")
         c = st.columns(5)

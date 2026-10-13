@@ -272,7 +272,7 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
             a["id"] = next(f"S-{i:02d}" for i in range(1, 1000) if f"S-{i:02d}" not in ids)
         site["planned_piles"].append({**a, "polygon": _latlon(g["coordinates"][0][:-1])})
         ensure_uids(site)
-        return (f"✅ Planowany strzał {a['id']} w dniu roboczym {a.get('blast_day', 1)} – w module „🗓️ Harmonogram” "
+        return (f"✅ Planowany strzał {a['id']} w dniu roboczym {a.get('blast_day', 1)} – w module „Planowanie produkcji” "
                 f"koparka bez urobku sama tu przejedzie")
     if target == "Kierunek urabiania koparki":
         ex = next((e for e in site["excavators"] if e["id"] == attrs.get("excavator")), None)
@@ -1104,13 +1104,13 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                 help="Wozidła nie miną się na tej drodze. Postaw na niej mijanki (tryb „Mijanka”). Pierwszeństwo ma "
                      "wozidło jadące pod górę – jadące w dół czeka na najbliższej mijance.")
             attrs["active"] = not st.checkbox("Droga planowana (dziś nieużywana)",
-                                              help="Narysuj ją teraz, a włączysz w wariancie (moduł „🗓️ Harmonogram” → „② Wariant – co jeśli”).")
+                                              help="Narysuj ją teraz, a włączysz w wariancie (moduł „Planowanie produkcji” → „② Wariant – co jeśli”).")
             st.caption("Narzędzie „linia” (/). Rysuj po osi drogi, zakończ klikając ostatni punkt. "
                        "Końce dróg, które się łączą, stawiaj blisko siebie (≤ 30 m).")
         elif mode == "Usyp (materiał)":
             planned = schedule is not False and st.radio(
                 "Stan", ["leży – urobek gotowy", "planowany odstrzał"], horizontal=True, key="pile_status",
-                help="Planowanie odstrzałów jest w module „🗓️ Harmonogram”.") == "planowany odstrzał"
+                help="Planowanie odstrzałów jest w module „Planowanie produkcji”.") == "planowany odstrzał"
             attrs["status"] = "planned" if planned else "lying"
             n_all = len(site["piles"]) + len(site.get("planned_piles", []))
             attrs["id"] = st.text_input("Oznaczenie usypu", f"{'S' if planned else 'U'}-{n_all + 1:02d}", key=f"pile_id_{planned}")
@@ -1157,7 +1157,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             if share > 0:
                 attrs["target_share"] = share
             attrs["blast_day"] = int(st.number_input("Strzał w dniu roboczym nr", 1, 300, 3, 1, key="pl_day",
-                                                     help="licząc od pierwszego dnia okresu w module „🗓️ Harmonogram” "
+                                                     help="licząc od pierwszego dnia okresu w module „Planowanie produkcji” "
                                                           "(1 = pierwszy dzień roboczy)"))
             c = st.columns(2)
             attrs["t_per_m"] = c[0].number_input("Ton na metr wiercenia [t/mb]", 5.0, 500.0, 50.0, 5.0, key="pl_tpm",
@@ -1425,7 +1425,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                 st.rerun()
     if len(tabs) > 3:
         with t_plan:
-            st.markdown("**🟧 Obszary wydobycia** – program sam ustala terminy strzałów (moduł „🗓️ Harmonogram”).")
+            st.markdown("**🟧 Obszary wydobycia** – program sam ustala terminy strzałów (moduł „Planowanie produkcji”).")
             if site.get("areas"):
                 object_table(site, "areas", lambda: pd.DataFrame(
                     [{"id": a["id"], "level": a.get("level"), "level_m": a.get("level_m"), "material": a.get("material", ""),

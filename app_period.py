@@ -63,12 +63,12 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         if sc.rl_weights:
             compare_rl = st.toggle("📱 Porównaj z systemem przydziału na żywo (RL)", True, key="per_rl",
                                    help="Ten sam plan policzony drugi raz z przydziałem i zaleceniami nauczonymi w "
-                                        "module „🚚 Zmiana” – widać, ile ton i złotych na okres daje wdrożenie.")
+                                        "module „Analiza zmiany” – widać, ile ton i złotych na okres daje wdrożenie.")
         else:
             compare_rl = False
-            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **🚚 Zmiana → ④ Optymalizacja RL**, "
+            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **Analiza zmiany → ④ Optymalizacja RL**, "
                        "a tu zobaczysz, ile daje na cały okres.")
-    st.caption("Harmonogram liczony jest tak, jak jeździcie dziś (kierowca wraca do „swojej” koparki)"
+    st.caption("Baza harmonogramu: obecny sposób przydziału (wozidło wraca do przypisanej koparki)"
                + (" – obok to samo z systemem RL." if compare_rl else "."))
 
     applied = st.session_state.get("prod_applied")

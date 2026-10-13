@@ -103,7 +103,7 @@ def test_simple_mode_variant_compares_with_today():
     name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
     at.sidebar.selectbox[0].select(name).run()
     at.sidebar.button[0].click().run()
-    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
+    at.radio(key="work_kind").set_value("Planowanie produkcji").run()
     next(b for b in at.button if "Utwórz wariant" in b.label).click().run()
     assert not at.exception, at.exception
     assert at.session_state["variant_yaml"]
@@ -157,7 +157,7 @@ def test_planning_only_in_schedule_mode():
     assert not at.exception, at.exception
     assert not [r for r in at.radio if r.key == "pile_status"]  # one shift: piles only as they lie today
     assert "📅 Plan strzałów" not in at.radio(key="draw_group").options
-    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
+    at.radio(key="work_kind").set_value("Planowanie produkcji").run()
     at.radio(key="draw_group").set_value("⛏️ Urobek i koparki").run()
     assert not at.exception, at.exception
     assert [r for r in at.radio if r.key == "pile_status"]  # schedule: a pile can be a planned blast
@@ -190,7 +190,7 @@ def test_schedule_compares_with_rl_when_learned():
     name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
     at.sidebar.selectbox[0].select(name).run()
     at.sidebar.button[0].click().run()
-    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
+    at.radio(key="work_kind").set_value("Planowanie produkcji").run()
     assert not at.exception, at.exception
     assert not [t for t in at.toggle if t.key == "per_rl"]  # nothing learned yet: only a hint where to learn
     raw = dict(at.session_state["raw"])
@@ -207,7 +207,7 @@ def test_schedule_compares_with_rl_when_learned():
 
 def test_production_goal_backwards_and_applied():
     at = AppTest.from_file(APP, default_timeout=300).run()  # the default mine
-    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
+    at.radio(key="work_kind").set_value("Planowanie produkcji").run()
     assert not at.exception, at.exception
     at.number_input(key="per_days").set_value(3).run()
     next(b for b in at.button if "Policz plan wstecz" in b.label).click().run()
@@ -239,7 +239,7 @@ def test_calibration_screen_fits_and_saves():
 
 def test_chance_of_the_plan():
     at = AppTest.from_file(APP, default_timeout=300).run()
-    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
+    at.radio(key="work_kind").set_value("Planowanie produkcji").run()
     at.number_input(key="per_days").set_value(2).run()
     at.number_input(key="per_target").set_value(8000.0).run()
     at.selectbox(key="mc_n").set_value(10).run()

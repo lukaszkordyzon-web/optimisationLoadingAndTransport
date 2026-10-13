@@ -27,7 +27,7 @@ def status_line(sc) -> None:
                    .replace(",", " "))
     else:
         st.warning("⚠️ Model nieskalibrowany – czasy, prędkości i przestoje to założenia, więc tony i koszty są "
-                   "poglądowe. Wpisz dane z prawdziwej zmiany: moduł **🚚 Zmiana → ② Kalibracja**.")
+                   "poglądowe. Wpisz dane z prawdziwej zmiany: moduł **Analiza zmiany → ② Kalibracja**.")
 
 
 def step_calibration(raw: dict, sc, set_raw) -> None:
