@@ -580,7 +580,8 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
             if k not in ("id", "accepts", "capacity_tph", "hopper_t", "product", "target_t")}
     new["crushers_extra"] = [{**base, "id": c["id"], "capacity_tph": float(c.get("capacity_tph", 800)),
                               "hopper_t": float(c.get("hopper_t", 150)), "accepts": list(c.get("accepts") or []),
-                              "product": c.get("product", ""), "target_t": float(c.get("target_t") or 0.0)}
+                              "product": c.get("product", ""), "target_t": float(c.get("target_t") or 0.0),
+                              **({"kwh_per_t": float(c["kwh_per_t"])} if c.get("kwh_per_t") else {})}
                              for c in site.get("crushers", [])]
     # keep fleet assignments only if they still point to existing excavators
     ex_ids = {e["id"] for e in excavators}

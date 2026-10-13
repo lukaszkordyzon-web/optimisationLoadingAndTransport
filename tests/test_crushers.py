@@ -57,3 +57,17 @@ def test_month_with_two_crushers_reports_plan():
     assert "kr_C-2_t" in df and df["kr_C-2_t"].sum() > 0
     rows = {r["kruszarka"]: r for r in summary(df, plan, sc.crushers)["kruszarki"]}
     assert rows["C-2"]["plan_t"] == 4000 * len(df) and rows["C-2"]["wykonanie_pct"] > 0
+
+
+def test_product_sets_energy_per_tonne():
+    from kruszyk.config import PRODUCTS
+
+    raw = yaml.safe_load(DEMO.read_text())
+    s = raw["site"]
+    s["crushers"] = [{"id": "C-2", "lat": 49.9946, "lon": 20.0240, "capacity_tph": 900, "hopper_t": 120,
+                      "accepts": ["U-03"], "product": "piasek łamany 0–2", "kwh_per_t": PRODUCTS["piasek łamany 0–2"]}]
+    s["crusher"]["accepts"] = ["U-01", "U-02", "S-01", "S-02", "O1"]
+    sc = scenario_from_dict(site_to_scenario(s, raw))
+    assert sc.crushers_extra[0].kwh_per_t == PRODUCTS["piasek łamany 0–2"] > sc.crusher.kwh_per_t
+    by = {c["crusher"]: c for c in simulate(sc, seed=1).kpi["crushers"]}
+    assert by["C-2"]["kwh_per_t"] > 1.5 * by["C-1"]["kwh_per_t"]  # fine product = much more energy per tonne

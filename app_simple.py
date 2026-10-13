@@ -76,7 +76,8 @@ def _crushers_summary(k: dict) -> None:
     rows = [{"kruszarka": c["crusher"], "produkt": c.get("product") or "–",
              "przyjmuje z": ", ".join(c.get("accepts") or []) or "wszystkich",
              "skruszone [t]": round(c["crushed_t"]), "plan [t]": round(c["target_t"]) if c.get("target_t") else None,
-             "wykonanie planu [%]": c.get("plan_pct"), "wykorzystanie [%]": round(100 * c["utilization"]),
+             "wykonanie planu [%]": c.get("plan_pct"), "energia [kWh/t]": c.get("kwh_per_t"),
+             "wykorzystanie [%]": round(100 * c["utilization"]),
              "bez nadawy [h]": c["starved_h"]} for c in cs]
     st.markdown("**🏭 Kruszarki – produkcja**")
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")

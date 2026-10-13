@@ -1222,7 +1222,9 @@ class SimResult:
                           "utilization": round(u.busy_s / shift_s, 3), "starved_h": round(u.starved_s / 3600, 2),
                           "accepts": list(u.cfg.accepts), "product": u.cfg.product, "target_t": u.cfg.target_t,
                           "plan_pct": round(100 * u.crushed_t / u.cfg.target_t, 1) if u.cfg.target_t else None,
-                          "capacity_tph": u.cfg.capacity_tph} for u in sim.units.values()],
+                          "capacity_tph": u.cfg.capacity_tph, "kwh": round(u.kwh),
+                          "kwh_per_t": round(u.kwh / u.crushed_t, 2) if u.crushed_t else None}
+                         for u in sim.units.values()],
             "crusher_starved_h": round(sim.crusher_starved_s / 3600, 2),
             "stockpile_in_t": round(sim.stockpile_in_t, 1),
             "stockpile_end_t": round(sim.stockpile_t, 1),

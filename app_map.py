@@ -10,7 +10,7 @@ import streamlit as st
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
-from kruszyk.config import SPOT_MODES
+from kruszyk.config import PRODUCTS, SPOT_MODES
 from kruszyk.psd import DEFAULT_PRESET, PRESETS, SIEVES_MM, clean, preset_of, rosin_rammler, summary
 from kruszyk.site import (SNAP_M, along_m, analyze_site, normalize_roads, centroid, haversine_m, parse_coords,
                           point_along, polygon_area_m2, polyline_length_m, site_to_scenario)
@@ -319,7 +319,8 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
                 next(f"C-{i}" for i in range(2, 100) if f"C-{i}" not in ids)
             site["crushers"].append({"id": cid, "lat": lat, "lon": lon, "capacity_tph": attrs.get("capacity_tph", 800.0),
                                      "hopper_t": attrs.get("hopper_t", 150.0), "accepts": attrs.get("accepts", []),
-                                     "product": attrs.get("product", ""), "target_t": attrs.get("target_t", 0.0)})
+                                     "product": attrs.get("product", ""), "target_t": attrs.get("target_t", 0.0),
+                                     "kwh_per_t": attrs.get("kwh_per_t")})
             ensure_uids(site)
             return f"✅ Dodano kruszarkę {cid} – zbuduj trasy (zapisz kopalnię), żeby wozidła do niej jeździły"
         site["crusher"] = {**(site.get("crusher") or {}), "lat": lat, "lon": lon}
@@ -1000,7 +1001,10 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                 attrs["hopper_t"] = st.number_input("Kosz [t]", 10.0, 2000.0, 150.0, 10.0, key="cr_hop")
                 attrs["accepts"] = st.multiselect(
                     "Przyjmuje urobek z (puste = ze wszystkich)", _pile_ids(site), key="cr_acc")
-                attrs["product"] = st.text_input("Co produkuje", "", key="cr_prod", placeholder="np. kruszywo 0–31,5")
+                attrs["product"] = st.selectbox("Co produkuje", list(PRODUCTS), key="cr_prod")
+                attrs["kwh_per_t"] = st.number_input("Energia [kWh/t]", 0.1, 10.0, float(PRODUCTS[attrs["product"]]),
+                                                     0.1, key=f"cr_kwh_{attrs['product']}",
+                                                     help="typowa dla wybranego produktu – możesz poprawić")
                 attrs["target_t"] = st.number_input("Plan na zmianę [t] (0 = bez planu)", 0.0, 100_000.0, 0.0, 500.0,
                                                     key="cr_plan")
             st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku). Każda kruszarka "
@@ -1322,10 +1326,12 @@ def crushers_table(site: dict, raw: dict) -> None:
         return
     main, cr = site["crusher"], raw.setdefault("crusher", {})
     rows = [{"id": main.get("id", "C-1"), "rola": "główna", "capacity_tph": float(cr.get("capacity_tph", 1000)),
-             "hopper_t": float(cr.get("hopper_t", 150)), "product": main.get("product", ""),
+             "hopper_t": float(cr.get("hopper_t", 150)), "product": main.get("product") or None,
+             "kwh_per_t": float(cr.get("kwh_per_t", 1.1)),
              "target_t": float(main.get("target_t") or 0.0), "accepts": list(main.get("accepts") or [])}]
     rows += [{"id": c["id"], "rola": "dodatkowa", "capacity_tph": float(c.get("capacity_tph", 800)),
-              "hopper_t": float(c.get("hopper_t", 150)), "product": c.get("product", ""),
+              "hopper_t": float(c.get("hopper_t", 150)), "product": c.get("product") or None,
+              "kwh_per_t": float(c.get("kwh_per_t") or cr.get("kwh_per_t", 1.1)),
               "target_t": float(c.get("target_t") or 0.0), "accepts": list(c.get("accepts") or [])}
              for c in site.get("crushers", [])]
     snap = f"crush_tbl_{st.session_state.obj_ver}_{st.session_state.get('ver', 0)}"
@@ -1336,16 +1342,32 @@ def crushers_table(site: dict, raw: dict) -> None:
                             "id": "kruszarka", "rola": "rola",
                             "capacity_tph": st.column_config.NumberColumn("wydajność [t/h]", min_value=50.0),
                             "hopper_t": st.column_config.NumberColumn("kosz [t]", min_value=10.0),
-                            "product": st.column_config.TextColumn("co produkuje"),
+                            "product": st.column_config.SelectboxColumn(
+                                "co produkuje", options=list(PRODUCTS),
+                                help="wybór produktu ustawia typową energochłonność (kWh/t) – możesz ją poprawić"),
+                            "kwh_per_t": st.column_config.NumberColumn(
+                                "energia [kWh/t]", min_value=0.1, max_value=10.0, step=0.1, format="%.2f",
+                                help="zużycie energii na tonę przy dobrym rozdrobnieniu; grube bryły podnoszą je"),
                             "target_t": st.column_config.NumberColumn("plan na zmianę [t]", min_value=0.0),
                             "accepts": st.column_config.MultiselectColumn(
                                 "przyjmuje z usypów (puste = wszystkie)", options=_pile_ids(site))})
+    refresh = False
     for i, r in ed.iterrows():
         tgt = main if i == 0 else (site["crushers"][i - 1] if i - 1 < len(site.get("crushers", [])) else None)
         if tgt is None:
             continue
         acc = [a for a in (r["accepts"] if isinstance(r["accepts"], list) else []) if a]
-        new = {"product": str(r["product"] or ""), "target_t": float(r["target_t"] or 0.0), "accepts": acc,
+        product = "" if r["product"] is None or pd.isna(r["product"]) else str(r["product"])
+        kwh = float(r["kwh_per_t"]) if not pd.isna(r["kwh_per_t"]) else None
+        if product != (tgt.get("product") or "") and product in PRODUCTS:
+            kwh = PRODUCTS[product]  # another product chosen -> its typical energy
+            refresh = True
+        if kwh:
+            if i == 0:
+                cr["kwh_per_t"] = kwh
+            else:
+                tgt["kwh_per_t"] = kwh
+        new = {"product": product, "target_t": float(r["target_t"] or 0.0), "accepts": acc,
                "id": str(r["id"] or "").strip() or tgt.get("id", "C-1")}
         defaults = {"product": "", "target_t": 0.0, "accepts": [], "id": "C-1"}
         for k_, v_ in new.items():  # only real changes (so a fresh mine doesn't look edited)
@@ -1355,6 +1377,10 @@ def crushers_table(site: dict, raw: dict) -> None:
             cr["capacity_tph"], cr["hopper_t"] = float(r["capacity_tph"]), float(r["hopper_t"])
         else:
             tgt["capacity_tph"], tgt["hopper_t"] = float(r["capacity_tph"]), float(r["hopper_t"])
+    if refresh:  # show the energy of the newly chosen product
+        st.session_state.pop(snap, None)
+        st.session_state.obj_ver += 1
+        st.rerun()
     st.caption("Wozidło wiezie urobek do kruszarki, która go przyjmuje; gdy przyjmuje kilka – dziś do najbliższej, "
                "przy przydziale systemowym / RL do tej, gdzie szybciej wyładuje. Kolejną kruszarkę dodasz na mapie: "
                "grupa „🛣️ Drogi” → Kruszarka → „Dodaj kolejną”.")

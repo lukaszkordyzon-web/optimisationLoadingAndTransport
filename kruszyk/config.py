@@ -80,6 +80,20 @@ class TruckFleet:
     blend: dict = field(default_factory=dict)
 
 
+# What a crusher can produce and how much energy it typically takes per tonne (crushing + screening).
+# Finer product = more crushing stages = more kWh/t. Indicative values – overwrite them with your meters.
+PRODUCTS = {
+    "kamień łamany / narzut 63–250": 0.6,
+    "kruszywo 0–63 (podbudowa)": 0.9,
+    "tłuczeń 31,5–63": 1.0,
+    "mieszanka 0–31,5": 1.2,
+    "kliniec 16–31,5": 1.4,
+    "grys 8–16": 1.8,
+    "grys 2–8": 2.2,
+    "piasek łamany 0–2": 2.8,
+}
+
+
 @dataclass
 class Crusher:
     capacity_tph: float
