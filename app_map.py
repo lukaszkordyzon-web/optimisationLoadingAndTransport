@@ -554,6 +554,116 @@ def apply_edit_drawing(site: dict, sel: str, g: dict) -> str:
     return f"✅ Przerysowano usyp {o['id']}"
 
 
+def _fmt(v, unit: str = "", nd: int = 0) -> str:
+    if v is None or v == "" or (isinstance(v, float) and v != v):
+        return "–"
+    if isinstance(v, bool):
+        return "tak" if v else "nie"
+    if isinstance(v, (int, float)):
+        return f"{v:,.{nd}f}".replace(",", " ") + (f" {unit}" if unit else "")
+    return str(v)
+
+
+def _node_elev(info: dict, p) -> float | None:
+    g, elev = info.get("graph"), info.get("elev") or {}
+    if g is None or not elev:
+        return None
+    n = min(elev, key=lambda i: haversine_m(g.nodes[i], tuple(p)))
+    return float(elev[n]) if haversine_m(g.nodes[n], tuple(p)) < 2 * SNAP_M else None
+
+
+def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
+    """Everything about one object – what was entered and what follows from it (heights, lengths, links).
+    First item = the title."""
+    o = find_obj(site, sel)
+    kind = sel.split(":", 1)[0]
+    info = analyze_site(site)
+    lv = {x["name"]: x for x in site.get("levels") or []}
+    P: list[tuple[str, str]] = []
+    if kind == "road":
+        L = polyline_length_m(o["coords"])
+        z0, z1 = _node_elev(info, o["coords"][0]), _node_elev(info, o["coords"][-1])
+        auto = next((x["name"] for x in site.get("levels") or [] if (o.get("name") or o.get("id")) in x.get("roads", [])), None)
+        bays = [b["id"] for b in site.get("passing_bays", []) if along_m(o["coords"], (b["lat"], b["lon"]))[1] <= SNAP_M]
+        P = [("title", f"🛣️ {o.get('kind', 'droga')} {o.get('id')} – {o.get('name', '')}"),
+             ("rodzaj", o.get("kind")), ("długość", _fmt(L, "m")),
+             ("nachylenie wzdłuż rysowania", _fmt(o.get("grade_draw_pct"), "%", 1)),
+             ("rzędna początku (1. punkt)", _fmt(z0, "m", 1)), ("rzędna końca", _fmt(z1, "m", 1)),
+             ("różnica wysokości", _fmt(None if z0 is None or z1 is None else z1 - z0, "m", 1)),
+             ("rzędna wlotu (wpisana)", _fmt(o.get("inlet_elev_m"), "m", 1)), ("poziom (auto)", auto or "–"),
+             ("limit prędkości", _fmt(o.get("speed_limit_kmh"), "km/h")), ("jeden pas", _fmt(bool(o.get("single_lane")))),
+             ("mijanki", ", ".join(bays) or "–"), ("w użyciu", _fmt(o.get("active", True))),
+             ("czas przejazdu przy limicie", _fmt(L / max(float(o.get("speed_limit_kmh") or 30), 1) * 3.6 / 60, "min", 1))]
+    elif kind in ("pile", "planned"):
+        from kruszyk.psd import summary as psd_summary
+
+        max_feed = float(raw.get("crusher", {}).get("max_feed_mm", 800))
+        sm = psd_summary(o["psd"], max_feed) if o.get("psd") else {}
+        exs = [e["id"] for e in site.get("excavators", []) if e.get("pile") == o["id"]]
+        P = [("title", f"{'🧨 planowany odstrzał' if kind == 'planned' else '⛰️ usyp'} {o['id']}"),
+             ("materiał", o.get("material")), ("ilość", _fmt(o.get("tonnage_t"), "t")),
+             ("poziom", (o.get("level") or "–") + (" (auto)" if o.get("level_auto") else "")),
+             ("rzędna", _fmt(o.get("level_m"), "m", 1)), ("powierzchnia", _fmt(polygon_area_m2(o["polygon"]), "m²")),
+             ("gęstość spulchniona", _fmt(o.get("loose_density_t_m3"), "t/m³", 2)),
+             ("uziarnienie", preset_of(o["psd"]) if o.get("psd") else "–"),
+             ("P80", _fmt(sm.get("P80 [mm]"), "mm")), ("nadziarno", _fmt(sm.get("nadziarno [%]"), "%", 1)),
+             ("udział w nadawie", _fmt(o.get("target_share"), "%")), ("koparki", ", ".join(exs) or "–"),
+             ("kruszarki przyjmujące", ", ".join(c.get("id", "C-1") for c in [site.get("crusher") or {}] + site.get("crushers", [])
+                                                   if c and (not c.get("accepts") or o["id"] in c["accepts"])) or "–")]
+        if kind == "planned":
+            m = float(o.get("tonnage_t") or 0) / float(o.get("t_per_m") or 50)
+            P += [("dzień strzału (roboczy)", _fmt(o.get("blast_day"))), ("przyjazd ekipy", o.get("crew_arrive") or "–"),
+                  ("odpalenie", f"{o.get('fire_from', '–')}–{o.get('fire_to', '–')}"),
+                  ("ewakuacja przed", _fmt(o.get("evacuation_min"), "min")), ("wyjazd ekipy", o.get("crew_leave") or "–"),
+                  ("t/mb", _fmt(o.get("t_per_m"), "t/mb")), ("metry do wywiercenia", _fmt(m, "m")),
+                  ("nawiercony", _fmt(bool(o.get("drilled"))))]
+    elif kind == "excavator":
+        lvx = (info.get("levels") or {}).get(o["id"], {})
+        park = next((p for p in site.get("parking", []) if p.get("excavator") == o["id"]), None)
+        spot = ", ".join(f"{k} {v:g}%" for k, v in (o.get("spotting") or {}).items()) or "stały czas"
+        P = [("title", f"⛏️ koparka {o['id']}"), ("ładuje z usypu", o.get("pile")),
+             ("łyżka", _fmt(o.get("bucket_m3"), "m³", 1)), ("cykl łyżki", _fmt(o.get("swing_cycle_s"), "s")),
+             ("rzędna (z dróg)", _fmt(lvx.get("elev_m"), "m", 1)), ("odległość od drogi", _fmt(lvx.get("dist_to_road_m"), "m")),
+             ("sposób podstawiania", spot),
+             ("kierunek urabiania", _fmt(polyline_length_m(o["dig_path"]), "m") if o.get("dig_path") else "–"),
+             ("przestawienie", f"co {o.get('relocate_every_t', 600):g} t, {o.get('relocate_min', 4):g} min" if o.get("dig_path") else "–"),
+             ("miejsce postoju", "tak" if park else "– (cofa się po swojej trasie)"),
+             ("położenie", f"{o['lat']:.5f}, {o['lon']:.5f}")]
+    elif kind in ("crusher", "crusher2"):
+        main = kind == "crusher"
+        cr = raw.get("crusher", {}) if main else o
+        P = [("title", f"🏭 kruszarka {o.get('id', 'C-1')}{' (główna)' if main else ''}"),
+             ("wydajność", _fmt(cr.get("capacity_tph"), "t/h")), ("kosz", _fmt(cr.get("hopper_t"), "t")),
+             ("produkt", o.get("product") or "–"), ("energia", _fmt(cr.get("kwh_per_t", raw.get("crusher", {}).get("kwh_per_t")), "kWh/t", 2)),
+             ("plan na zmianę", _fmt(o.get("target_t"), "t")), ("przyjmuje z", ", ".join(o.get("accepts") or []) or "wszystkich usypów"),
+             ("rzędna", _fmt(site["crusher"].get("elev_m") if main else _node_elev(info, (o["lat"], o["lon"])), "m", 1)),
+             ("położenie", f"{o['lat']:.5f}, {o['lon']:.5f}")]
+    elif kind == "area":
+        n = -(-float(o.get("reserves_t") or 0) // max(float(o.get("blast_max_t") or 1), 1))
+        P = [("title", f"🟧 obszar wydobycia {o['id']}"), ("materiał", o.get("material")),
+             ("poziom", (o.get("level") or "–") + (" (auto)" if o.get("level_auto") else "")),
+             ("rzędna", _fmt(o.get("level_m"), "m", 1)), ("zasoby", _fmt(o.get("reserves_t"), "t")),
+             ("powierzchnia", _fmt(polygon_area_m2(o["polygon"]), "m²")), ("największy strzał", _fmt(o.get("blast_max_t"), "t")),
+             ("liczba strzałów (ok.)", _fmt(n)), ("strzelaj poniżej", _fmt(o.get("reblast_below_t"), "t")),
+             ("odstęp między strzałami", _fmt(o.get("min_gap_days"), "dni rob.")),
+             ("t/mb", _fmt(o.get("t_per_m"), "t/mb")),
+             ("godziny strzału", f"ekipa {o.get('crew_arrive', '–')}, odpalenie {o.get('fire_from', '–')}–{o.get('fire_to', '–')}")]
+    elif kind == "bay":
+        road = next((r for r in site.get("roads", []) if along_m(r["coords"], (o["lat"], o["lon"]))[1] <= SNAP_M), None)
+        P = [("title", f"⇆ mijanka {o.get('id')}"), ("na drodze", (road or {}).get("name", "–")),
+             ("rzędna", _fmt(_node_elev(info, (o["lat"], o["lon"])), "m", 1)), ("położenie", f"{o['lat']:.5f}, {o['lon']:.5f}")]
+    elif kind == "parking":
+        P = [("title", f"🅿️ miejsce postoju koparki {o.get('excavator')}"), ("koparka", o.get("excavator")),
+             ("położenie", f"{o['lat']:.5f}, {o['lon']:.5f}")]
+    elif kind == "dig":
+        e = o["_ex"]
+        P = [("title", f"⤳ kierunek urabiania {e['id']}"), ("długość", _fmt(polyline_length_m(e["dig_path"]), "m")),
+             ("przestawienie co", _fmt(e.get("relocate_every_t", 600), "t")), ("czas przestawienia", _fmt(e.get("relocate_min", 4), "min"))]
+    else:
+        P = [("title", sel)] + [(k, _fmt(v)) for k, v in o.items() if not isinstance(v, (list, dict))]
+    return [(k, v if isinstance(v, str) else _fmt(v)) for k, v in P]
+
+
 def highlight(m, site: dict, sel: str | None) -> None:
     """Yellow halo around the selected object (drawn under it)."""
     o = find_obj(site, sel)
@@ -950,6 +1060,8 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
     sync_levels(site)
     levels_editor(site)
     groups = [g for g in MODE_GROUPS if schedule is not False or g != "📅 Plan strzałów"]
+    if st.session_state.get("group_next") in groups:  # "edit this object" from the properties panel
+        st.session_state.draw_group = st.session_state.pop("group_next")
     if st.session_state.get("draw_group") not in groups:
         st.session_state.draw_group = groups[0]
     group = st.radio("Co robisz?", groups, horizontal=True, key="draw_group",
@@ -1167,39 +1279,61 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         draw_network(objects, analyze_site(site))
         out = st_folium(editing_map(site), height=620, use_container_width=True,
                         key=f"map_{st.session_state.map_key}", feature_group_to_add=objects,
-                        returned_objects=["last_active_drawing", "last_object_clicked",
+                        returned_objects=["all_drawings", "last_object_clicked",
                                           "last_object_clicked_tooltip"])
 
     out = out or {}
     click = (out.get("last_object_clicked_tooltip"), repr(out.get("last_object_clicked")))
     if out.get("last_object_clicked") and click != st.session_state.get("last_click"):
         st.session_state.last_click = click
-        if mode == EDIT:
-            sel = sel_from_click(site, click[0], out.get("last_object_clicked"))
-            if sel and sel != st.session_state.get("sel_box"):
+        sel = sel_from_click(site, click[0], out.get("last_object_clicked"))
+        if sel:
+            st.session_state.info_sel = sel  # properties of the clicked object (any mode)
+            if mode == EDIT and sel != st.session_state.get("sel_box"):
                 st.session_state.sel_next = sel
                 st.session_state.edit_arm = None
-                st.rerun()
-    geom = out.get("last_active_drawing")
-    if geom and geom.get("geometry"):
-        sig = repr(geom["geometry"])
-        if sig != st.session_state.get("last_added_geom"):
-            st.session_state.last_added_geom = sig
-            arm = st.session_state.get("edit_arm")
-            if mode != EDIT:
-                msg = add_drawing(site, geom["geometry"], mode, attrs)
-            elif arm:
-                msg = apply_edit_drawing(site, arm[1], geom["geometry"])
-                st.session_state.edit_arm = None
-            else:
-                msg = ("⚠️ W trybie edycji nic nie dodaję – wybierz obiekt i kliknij „📍 Przesuń” / „✏️ Przerysuj”, "
-                       "albo zmień tryb na rodzaj obiektu, który chcesz dodać.")
-            st.session_state.map_flash = msg
-            st.session_state.obj_ver += 1  # refresh the tables below, not the map
             st.rerun()
+    # new sketches = drawings that were not there before. (Not "last_active_drawing": the map component also
+    # reports a clicked existing object as the last drawing – that would add a copy of it.)
+    seen = st.session_state.setdefault("seen_drawings", set())
+    fresh = [f for f in (out.get("all_drawings") or []) if f.get("geometry") and repr(f["geometry"]) not in seen]
+    geom = fresh[-1] if fresh else None
+    for f in fresh:
+        seen.add(repr(f["geometry"]))
+    if geom:
+        arm = st.session_state.get("edit_arm")
+        if mode != EDIT:
+            msg = add_drawing(site, geom["geometry"], mode, attrs)
+        elif arm:
+            msg = apply_edit_drawing(site, arm[1], geom["geometry"])
+            st.session_state.edit_arm = None
+        else:
+            msg = ("⚠️ W trybie edycji nic nie dodaję – wybierz obiekt i kliknij „📍 Przesuń” / „✏️ Przerysuj”, "
+                   "albo zmień tryb na rodzaj obiektu, który chcesz dodać.")
+        st.session_state.map_flash = msg
+        st.session_state.obj_ver += 1  # refresh the tables below, not the map
+        st.rerun()
     flash = st.session_state.pop("map_flash", None)
     if flash:
         (st.success if flash.startswith("✅") else st.warning)(flash)
+    info_sel = st.session_state.get("info_sel")
+    if info_sel and find_obj(site, info_sel) is not None:
+        props = object_properties(site, info_sel, raw_for_build)
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([6, 1.3, 0.7])
+            c1.markdown(f"**ℹ️ {props[0][1]}** – kliknięty obiekt")
+            if c2.button("✏️ Edytuj / przesuń", key="info_edit"):
+                st.session_state.group_next, st.session_state.sel_next = "✏️ Edycja", info_sel
+                st.rerun()
+            if c3.button("✖", key="info_close", help="zamknij"):
+                st.session_state.pop("info_sel", None)
+                st.rerun()
+            half = (len(props) + 1) // 2
+            cols = st.columns(2)
+            for col, part in zip(cols, (props[1:half + 1], props[half + 1:])):
+                if part:
+                    col.dataframe(pd.DataFrame(part, columns=["właściwość", "wartość"]).astype(str),
+                                  hide_index=True, width="stretch")
 
     st.subheader("3. Obiekty na mapie")
     st.caption("Parametry poprawiasz w tabelach (wiersz można też usunąć). Położenie i kształt – na mapie, w trybie "
@@ -1214,6 +1348,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
     t_ev = t_ex
     t_plan = tabs[3] if len(tabs) > 3 else None
     road_levels = {n: lv["name"] for lv in site.get("levels") or [] for n in lv.get("roads", [])}
+    net = analyze_site(site)
     with t_road:
         crushers_table(site, raw_for_build)
         if site["roads"]:
@@ -1222,10 +1357,21 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                                                                "single_lane": bool(r.get("single_lane")),
                                                                                "inlet_elev_m": r.get("inlet_elev_m")}
                  | {"poziom (auto)": road_levels.get(r.get("name") or r.get("id"), "–"),
+                    "rzędna początku [m]": _node_elev(net, r["coords"][0]),
+                    "rzędna końca [m]": _node_elev(net, r["coords"][-1]),
                     "długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]]),
-                extra=("active", "single_lane", "inlet_elev_m"), disabled=["id", "długość [m]", "poziom (auto)"],
+                extra=("active", "single_lane", "inlet_elev_m"),
+                disabled=["id", "długość [m]", "poziom (auto)", "rzędna początku [m]", "rzędna końca [m]"],
+                rerun_on=("inlet_elev_m", "grade_draw_pct", "active", "kind"),
                 column_config={**ROAD_COLS, "inlet_elev_m": st.column_config.NumberColumn(
-                    "rzędna wlotu [m]", help="pochylnia: rzędna pierwszego narysowanego punktu (puste = z sieci)")})
+                    "rzędna wlotu [m]", help="pochylnia: rzędna pierwszego narysowanego punktu (wlotu). Droga "
+                                             "pozioma: zwykle puste – jej rzędna wynika ze styku z pochylnią; wpisz "
+                                             "tylko dla drogi bez pochylni (np. poziom górny). Puste = z sieci."),
+                               "rzędna początku [m]": st.column_config.NumberColumn(format="%.1f"),
+                               "rzędna końca [m]": st.column_config.NumberColumn(format="%.1f")})
+            if net.get("warnings"):
+                for w in net["warnings"]:
+                    st.warning(w)
         else:
             st.caption("brak dróg")
         bays = site.get("passing_bays", [])
@@ -1244,7 +1390,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                 row["level_m"] = p.get("level_m")
                 row["pow. [m²]"] = round(polygon_area_m2(p["polygon"]))
                 rows.append(row)
-            object_table(site, "piles", lambda: pd.DataFrame(rows), extra=("target_share", "level"),
+            object_table(site, "piles", lambda: pd.DataFrame(rows), extra=("target_share", "level"), rerun_on=("level",),
                          disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]", "level_m"],
                          column_config={**PILE_COLS, "level": level_col(site),
                                         "level_m": st.column_config.NumberColumn("rzędna [m]", format="%.1f")})
@@ -1262,6 +1408,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                   "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "–"}
                  for p in site["planned_piles"]]),
                 extra=("target_share", "t_per_m", "drilled", "level", *TIME_COLS), disabled=["uziarnienie"],
+                rerun_on=("level",),
                 column_config={"id": "strzał", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
                                "level": level_col(site),
                                "tonnage_t": st.column_config.NumberColumn("ilość [t]", min_value=0.0),
@@ -1311,6 +1458,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                       "first_drilled": bool(a.get("first_drilled", True)), **{k: a.get(k) for k in TIME_COLS},
                       "pow. [m²]": round(polygon_area_m2(a["polygon"]))} for a in site["areas"]]),
                     extra=("target_share", "t_per_m", "first_drilled", "level", "level_m"), disabled=["pow. [m²]"],
+                    rerun_on=("level",),
                     column_config={"id": "obszar", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
                                    "level": level_col(site),
                                    "level_m": st.column_config.NumberColumn(
@@ -1333,10 +1481,22 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                "Biały punkt = węzeł (skrzyżowanie), czerwony = ślepy koniec drogi.")
     c1, c2 = st.columns([1, 3])
     if site.get("crusher"):
-        elev = c1.number_input("Rzędna kruszarki [m]", -500.0, 2000.0, float(site["crusher"].get("elev_m", 0.0)), 1.0,
-                               help="np. rzędna terenu n.p.m.; poziomy koparek liczone względem niej")
+        from kruszyk.site import crusher_fixed
+
+        fixed = crusher_fixed(site["crusher"])
+        elev = c1.number_input("Rzędna kruszarki [m]", -500.0, 5000.0, float(site["crusher"].get("elev_m", 0.0)), 1.0,
+                               key=f"cr_elev_{st.session_state.obj_ver}",
+                               help="Puste pole wlotu pochylni = rzędne liczone od kruszarki. Gdy pochylnie mają "
+                                    "rzędne wlotu, rzędna kruszarki liczy się z nich – chyba że wpiszesz ją tu ręcznie.")
         if elev != float(site["crusher"].get("elev_m", 0.0)):
-            site["crusher"]["elev_m"] = elev
+            site["crusher"]["elev_m"], site["crusher"]["elev_set"] = elev, True
+            st.session_state.obj_ver += 1
+            st.rerun()
+        if fixed and site["crusher"].get("elev_set") and c1.button("↺ Licz z wlotów pochylni"):
+            site["crusher"].pop("elev_set", None)
+            st.session_state.obj_ver += 1
+            st.rerun()
+        c1.caption("✍️ ustawiona ręcznie" if fixed else "🔗 z wlotów pochylni / sieci dróg")
     info = analyze_site(site)
     with c2:
         if info["graph"] is not None:
@@ -1520,7 +1680,7 @@ def crushers_table(site: dict, raw: dict) -> None:
                "grupa „🛣️ Drogi” → Kruszarka → „Dodaj kolejną”.")
 
 
-def object_table(site: dict, key: str, make_df, extra: tuple = (), **editor_kw) -> None:
+def object_table(site: dict, key: str, make_df, extra: tuple = (), rerun_on: tuple = (), **editor_kw) -> None:
     """Editable table of site objects. The editor works on a fixed snapshot (per object version) and every
     row is tied to its object by a hidden id – so deleting/editing a row always changes the right object."""
     ver = st.session_state.obj_ver
@@ -1531,6 +1691,7 @@ def object_table(site: dict, key: str, make_df, extra: tuple = (), **editor_kw) 
     ed = st.data_editor(df0, num_rows="dynamic", key=f"{key}_{ver}", hide_index=True, width="stretch", **editor_kw)
     readonly = set(editor_kw.get("disabled") or [])
     by_uid = {o["uid"]: o for o in site[key]}
+    before = {u: tuple(o.get(f) for f in rerun_on) for u, o in by_uid.items()}
     kept = set()
     for idx, row in ed.iterrows():
         if not isinstance(idx, (int, np.integer)) or idx >= len(uids):
@@ -1551,6 +1712,9 @@ def object_table(site: dict, key: str, make_df, extra: tuple = (), **editor_kw) 
                 obj[col] = None
     # rows deleted in the table disappear; objects added after the snapshot stay
     site[key] = [o for o in site[key] if o["uid"] in kept or o["uid"] not in uids]
+    if rerun_on and any(tuple(o.get(f) for f in rerun_on) != before.get(o["uid"]) for o in site[key]):
+        st.session_state.obj_ver += 1  # heights / levels changed: recompute the computed columns
+        st.rerun()
 
 
 def render_live_map(sc, snap: pd.DataFrame, colors: dict, labels: dict) -> None:

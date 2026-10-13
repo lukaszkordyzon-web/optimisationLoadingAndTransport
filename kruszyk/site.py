@@ -267,13 +267,15 @@ class RoadGraph:
                 out.append((n, float(z)))
         return out
 
-    def elevations(self, root: int, root_elev: float,
-                   anchors: list[tuple[int, float]] | None = None) -> tuple[dict[int, float], list[str]]:
+    def elevations(self, root: int, root_elev: float, anchors: list[tuple[int, float]] | None = None,
+                   root_fixed: bool = True) -> tuple[dict[int, float], list[str]]:
         """Node elevations along the road grades, from the crusher and from every ramp inlet with a given
         elevation (each node takes its height from the nearest such point). Flat roads therefore get the
         height of the place where they meet a ramp. Returns elevations and warnings where the drawn grades
         do not agree with the known heights (> 3 m)."""
-        anchors = [(root, root_elev)] + (self.ramp_anchors() if anchors is None else anchors)
+        anchors = self.ramp_anchors() if anchors is None else list(anchors)
+        if root_fixed or not anchors:  # the crusher's height counts only if set (or nothing else is known)
+            anchors = [(root, root_elev)] + anchors
         adj = self.adj()
         elev, dist, pq = {}, {}, []
         for n, z in anchors:
@@ -299,6 +301,12 @@ class RoadGraph:
                     warnings.append(f"Droga „{name}”: {kind} na różnych wysokościach ({elev[a]:.0f} / {elev[b]:.0f} m) – "
                                     "sprawdź nachylenia i rzędne wlotów pochylni")
         return elev, sorted(set(warnings))
+
+
+def crusher_fixed(c: dict | None) -> bool:
+    """Is the crusher's elevation given by the user (typed in, or from its level)? Otherwise it follows the
+    ramp inlets."""
+    return bool(c and (c.get("elev_set") or c.get("level")))
 
 
 def level_elev(site: dict, name) -> float | None:
@@ -454,7 +462,9 @@ def analyze_site(site: dict) -> dict:
     attached = {c_node}
     for e in site.get("excavators", []):
         attached.add(g.attach((e["lat"], e["lon"]))[0])
-    elev, warns = g.elevations(c_node, float(c.get("elev_m", 0.0)))
+    elev, warns = g.elevations(c_node, float(c.get("elev_m", 0.0)), root_fixed=crusher_fixed(c))
+    if not crusher_fixed(c) and c_node in elev:
+        c["elev_m"] = round(float(elev[c_node]), 1)  # from the ramp inlets
     out["elev"], out["warnings"] = elev, warns
     adj = g.adj()
     for n in range(len(g.nodes)):
@@ -492,7 +502,7 @@ def build_route(site: dict, start: tuple[float, float], route_id: str, end=None,
     # attach the end points first: splitting a road creates nodes that need an elevation too
     g.attach(tuple(start))
     g.attach(target)
-    elev, _ = g.elevations(c_node, float(c.get("elev_m", 0.0)))
+    elev, _ = g.elevations(c_node, float(c.get("elev_m", 0.0)), root_fixed=crusher_fixed(c))
     r = path_between(g, start, target, elev, end_name=end_name)
     if r is None:
         raise ValueError(f"{route_id}: brak połączenia drogowego – połącz drogi (koniec drogi ≤ {SNAP_M:.0f} m "
@@ -668,7 +678,7 @@ def _network(site: dict):
     g = RoadGraph(site["roads"])
     c = site["crusher"]
     c_node, _ = g.attach((c["lat"], c["lon"]))
-    elev, _ = g.elevations(c_node, float(c.get("elev_m", 0.0)))
+    elev, _ = g.elevations(c_node, float(c.get("elev_m", 0.0)), root_fixed=crusher_fixed(c))
     return g, elev
 
 
@@ -916,7 +926,7 @@ def poly_distance_m(a: list, b: list) -> float:
 
 
 # ---------------------------------------------------------------- automatic levels from flat roads
-LEVEL_SNAP_M = 1.0     # flat roads within this height are one level
+LEVEL_SNAP_M = 2.0     # flat roads within this height are one level
 LEVEL_NEAR_M = 150.0   # a pile / area closer than this to a level road belongs to that level
 
 
@@ -928,7 +938,7 @@ def _network_elev(site: dict):
     c = site.get("crusher")
     if c:
         root, _ = g.attach((c["lat"], c["lon"]))
-        elev, _ = g.elevations(root, float(c.get("elev_m", 0.0)))
+        elev, _ = g.elevations(root, float(c.get("elev_m", 0.0)), root_fixed=crusher_fixed(c))
     else:
         anchors = g.ramp_anchors()
         if not anchors:
@@ -938,24 +948,48 @@ def _network_elev(site: dict):
 
 
 def auto_levels(site: dict) -> list[dict]:
-    """Levels found from the flat roads: each flat road lies at the height where it meets a ramp."""
+    """Levels from the flat roads. Flat roads connected to each other form one level; its height is the height
+    where they meet a ramp (or the elevation typed in for one of them)."""
     g, elev = _network_elev(site)
     if g is None or not elev:
         return []
+    flat = {ri for ri, r in enumerate(g.roads) if abs(float(r.get("grade_draw_pct") or 0.0)) < 0.05}
+    nodes_of: dict[int, set] = {}
+    for (a, b), (_, ri) in g.edges.items():
+        nodes_of.setdefault(ri, set()).update((a, b))
+    # connected groups of flat roads (sharing a node)
+    parent = {ri: ri for ri in flat}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    flat_l = sorted(flat)
+    for i, a in enumerate(flat_l):
+        for b in flat_l[i + 1:]:
+            if nodes_of.get(a, set()) & nodes_of.get(b, set()):
+                parent[find(a)] = find(b)
+    groups: dict[int, list[int]] = {}
+    for ri in flat_l:
+        groups.setdefault(find(ri), []).append(ri)
+    sloped_nodes = set().union(*(nodes_of.get(ri, set()) for ri in range(len(g.roads)) if ri not in flat)) \
+        if len(flat) < len(g.roads) else set()
     found: list[dict] = []
-    for r in g.roads:
-        if abs(float(r.get("grade_draw_pct") or 0.0)) >= 0.05:
-            continue
-        zs = [elev[n] for n in range(len(g.nodes)) if n in elev
-              and min(haversine_m(g.nodes[n], tuple(c)) for c in r["coords"]) < SNAP_M]
+    for members in groups.values():
+        typed = [float(g.roads[ri]["inlet_elev_m"]) for ri in members if g.roads[ri].get("inlet_elev_m") not in (None, "")]
+        nodes = set().union(*(nodes_of.get(ri, set()) for ri in members))
+        contact = [elev[n] for n in nodes & sloped_nodes if n in elev]
+        zs = typed or contact or [elev[n] for n in nodes if n in elev]
         if not zs:
             continue
-        z = round(sum(zs) / len(zs), 1)
+        z = round(max(zs) if typed or contact else sum(zs) / len(zs), 1)
+        names = [g.roads[ri].get("name") or g.roads[ri].get("id") for ri in members]
         lv = next((x for x in found if abs(x["elev_m"] - z) <= LEVEL_SNAP_M), None)
         if lv is None:
-            lv = {"name": f"Poziom {z:+.0f}", "elev_m": z, "auto": True, "roads": []}
-            found.append(lv)
-        lv["roads"].append(r.get("name") or r.get("id"))
+            found.append({"name": f"Poziom {z:+.0f}", "elev_m": z, "auto": True, "roads": names})
+        else:
+            lv["roads"] += names
     return sorted(found, key=lambda x: -x["elev_m"])
 
 

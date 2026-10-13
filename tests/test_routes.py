@@ -201,5 +201,6 @@ def test_ramp_inlet_sets_heights_and_flat_roads_become_levels():
     assert bottom == pytest.approx(100.0 - 0.09 * 636, abs=1.5)  # inlet - 9 % of the ramp length
     u03 = next(p for p in site["piles"] if p["id"] == "U-03")
     assert names[u03["level"]] == bottom  # the pile next to the bottom road is on the bottom level
-    info = analyze_site(site)
-    assert any("nie zgadza" in w or "różnych wysokościach" in w for w in info["warnings"])  # crusher at 0 m vs inlet 100 m
+    assert not analyze_site(site)["warnings"]  # the crusher follows the ramp inlet
+    site["crusher"].update(elev_m=0.0, elev_set=True)  # typed in by hand: 0 m does not fit an inlet at 100 m
+    assert any("nie zgadza" in w or "różnych wysokościach" in w for w in analyze_site(site)["warnings"])

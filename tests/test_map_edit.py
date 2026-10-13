@@ -132,3 +132,33 @@ def test_pile_lying_or_planned_blast(site):
     assert msg.startswith("✅") and len(site["planned_piles"]) == n_pl + 1
     pl = site["planned_piles"][-1]
     assert pl["blast_day"] == 3 and pl["fire_from"] == "10:00" and "status" not in pl
+
+
+def test_properties_of_every_object(site):
+    import yaml as _y
+
+    from app_map import object_properties, site_items
+
+    raw = _y.safe_load(DEMO.read_text())
+    for sel in site_items(site):
+        props = object_properties(site, sel, raw)
+        assert props[0][0] == "title" and len(props) >= 3, sel
+        assert all(isinstance(v, str) for _, v in props)
+    road = next(r for r in site["roads"] if r["kind"] == "rampa")
+    p = dict(object_properties(site, f"road:{road['uid']}", raw))
+    assert p["rzędna początku (1. punkt)"] != "–" and "m" in p["długość"]
+    ex = site["excavators"][0]
+    assert dict(object_properties(site, f"excavator:{ex['uid']}", raw))["ładuje z usypu"] == ex["pile"]
+
+
+def test_levels_follow_the_ramp_inlet(site):
+    from kruszyk.site import sync_levels
+
+    R = {r["id"]: r for r in site["roads"]}
+    R["R1"]["grade_draw_pct"], R["R1"]["inlet_elev_m"] = 0.0, 300.0
+    R["R2"]["grade_draw_pct"], R["R2"]["inlet_elev_m"] = -10.0, 300.0
+    site.pop("levels", None)
+    sync_levels(site)
+    z = sorted((lv["elev_m"] for lv in site["levels"]), reverse=True)
+    assert z[0] == 300.0 and z[-1] == pytest.approx(300 - 0.10 * 636, abs=1)  # top road and the ramp's foot
+    assert site["crusher"].get("elev_set") is None  # the crusher follows the inlet, not 0 m
