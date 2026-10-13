@@ -22,7 +22,7 @@ CRUSHER_TICK_S = 10.0
 LOADER_TICK_S = 30.0
 DRIVE_STATES = {"jazda_pusty", "przejazd_miedzy_usypami", "jazda_pelny"}
 IDLE_STATES = {"kolejka_koparka", "podstawienie", "zaladunek", "kolejka_kruszarka", "wyladunek",
-               "wyladunek_halda", "postoj_koparki"}
+               "wyladunek_halda", "postoj_koparki", "wyjazd_z_frontu", "mijanka"}
 CONNECTORS = {"front", "plac_kruszarki", "dojazd"}  # short links to the network, not real roads
 PREFILL_NATURAL_P = 0.3  # without information the operator sometimes guesses and fills the bucket in time
 
@@ -57,6 +57,8 @@ class ExcavatorState:
     parked_since: float | None = None
     parked_s: float = 0.0
     down: list = field(default_factory=list)  # (from, to, reason): breaks, blasting, refuelling
+    bays: simpy.Resource | None = None  # loading positions: 2 when trucks are loaded from both sides
+    spot_modes: list = field(default_factory=list)  # [(share, mode dict)]
 
 
 class Simulation:
@@ -74,6 +76,16 @@ class Simulation:
             e.id: ExcavatorState(e, simpy.Resource(self.env, 1), sc.blast(e.blast).tonnage_t)
             for e in sc.excavators
         }
+        for ex in self.excavators.values():
+            mix = {k: float(v or 0) for k, v in ex.cfg.spotting.items() if float(v or 0) > 0}
+            if mix:
+                total = sum(mix.values())
+                ex.spot_modes = [(v / total, sc.spotting.mode(k)) for k, v in mix.items()]
+            else:  # one fixed spotting time (scenarios without spotting modes)
+                ex.spot_modes = [(1.0, {"in_s": ex.cfg.spot_time_s, "out_s": 0.0, "extra_m": 0.0,
+                                        "double": False, "out_blocks": False})]
+            double = any(m["double"] for _, m in ex.spot_modes)
+            ex.bays = simpy.Resource(self.env, 2 if double else 1)
         # several excavators on the same blast share its tonnage
         by_blast: dict[str, list[ExcavatorState]] = {}
         for ex in self.excavators.values():
@@ -128,6 +140,8 @@ class Simulation:
                 self.pinned.add(f.excavators[0])
         self.flex_trucks = sum(f.count for f in sc.trucks if not f.blend and len(f.excavators) != 1)
         self.yields, self.yield_s = 0, 0.0
+        self.sections: dict[str, dict] = {}  # single-lane stretches between passing bays
+        self.bay_stops = 0
         self.truck_refuels = 0
         self.over_limit_segments, self.drive_segments = 0, 0
 
@@ -182,9 +196,20 @@ class Simulation:
     def _noise(self, sd: float) -> float:
         return float(self.rng.lognormal(-sd * sd / 2, sd))
 
+    @staticmethod
+    def _blocking_s(m: dict) -> float:
+        """Excavator time a truck's manoeuvres take (it can't load anyone meanwhile)."""
+        if m["double"]:
+            return 0.0  # spots on the free side while the previous truck is being loaded
+        return m["in_s"] + (m["out_s"] if m["out_blocks"] else 0.0)
+
     def _expected_service(self, ex: ExcavatorState, fleet: TruckFleet) -> float:
         blast = self.sc.blast(ex.cfg.blast)
-        return ex.cfg.spot_time_s + load_time_s(ex.cfg, fleet, blast, self.sc.loose_density_t_m3)
+        spot = sum(p * self._blocking_s(m) for p, m in ex.spot_modes)
+        return spot + load_time_s(ex.cfg, fleet, blast, self.sc.loose_density_t_m3)
+
+    def _queue_len(self, ex: ExcavatorState) -> int:
+        return len(ex.bays.queue) + len(ex.resource.queue)
 
     def _active(self, ex: ExcavatorState) -> bool:
         return ex.remaining_t - ex.committed_t > 1e-6
@@ -482,18 +507,85 @@ class Simulation:
                 best, best_finish = ex, finish
         return best
 
+    # ---------------------------------------------------------------- single-lane roads (passing bays)
+    def _section(self, key: str) -> dict:
+        if key not in self.sections:
+            self.sections[key] = {"inside": {1: 0, -1: 0}, "waiting": {1: 0, -1: 0}, "approach": {},
+                                  "up": 0, "changed": self.env.event()}
+        return self.sections[key]
+
+    def _notify(self, s: dict) -> None:
+        ev, s["changed"] = s["changed"], self.env.event()
+        ev.succeed()
+
+    @staticmethod
+    def _dirs(seg, forward: bool) -> tuple[int, int]:
+        """(direction along the road drawing, +1 uphill / -1 downhill / 0 flat) of a truck on this segment."""
+        d = (seg.section_dir or 1) * (1 if forward else -1)
+        grade = seg.grade_pct if forward else -seg.grade_pct
+        return d, (1 if grade > 0.5 else -1 if grade < -0.5 else 0)
+
+    def _approach(self, truck: TruckState, seg, forward: bool, eta: float) -> None:
+        d, slope = self._dirs(seg, forward)
+        s = self._section(seg.section)
+        if slope > 0:
+            s["up"] = d
+        s["approach"][truck.id] = (d, eta)
+
+    def _enter_section(self, truck: TruckState, seg, forward: bool, route, k: int, load_t: float):
+        """Uphill trucks have priority: a truck going down does not enter while one is coming up inside
+        the stretch, waiting at its lower bay, or about to reach it before we could get through."""
+        env = self.env
+        d, slope = self._dirs(seg, forward)
+        s = self._section(seg.section)
+        if slope > 0:
+            s["up"] = d
+        s["approach"].pop(truck.id, None)
+        through = segment_time_s(seg, truck.fleet, load_t > 0, self.sc.rolling_resistance_pct, forward, load_t)
+        waited = False
+        while True:
+            blocked = s["inside"][-d] > 0
+            if not blocked and slope <= 0 and s["up"] == -d:
+                blocked = (s["waiting"][-d] > 0 or
+                           any(ad == -d and eta <= env.now + through for ad, eta in s["approach"].values()))
+            if not blocked:
+                break
+            if not waited:
+                s["waiting"][d] += 1
+                waited = True
+                self.bay_stops += 1
+            yield env.any_of([s["changed"], env.timeout(10.0)])
+        if waited:
+            s["waiting"][d] -= 1
+        s["inside"][d] += 1
+        self._notify(s)
+
+    def _leave_section(self, seg, forward: bool) -> None:
+        d, _ = self._dirs(seg, forward)
+        s = self._section(seg.section)
+        s["inside"][d] -= 1
+        self._notify(s)
+
     # ---------------------------------------------------------------- processes
     def _drive(self, truck: TruckState, route, forward: bool, load_t: float, leg: str, ex_id: str,
                pace: float = 1.0):
         """Drive a whole route (forward = towards its end). leg: pusty | miedzy | pelny."""
-        idx = range(len(route.segments)) if forward else reversed(range(len(route.segments)))
+        idx = list(range(len(route.segments)) if forward else reversed(range(len(route.segments))))
         f = truck.fleet
         share = load_t / f.payload_t if f.payload_t else 0.0
         fuel_rate = f.fuel_lph_empty + (f.fuel_lph_loaded - f.fuel_lph_empty) * share
         start_state = self.env.now
         v = self.sc.variability
-        for k in idx:
+        for pos, k in enumerate(idx):
             seg = route.segments[k]
+            if seg.section:  # single-lane stretch: wait at the passing bay until the way is free
+                t_wait = self.env.now
+                yield from self._enter_section(truck, seg, forward, route, k, load_t)
+                if self.env.now > t_wait:
+                    self._log_state(truck, {"pusty": "jazda_pusty", "miedzy": "przejazd_miedzy_usypami",
+                                            "pelny": "jazda_pelny"}[leg], start_state, ex_id, end=t_wait)
+                    self._log_state(truck, "mijanka", t_wait, ex_id)
+                    start_state = self.env.now
             mean = segment_time_s(seg, f, load_t > 0, self.sc.rolling_resistance_pct, forward, load_t)
             # limits are binding; drivers who speed (site practice) go up to speeding_pct over the limit
             over = 1 + (v.speeding_pct / 100 if truck.speeder else 0.0)
@@ -511,7 +603,12 @@ class Simulation:
             if n_y:
                 self.yields += n_y
                 self.yield_s += delay
+            nxt = route.segments[idx[pos + 1]] if pos + 1 < len(idx) else None
+            if nxt is not None and nxt.section:  # let the traffic on the next single-lane stretch know we're coming
+                self._approach(truck, nxt, forward, start + dur + delay)
             yield self.env.timeout(dur + delay)
+            if seg.section:
+                self._leave_section(seg, forward)
             # slower driving burns roughly the same fuel per km (same climbing energy)
             used = fuel_rate * natural / 3600
             self.fuel_l += used
@@ -533,64 +630,101 @@ class Simulation:
         state = {"pusty": "jazda_pusty", "miedzy": "przejazd_miedzy_usypami", "pelny": "jazda_pelny"}[leg]
         self._log_state(truck, state, start_state, ex_id)
 
+    def _pick_spot_mode(self, ex: ExcavatorState) -> dict:
+        if len(ex.spot_modes) == 1:
+            return ex.spot_modes[0][1]
+        r, acc = self.rng.random(), 0.0
+        for p, m in ex.spot_modes:
+            acc += p
+            if r < acc:
+                return m
+        return ex.spot_modes[-1][1]
+
     def _load_at(self, truck: TruckState, ex: ExcavatorState, amount: float, committed: float):
-        """Queue, spot and load `amount` t at `ex`. Returns tonnes actually loaded."""
+        """Queue, spot and load `amount` t at `ex`, then leave the loading position. Returns tonnes loaded.
+        One-sided spotting: the truck needs the excavator for its whole manoeuvre. Two-sided: it spots on
+        the free side while the previous truck is still being loaded, and only the loading itself waits."""
         env, sc, fleet = self.env, self.sc, truck.fleet
+        mode = self._pick_spot_mode(ex)
         t0 = env.now
-        with ex.resource.request() as req:
-            yield req
+        with ex.bays.request() as bay:
+            yield bay
             self._log_state(truck, "kolejka_koparka", t0, ex.cfg.id)
             ex.pending.pop(truck.id, None)
-            ex.busy_until = env.now + self._expected_service(ex, fleet)
+            ex.busy_until = max(env.now, ex.busy_until) + self._expected_service(ex, fleet)
             tonnes = min(amount, ex.remaining_t)
             pol = sc.excavator_policy
             if sc.dispatch == "rl" and pol.topup_min_fill < 0.999 and tonnes >= amount - 1e-6:
                 # learned: with trucks waiting, send this one without its last bucket
                 blast0 = sc.blast(ex.cfg.blast)
                 n_pass = passes_per_truck(ex.cfg, fleet, blast0.loose_density_t_m3 or sc.loose_density_t_m3)
-                if n_pass > 1 and (n_pass - 1) / n_pass >= pol.topup_min_fill and len(ex.resource.queue) >= pol.topup_min_queue:
+                if n_pass > 1 and (n_pass - 1) / n_pass >= pol.topup_min_fill and self._queue_len(ex) >= pol.topup_min_queue:
                     tonnes = amount * (n_pass - 1) / n_pass
                     ex.topup_skips += 1
             ex.remaining_t -= tonnes
             ex.committed_t -= committed
             if tonnes <= 1e-6:
                 return 0.0
+            if mode["double"]:
+                t0 = env.now
+                yield env.timeout(mode["in_s"] * self._noise(0.2))
+                self._log_state(truck, "podstawienie", t0, ex.cfg.id)
             t0 = env.now
-            yield from self._excavator_wait(ex)
-            if env.now > t0:
-                self._log_state(truck, "postoj_koparki", t0, ex.cfg.id)
-            idle_before = env.now - ex.last_end  # how long the excavator had nothing to load
+            with ex.resource.request() as req:
+                yield req
+                self._log_state(truck, "kolejka_koparka", t0, ex.cfg.id)
+                t0 = env.now
+                yield from self._excavator_wait(ex)
+                if env.now > t0:
+                    self._log_state(truck, "postoj_koparki", t0, ex.cfg.id)
+                idle_before = env.now - ex.last_end  # how long the excavator had nothing to load
 
-            t0 = env.now
-            yield env.timeout(ex.cfg.spot_time_s * self._noise(0.2))
-            ex.spotting_s += env.now - t0
-            self._log_state(truck, "podstawienie", t0, ex.cfg.id)
-            t0 = env.now
-            yield from self._excavator_wait(ex)  # the window may have started while the truck was spotting
-            if env.now > t0:
-                self._log_state(truck, "postoj_koparki", t0, ex.cfg.id)
+                if not mode["double"]:
+                    t0 = env.now
+                    yield env.timeout(mode["in_s"] * self._noise(0.2))
+                    ex.spotting_s += env.now - t0
+                    self._log_state(truck, "podstawienie", t0, ex.cfg.id)
+                    t0 = env.now
+                    yield from self._excavator_wait(ex)  # the window may have started while the truck was spotting
+                    if env.now > t0:
+                        self._log_state(truck, "postoj_koparki", t0, ex.cfg.id)
 
-            blast = sc.blast(ex.cfg.blast)
-            full_load = load_time_s(ex.cfg, fleet, blast, sc.loose_density_t_m3)
-            one_pass = ex.cfg.swing_cycle_s * (1.0 + 0.5 * blast.fragmentation)
-            load = full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd)
-            # a bucket filled while the truck was still coming saves one pass – if the operator knew it was coming
-            p_prefill = 1.0 if sc.advisor.enabled else PREFILL_NATURAL_P
-            if idle_before >= one_pass and load > 1.5 * one_pass and self.rng.random() < p_prefill:
-                load -= one_pass
-                ex.prefills += 1
+                blast = sc.blast(ex.cfg.blast)
+                full_load = load_time_s(ex.cfg, fleet, blast, sc.loose_density_t_m3)
+                one_pass = ex.cfg.swing_cycle_s * (1.0 + 0.5 * blast.fragmentation)
+                load = full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd)
+                # a bucket filled while the truck was still coming saves one pass – if the operator knew it was coming
+                p_prefill = 1.0 if sc.advisor.enabled else PREFILL_NATURAL_P
+                if idle_before >= one_pass and load > 1.5 * one_pass and self.rng.random() < p_prefill:
+                    load -= one_pass
+                    ex.prefills += 1
+                t0 = env.now
+                yield env.timeout(load)
+                ex.loading_s += env.now - t0
+                ex.last_end = env.now
+                self._log_state(truck, "zaladunek", t0, ex.cfg.id)
+                self.loaded_by_blast[blast.id] += tonnes
+                self.loads.append({"truck": truck.id, "excavator": ex.cfg.id, "blast": blast.id,
+                                   "material": blast.material, "tonnes": tonnes, "fragmentation": blast.fragmentation,
+                                   "loaded_at_s": env.now, "trip": truck.trip})
+                if ex.remaining_t <= 1e-6 and ex.depleted_at is None:
+                    ex.depleted_at = env.now
+                if mode["out_blocks"] and mode["out_s"] > 0:  # nobody can spot until this truck has left
+                    t0 = env.now
+                    yield env.timeout(mode["out_s"] * self._noise(0.2))
+                    ex.spotting_s += env.now - t0
+                    self._log_state(truck, "wyjazd_z_frontu", t0, ex.cfg.id)
+            if mode["double"] and mode["out_s"] > 0:  # leaves its own side, the excavator already loads the other
+                t0 = env.now
+                yield env.timeout(mode["out_s"] * self._noise(0.2))
+                self._log_state(truck, "wyjazd_z_frontu", t0, ex.cfg.id)
+        out = (0.0 if (mode["out_blocks"] or mode["double"]) else mode["out_s"] * self._noise(0.2))
+        out += mode["extra_m"] / (sc.spotting.floor_speed_kmh / 3.6)
+        if out > 0:  # turning loop / leaving without blocking the next truck
             t0 = env.now
-            yield env.timeout(load)
-            ex.loading_s += env.now - t0
-            ex.last_end = env.now
-            self._log_state(truck, "zaladunek", t0, ex.cfg.id)
-            self.loaded_by_blast[blast.id] += tonnes
-            self.loads.append({"truck": truck.id, "excavator": ex.cfg.id, "blast": blast.id,
-                               "material": blast.material, "tonnes": tonnes, "fragmentation": blast.fragmentation,
-                               "loaded_at_s": env.now, "trip": truck.trip})
-            if ex.remaining_t <= 1e-6 and ex.depleted_at is None:
-                ex.depleted_at = env.now
-            return tonnes
+            yield env.timeout(out)
+            self._log_state(truck, "wyjazd_z_frontu", t0, ex.cfg.id)
+        return tonnes
 
     def _plan(self, truck: TruckState) -> list[tuple[ExcavatorState, float]] | None:
         """Loading stops for the next trip: [(excavator, tonnes)]."""
@@ -917,6 +1051,9 @@ class SimResult:
             "decisions": sim.decisions,
             "yields": sim.yields,
             "yield_h": round(sim.yield_s / 3600, 2),
+            "bay_stops": sim.bay_stops,
+            "bay_wait_h": round(float(st.get("mijanka", 0.0)), 2),
+            "spot_exit_h": round(float(st.get("podstawienie", 0.0)) + float(st.get("wyjazd_z_frontu", 0.0)), 2),
             "over_limit_pct": round(100 * sim.over_limit_segments / max(sim.drive_segments, 1), 1),
             "speeders": sum(t.speeder for t in sim.trucks),
             "prefills": sum(e.prefills for e in sim.excavators.values()),

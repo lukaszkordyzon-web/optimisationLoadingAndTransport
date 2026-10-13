@@ -79,3 +79,23 @@ def test_rename_updates_references(site):
     users = [e for e in site["excavators"] if e.get("pile") == pile["id"]]
     rename_refs(site, "piles", pile["id"], "U-X")
     assert users and all(e["pile"] == "U-X" for e in users)
+
+
+def test_passing_bay_snaps_to_road_and_marks_it_single_lane(site):
+    from app_map import add_bay
+    from kruszyk.site import along_m
+
+    road = next(r for r in site["roads"] if r["id"] == "R4")
+    road["single_lane"] = False
+    a, b = road["coords"][0], road["coords"][1]
+    msg = add_bay(site, (a[0] + b[0]) / 2 + 0.0001, (a[1] + b[1]) / 2)  # ~10 m off the road
+    assert msg.startswith("✅") and road["single_lane"]
+    bay = site["passing_bays"][-1]
+    assert along_m(road["coords"], (bay["lat"], bay["lon"]))[1] < 1.0  # snapped onto the road
+    assert add_bay(site, 0.0, 0.0).startswith("⚠️")
+    sel = sel_from_click(site, f"⇆ {bay['id']} · mijanka", None)
+    assert sel == f"bay:{bay['uid']}"
+    apply_edit_drawing(site, sel, {"type": "Point", "coordinates": [b[1], b[0]]})
+    assert find_obj(site, sel) is not None  # moved, still the same bay
+    delete_obj(site, sel)
+    assert bay["uid"] not in {x["uid"] for x in site["passing_bays"]}

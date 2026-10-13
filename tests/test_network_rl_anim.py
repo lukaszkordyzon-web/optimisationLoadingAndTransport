@@ -38,7 +38,7 @@ def test_branch_from_middle_of_ramp_is_a_junction(demo):
 def test_route_grades_follow_travel_direction(demo):
     k1 = [s.grade_pct for s in demo.routes["T-K-1"].segments if s.name == "rampa główna"]
     down = [s.grade_pct for s in demo.links["K-1>K-2"].segments if s.name == "rampa główna"]
-    assert k1 == [9.0] and down == [-9.0]
+    assert k1 == [9.0] and down and all(g == -9.0 for g in down)  # the ramp is split at its passing bay
     flat = [s.grade_pct for s in demo.routes["T-K-2"].segments if s.name == "poziom dolny"]
     assert flat == [0.0]
 

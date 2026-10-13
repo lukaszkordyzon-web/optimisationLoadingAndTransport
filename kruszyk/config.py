@@ -13,6 +13,8 @@ class Segment:
     length_m: float
     grade_pct: float  # positive = uphill in the loaded direction (front -> crusher)
     speed_limit_kmh: float = 40.0
+    section: str | None = None  # single-lane stretch between passing bays (one direction at a time)
+    section_dir: int = 0        # +1 / -1: direction of this route (forward) relative to the road drawing
 
 
 @dataclass
@@ -46,7 +48,9 @@ class Excavator:
     blast: str
     route: str
     fill_factor: float = 0.9
-    spot_time_s: float = 40.0
+    spot_time_s: float = 40.0  # used when `spotting` is empty (one fixed spotting time)
+    # how trucks spot at this excavator: mode (see SPOT_MODES) -> % of trucks, e.g. {tyl_1: 60, bok_rondo: 40}
+    spotting: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -194,6 +198,31 @@ class ExcavatorPolicy:
     review_min: float = 30.0               # how often the number of working excavators is reviewed
 
 
+# Ways of spotting a truck at the excavator. in_s = manoeuvre to the loading position, out_s = leaving it,
+# extra_m = extra metres driven on the floor (turning loop), double = loading from both sides (the next truck
+# spots on the other side while this one is loaded), out_blocks = the next truck can't spot until this one left.
+SPOT_MODES = {
+    "tyl_1": {"short": "tyłem, 1 strona", "label": "tyłem, z jednej strony", "in_s": 45.0, "out_s": 10.0, "extra_m": 0.0,
+              "double": False, "out_blocks": True},
+    "tyl_2": {"short": "tyłem, 2 strony", "label": "tyłem, z dwóch stron (dwustronnie)", "in_s": 45.0, "out_s": 10.0, "extra_m": 0.0,
+              "double": True, "out_blocks": False},
+    "bok_rondo": {"short": "bokiem + rondko", "label": "bokiem, wyjazd prosto z objazdem (rondko)", "in_s": 15.0, "out_s": 10.0, "extra_m": 80.0,
+                  "double": False, "out_blocks": False},
+    "bok_cofanie": {"short": "bokiem, wyjazd tyłem", "label": "bokiem, wyjazd cofaniem", "in_s": 15.0, "out_s": 40.0, "extra_m": 0.0,
+                    "double": False, "out_blocks": True},
+}
+
+
+@dataclass
+class Spotting:
+    """Manoeuvres at the loading face. `times` overrides SPOT_MODES per mode, e.g. {tyl_1: {in_s: 60}}."""
+    floor_speed_kmh: float = 10.0  # driving on the blast floor / loading area
+    times: dict = field(default_factory=dict)
+
+    def mode(self, key: str) -> dict:
+        return {**SPOT_MODES[key], **(self.times.get(key) or {})}
+
+
 DISPATCH_MODES = ("natural", "fixed", "dynamic", "rl")
 
 
@@ -228,6 +257,7 @@ class Scenario:
     advisor: Advisor = field(default_factory=Advisor)
     excavator_policy: ExcavatorPolicy = field(default_factory=ExcavatorPolicy)
     pacing: Pacing = field(default_factory=Pacing)
+    spotting: Spotting = field(default_factory=Spotting)
     site: dict | None = None  # map geometry (see site.py)
     links: dict = field(default_factory=dict)  # "K-1>K-2" -> Route between two excavators
 
@@ -245,6 +275,11 @@ class Scenario:
                 raise ValueError(f"Koparka {ex.id}: nieznany odstrzał '{ex.blast}'")
             if ex.route not in self.routes:
                 raise ValueError(f"Koparka {ex.id}: nieznana trasa '{ex.route}'")
+            bad = [m for m in ex.spotting if m not in SPOT_MODES]
+            if bad:
+                raise ValueError(f"Koparka {ex.id}: nieznany sposób podstawiania {', '.join(bad)}")
+            if ex.spotting and sum(float(v or 0) for v in ex.spotting.values()) <= 0:
+                raise ValueError(f"Koparka {ex.id}: udziały sposobów podstawiania muszą być > 0")
         if not self.excavators:
             raise ValueError("Scenariusz musi mieć co najmniej jedną koparkę")
         if self.truck_count < 1:
@@ -321,6 +356,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         costs=_build(Costs, raw.get("costs", {})),
         stockpile=_build(Stockpile, raw.get("stockpile", {})),
         pacing=_build(Pacing, raw.get("pacing", {})),
+        spotting=_build(Spotting, raw.get("spotting", {})),
         shift_plan=_build(ShiftPlan, raw.get("shift_plan", {})),
         blasting=_build(Blasting, raw.get("blasting", {})),
         inspection=_build(Inspection, raw.get("inspection", {})),
@@ -351,7 +387,8 @@ def scenario_to_dict(sc: Scenario) -> dict:
     def routes(rs: dict) -> dict:
         out = {}
         for rid, r in rs.items():
-            out[rid] = {"segments": [asdict(s) for s in r.segments]}
+            out[rid] = {"segments": [{k: v for k, v in asdict(s).items()
+                                      if not (k in ("section", "section_dir") and not v)} for s in r.segments]}
             if r.path:
                 out[rid]["path"] = r.path
         return out

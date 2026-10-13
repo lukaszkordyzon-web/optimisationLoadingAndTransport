@@ -93,16 +93,24 @@ excavators:
   swing_cycle_s: 30.0
   blast: U-01
   route: T-K-1
+  spotting:
+    tyl_1: 70.0
+    bok_rondo: 30.0
 - id: K-2
   bucket_m3: 4.5
   swing_cycle_s: 28.0
   blast: U-02
   route: T-K-2
+  spotting:
+    tyl_1: 100.0
 - id: K-3
   bucket_m3: 7.5
   swing_cycle_s: 34.0
   blast: U-03
   route: T-K-3
+  spotting:
+    tyl_1: 50.0
+    bok_cofanie: 50.0
 trucks:
 - model: wozidło 55 t
   count: 7
@@ -139,6 +147,8 @@ routes:
     - name: rampa główna
       length_m: 318.2
       speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
       grade_pct: 9.0
     - name: droga główna
       length_m: 895.9
@@ -174,8 +184,22 @@ routes:
       speed_limit_kmh: 30.0
       grade_pct: 0.0
     - name: rampa główna
-      length_m: 636.3
+      length_m: 159.1
       speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
       grade_pct: 9.0
     - name: droga główna
       length_m: 895.9
@@ -213,8 +237,22 @@ routes:
       speed_limit_kmh: 30.0
       grade_pct: 0.0
     - name: rampa główna
-      length_m: 636.3
+      length_m: 159.1
       speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
       grade_pct: 9.0
     - name: droga główna
       length_m: 895.9
@@ -314,8 +352,16 @@ links:
       speed_limit_kmh: 30.0
       grade_pct: 0.0
     - name: rampa główna
-      length_m: 318.2
+      length_m: 159.1
       speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: 1
+      grade_pct: -9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: 1
       grade_pct: -9.0
     - name: poziom dolny
       length_m: 331.2
@@ -355,8 +401,16 @@ links:
       speed_limit_kmh: 30.0
       grade_pct: 0.0
     - name: rampa główna
-      length_m: 318.2
+      length_m: 159.1
       speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: 1
+      grade_pct: -9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: 1
       grade_pct: -9.0
     - name: poziom dolny
       length_m: 652.9
@@ -396,8 +450,16 @@ links:
       speed_limit_kmh: 30.0
       grade_pct: 0.0
     - name: rampa główna
-      length_m: 318.2
+      length_m: 159.1
       speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
       grade_pct: 9.0
     - name: zjazd na poziom pośredni
       length_m: 494.0
@@ -462,8 +524,16 @@ links:
       speed_limit_kmh: 30.0
       grade_pct: 0.0
     - name: rampa główna
-      length_m: 318.2
+      length_m: 159.1
       speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
       grade_pct: 9.0
     - name: zjazd na poziom pośredni
       length_m: 494.0
@@ -544,6 +614,7 @@ site:
     kind: rampa
     grade_draw_pct: -9.0
     speed_limit_kmh: 25
+    single_lane: true
     coords:
     - - 50.0
       - 20.0125
@@ -699,18 +770,33 @@ site:
     pile: U-01
     bucket_m3: 6.0
     swing_cycle_s: 30
+    spotting:
+      tyl_1: 70
+      bok_rondo: 30
   - id: K-2
     lat: 49.99475
     lon: 20.0225
     pile: U-02
     bucket_m3: 4.5
     swing_cycle_s: 28
+    spotting:
+      tyl_1: 100
   - id: K-3
     lat: 49.99435
     lon: 20.027
     pile: U-03
     bucket_m3: 7.5
     swing_cycle_s: 34
+    spotting:
+      tyl_1: 50
+      bok_cofanie: 50
+  passing_bays:
+  - id: M1
+    lat: 49.997749999999996
+    lon: 20.01525
+  - id: M2
+    lat: 49.996624999999995
+    lon: 20.016625
   blast:
     lat: 49.99405
     lon: 20.0262

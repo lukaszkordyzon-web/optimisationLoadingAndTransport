@@ -15,7 +15,8 @@ from .site import analyze_site, haversine_m
 
 STATE_CODES = ["jazda_pusty", "przejazd_miedzy_usypami", "jazda_pelny", "kolejka_koparka", "podstawienie",
                "zaladunek", "kolejka_kruszarka", "wyladunek", "wyladunek_halda", "awaria", "postoj_brak_urobku",
-               "start", "przerwa", "postoj_strzelanie", "koniec_zmiany", "tankowanie", "postoj_koparki"]
+               "start", "przerwa", "postoj_strzelanie", "koniec_zmiany", "tankowanie", "postoj_koparki",
+               "wyjazd_z_frontu", "mijanka"]
 STATE_LABELS = {
     "jazda_pusty": "jedzie pusty", "przejazd_miedzy_usypami": "jedzie na 2. usyp", "jazda_pelny": "jedzie pełny",
     "kolejka_koparka": "czeka pod koparką", "podstawienie": "podstawia się", "zaladunek": "ładowany",
@@ -23,6 +24,7 @@ STATE_LABELS = {
     "awaria": "awaria", "postoj_brak_urobku": "postój – brak urobku", "start": "rozruch / przed startem",
     "przerwa": "przerwa", "postoj_strzelanie": "czeka – strzelanie", "koniec_zmiany": "koniec zmiany",
     "tankowanie": "tankowanie", "postoj_koparki": "czeka – koparka stoi",
+    "wyjazd_z_frontu": "manewruje / wyjeżdża z frontu", "mijanka": "czeka na mijance",
 }
 STATE_COLORS = {
     "jazda_pusty": "#8ecae6", "przejazd_miedzy_usypami": "#b5838d", "jazda_pelny": "#219ebc",
@@ -30,8 +32,9 @@ STATE_COLORS = {
     "kolejka_kruszarka": "#d62828", "wyladunek": "#264653", "wyladunek_halda": "#6c757d", "awaria": "#000000",
     "postoj_brak_urobku": "#adb5bd", "start": "#adb5bd", "przerwa": "#ffd166", "postoj_strzelanie": "#ff006e",
     "koniec_zmiany": "#adb5bd", "tankowanie": "#8338ec", "postoj_koparki": "#fb8500",
+    "wyjazd_z_frontu": "#e9c46a", "mijanka": "#ff4d6d",
 }
-QUEUES = {"kolejka_koparka", "kolejka_kruszarka", "postoj_koparki"}
+QUEUES = {"kolejka_koparka", "kolejka_kruszarka", "postoj_koparki", "mijanka"}
 CRUSHER_SIDE = {"kolejka_kruszarka", "wyladunek", "wyladunek_halda", "postoj_brak_urobku", "przerwa",
                 "postoj_strzelanie", "koniec_zmiany", "tankowanie"}
 
@@ -106,7 +109,7 @@ def trajectories(res) -> dict[str, list[list]]:
                                        sr.speed_limit_kmh if sr.segment not in ("front", "plac_kruszarki", "dojazd") else 0])
                     last = _at(path, cum, d1)
                 continue
-            if state in ("kolejka_koparka", "podstawienie", "zaladunek", "postoj_koparki"):
+            if state in ("kolejka_koparka", "podstawienie", "zaladunek", "postoj_koparki", "wyjazd_z_frontu"):
                 spot = ex_pos.get(row.excavator, last)
             elif state in CRUSHER_SIDE:
                 spot = crusher
@@ -132,7 +135,8 @@ def network(sc) -> dict:
     levels = info.get("levels", {})
     return {
         "roads": [{"coords": r["coords"], "kind": r.get("kind", "droga"), "name": r.get("name", ""),
-                   "grade": r.get("grade_draw_pct", r.get("grade_pct", 0)), "active": r.get("active", True)}
+                   "grade": r.get("grade_draw_pct", r.get("grade_pct", 0)), "active": r.get("active", True),
+                   "single": bool(r.get("single_lane"))}
                   for r in site.get("roads", [])],
         "piles": [{"polygon": p["polygon"], "id": p["id"], "material": p.get("material", "")} for p in site.get("piles", [])],
         "excavators": [{"id": e["id"], "lat": e["lat"], "lon": e["lon"],
@@ -140,6 +144,7 @@ def network(sc) -> dict:
         "crusher": site.get("crusher"),
         "blast": site.get("blast"),
         "parking": site.get("parking", []),
+        "bays": site.get("passing_bays", []),
         "dedicated": site.get("dedicated", []),
         "junctions": nodes,
         "center": site.get("center"), "zoom": site.get("zoom", 15),

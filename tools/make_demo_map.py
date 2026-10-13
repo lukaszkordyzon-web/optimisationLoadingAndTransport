@@ -26,7 +26,7 @@ site = {
         {"id": "R1", "name": "droga główna", "kind": "droga", "grade_draw_pct": -1.0, "speed_limit_kmh": 40,
          "coords": [C, [50.0003, 20.0060], J1]},
         {"id": "R2", "name": "rampa główna", "kind": "rampa", "grade_draw_pct": -9.0, "speed_limit_kmh": 25,
-         "coords": [J1, B]},
+         "single_lane": True, "coords": [J1, B]},
         {"id": "R3", "name": "zjazd na poziom pośredni", "kind": "droga", "grade_draw_pct": 0.0, "speed_limit_kmh": 30,
          "coords": [MID, [49.9972, 20.0110], [49.9968, 20.0085]]},
         {"id": "R4", "name": "poziom dolny", "kind": "droga", "grade_draw_pct": 0.0, "speed_limit_kmh": 30,
@@ -44,9 +44,12 @@ site = {
          "polygon": [[49.9940, 20.0265], [49.9940, 20.0280], [49.9935, 20.0280], [49.9935, 20.0265]]},
     ],
     "excavators": [
-        {"id": "K-1", "lat": 49.99665, "lon": 20.0085, "pile": "U-01", "bucket_m3": 6.0, "swing_cycle_s": 30},
-        {"id": "K-2", "lat": 49.99475, "lon": 20.0225, "pile": "U-02", "bucket_m3": 4.5, "swing_cycle_s": 28},
-        {"id": "K-3", "lat": 49.99435, "lon": 20.0270, "pile": "U-03", "bucket_m3": 7.5, "swing_cycle_s": 34},
+        {"id": "K-1", "lat": 49.99665, "lon": 20.0085, "pile": "U-01", "bucket_m3": 6.0, "swing_cycle_s": 30,
+         "spotting": {"tyl_1": 70, "bok_rondo": 30}},
+        {"id": "K-2", "lat": 49.99475, "lon": 20.0225, "pile": "U-02", "bucket_m3": 4.5, "swing_cycle_s": 28,
+         "spotting": {"tyl_1": 100}},
+        {"id": "K-3", "lat": 49.99435, "lon": 20.0270, "pile": "U-03", "bucket_m3": 7.5, "swing_cycle_s": 34,
+         "spotting": {"tyl_1": 50, "bok_cofanie": 50}},
     ],
 }
 
@@ -60,6 +63,9 @@ raw["trucks"] = [
      "power_kw": 400, "max_speed_kmh": 48, "fuel_lph_loaded": 45, "fuel_lph_empty": 24, "fuel_lph_idle": 8,
      "blend": {"K-1": 0.5, "K-2": 0.5}},
 ]
+# the main ramp is single-lane: trucks pass only at the junction half-way down and at the lower bay
+site["passing_bays"] = [{"id": "M1", "lat": MID[0], "lon": MID[1]},
+                        {"id": "M2", "lat": MID[0] + 0.5 * (B[0] - MID[0]), "lon": MID[1] + 0.5 * (B[1] - MID[1])}]
 site["blast"] = {"lat": 49.99405, "lon": 20.0262}  # next blast: on the bottom level, east of U-03
 # where excavators go for blasting / refuelling (K-1 has no marker: it backs off along its route)
 site["parking"] = [{"excavator": "K-2", "lat": 49.9953, "lon": 20.0195},

@@ -87,3 +87,67 @@ def test_planned_roads_are_not_used_by_graph():
     sc = load_scenario(DEMO)
     assert len(RoadGraph(sc.site["roads"]).roads) == len(sc.site["roads"]) - 1
     assert len(RoadGraph(sc.site["roads"], include_planned=True).roads) == len(sc.site["roads"])
+
+
+def test_single_lane_ramp_sections_and_uphill_priority():
+    """A single-lane ramp is split at passing bays; trucks wait at the bays and fewer bays cost more time."""
+    import copy
+
+    import yaml
+
+    from kruszyk.config import scenario_from_dict
+    from kruszyk.optimize import replicate
+    from kruszyk.site import point_along, site_to_scenario
+    from kruszyk.sim import simulate
+
+    raw = yaml.safe_load(open(Path(__file__).parent.parent / "scenarios" / "kruszyk_mapa_demo.yaml"))
+
+    def variant(fracs, single=True):
+        r = copy.deepcopy(raw)
+        ramp = next(x for x in r["site"]["roads"] if x["id"] == "R2")
+        ramp["single_lane"] = single
+        from kruszyk.site import polyline_length_m
+        L = polyline_length_m(ramp["coords"])
+        r["site"]["passing_bays"] = [dict(zip(("lat", "lon"), point_along(ramp["coords"], f * L))) for f in fracs]
+        return scenario_from_dict(site_to_scenario(r["site"], r))
+
+    sc = variant([0.25, 0.5, 0.75])
+    secs = [s.section for s in sc.routes["T-K-3"].segments if s.name == "rampa główna"]
+    assert len(secs) == 4 and len(set(secs)) == 4
+    two_lane = replicate(variant([], single=False), 3)
+    none = replicate(variant([]), 3)
+    many = replicate(variant([0.25, 0.5, 0.75]), 3)
+    assert two_lane["bay_wait_h"] == 0
+    assert none["bay_wait_h"] > many["bay_wait_h"] > 0
+    assert two_lane["throughput_tph"] > none["throughput_tph"]
+    # a stretch never carries both directions at once
+    violations = []
+
+    class Checked(Simulation):
+        def _enter_section(self, truck, seg, forward, route, k, load_t):
+            yield from super()._enter_section(truck, seg, forward, route, k, load_t)
+            d, _ = self._dirs(seg, forward)
+            if self.sections[seg.section]["inside"][-d]:
+                violations.append((seg.section, self.env.now))
+
+    sim = Checked(variant([0.5]), seed=3)
+    res = sim.run()
+    assert not violations
+    assert sim.bay_stops > 0 and (res.states["state"] == "mijanka").any()
+
+
+def test_spotting_modes_two_sided_is_faster():
+    import copy
+
+    from kruszyk.config import load_scenario
+    from kruszyk.optimize import replicate
+
+    sc = load_scenario(Path(__file__).parent.parent / "scenarios" / "kruszyk_mapa_demo.yaml")
+    out = {}
+    for mode in ("tyl_1", "tyl_2", "bok_cofanie"):
+        v = copy.deepcopy(sc)
+        for e in v.excavators:
+            e.spotting = {mode: 100}
+        out[mode] = replicate(v, 3)
+    assert out["tyl_2"]["throughput_tph"] > out["tyl_1"]["throughput_tph"]
+    assert out["tyl_2"]["excavator_utilization"] < out["tyl_1"]["excavator_utilization"]  # spotting hidden

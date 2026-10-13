@@ -98,6 +98,11 @@ def _losses(k: dict) -> list[str]:
     if k.get("yields", 0):
         out.append(f"🚙 Ustępowanie pierwszeństwa autom (ekipa, sztygar, cysterna): **{k['yields']}** razy, "
                    f"{60 * k['yield_h']:.0f} min.")
+    if k.get("bay_stops", 0):
+        out.append(f"⇆ Mijanki: wozidła czekały na mijankach **{k['bay_stops']}** razy, łącznie "
+                   f"**{60 * k.get('bay_wait_h', 0):.0f} min** (jeden pas; pierwszeństwo ma jadący pod górę).")
+    if k.get("spot_exit_h", 0) > 0.2:
+        out.append(f"↩️ Manewry pod koparkami (podstawienie i wyjazd): **{k['spot_exit_h']:.1f} h** czasu wozideł.")
     if k.get("feed_target"):
         mix = ", ".join(f"{b} {k['feed_share'].get(b, 0):.0f} % (cel {t:.0f} %)" for b, t in k["feed_target"].items())
         out.append(f"🧪 Skład nadawy: {mix} – odchyłka **{k['feed_dev_pp']:.1f} pp**.")
@@ -229,13 +234,36 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
             lambda: pd.DataFrame([{"name": r.get("name", ""), "kind": r.get("kind", "droga"),
                                    "grade_draw_pct": float(r.get("grade_draw_pct", 0)),
                                    "speed_limit_kmh": float(r.get("speed_limit_kmh", 30)),
+                                   "single_lane": bool(r.get("single_lane")),
                                    "active": bool(r.get("active", True))} for r in site["roads"]]),
             hide_index=True, width="stretch", disabled=["name", "kind"],
             column_config={"name": "droga", "kind": "rodzaj", "grade_draw_pct": "nachylenie wzdłuż rysowania [%]",
-                           "speed_limit_kmh": "limit [km/h]", "active": st.column_config.CheckboxColumn("w użyciu")})
+                           "speed_limit_kmh": "limit [km/h]",
+                           "single_lane": st.column_config.CheckboxColumn(
+                               "jeden pas", help="ruch wahadłowy – mijanie tylko na mijankach z mapy"),
+                           "active": st.column_config.CheckboxColumn("w użyciu")})
         for r, (_, row) in zip(site["roads"], ed.iterrows()):
             r["grade_draw_pct"], r["speed_limit_kmh"], r["active"] = (float(row["grade_draw_pct"]), float(row["speed_limit_kmh"]),
                                                                       bool(row["active"]))
+            r["single_lane"] = bool(row["single_lane"])
+        if site.get("excavators"):
+            from kruszyk.config import SPOT_MODES
+
+            st.markdown("**🚚 Podstawianie pod koparki** – procent wozideł danym sposobem (np. co da ładowanie dwustronne).")
+            modes = list(SPOT_MODES)
+            ed = _snapshot_editor(
+                f"vspot_{vv}",
+                lambda: pd.DataFrame([{"koparka": e["id"], **{m: (e.get("spotting") or {}).get(m) for m in modes}}
+                                      for e in site["excavators"]]),
+                hide_index=True, width="stretch", disabled=["koparka"],
+                column_config={m: st.column_config.NumberColumn(f"{SPOT_MODES[m]['short']} [%]", help=SPOT_MODES[m]["label"], min_value=0.0,
+                                                                max_value=100.0, step=5.0) for m in modes})
+            for e, (_, row) in zip(site["excavators"], ed.iterrows()):
+                mix = {m: float(row[m]) for m in modes if not pd.isna(row[m]) and float(row[m]) > 0}
+                if mix:
+                    e["spotting"] = mix
+                else:
+                    e.pop("spotting", None)
         st.markdown("**⛰️ Usypy** – ilość i uziarnienie.")
         ed = _snapshot_editor(
             f"vpiles_{vv}",

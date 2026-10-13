@@ -22,6 +22,8 @@ STATE_LABELS = {
     "wyladunek_halda": "wyładunek na hałdę",
     "awaria": "awaria",
     "postoj_brak_urobku": "postój – brak urobku",
+    "wyjazd_z_frontu": "manewruje / wyjeżdża z frontu",
+    "mijanka": "czeka na mijance",
 }
 
 

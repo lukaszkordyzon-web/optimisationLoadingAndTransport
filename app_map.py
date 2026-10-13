@@ -10,9 +10,10 @@ import streamlit as st
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
+from kruszyk.config import SPOT_MODES
 from kruszyk.psd import DEFAULT_PRESET, PRESETS, SIEVES_MM, clean, preset_of, rosin_rammler, summary
-from kruszyk.site import (analyze_site, normalize_roads, centroid, haversine_m, parse_coords, polygon_area_m2,
-                          polyline_length_m, site_to_scenario)
+from kruszyk.site import (SNAP_M, along_m, analyze_site, normalize_roads, centroid, haversine_m, parse_coords,
+                          point_along, polygon_area_m2, polyline_length_m, site_to_scenario)
 
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 ESRI_ATTR = "Esri, Maxar, Earthstar Geographics"
@@ -27,6 +28,7 @@ MODES = {
     "Kruszarka": "marker",
     "Miejsce strzelania": "marker",
     "Miejsce postoju koparki": "marker",
+    "Mijanka": "marker",
     "Trasa dedykowana": "polyline",
     "✏️ Edytuj / przesuń / usuń": None,
 }
@@ -45,14 +47,35 @@ def ensure_uids(site: dict) -> None:
     import uuid
 
     seen = set()
-    for key in ("roads", "piles", "excavators"):
+    for key in ("roads", "piles", "excavators", "passing_bays"):
         for o in site.get(key, []):
             if not o.get("uid"):
                 o["uid"] = uuid.uuid4().hex[:10]
+    bay_ids: set = set()
+    for b in site.get("passing_bays", []):
+        if not b.get("id") or b["id"] in bay_ids:
+            b["id"] = next(f"M{i}" for i in range(1, 10_000)
+                           if f"M{i}" not in bay_ids | {x.get("id") for x in site["passing_bays"]})
+        bay_ids.add(b["id"])
     for r in site.get("roads", []):
         if not r.get("id") or r["id"] in seen:
             r["id"] = next(f"R{i}" for i in range(1, 10_000) if f"R{i}" not in seen | {x.get("id") for x in site["roads"]})
         seen.add(r["id"])
+
+
+DEFAULT_FLAGS = {"active": True, "single_lane": False}
+
+
+def _plain(site: dict) -> dict:
+    """Site without the hidden helper ids – for "are there unsaved changes?"."""
+    out = {}
+    for k, v in site.items():
+        if isinstance(v, list):
+            out[k] = [{kk: vv for kk, vv in o.items() if kk != "uid" and not (kk in DEFAULT_FLAGS and vv == DEFAULT_FLAGS[kk])}
+                      if isinstance(o, dict) else o for o in v]
+        else:
+            out[k] = v
+    return out
 
 
 def get_site(raw: dict) -> dict:
@@ -121,16 +144,22 @@ def draw_site(m, site: dict) -> None:
         g = float(r.get("grade_draw_pct", 0.0))
         slope = "płasko" if abs(g) < 0.05 else (f"w górę {g:g} %" if g > 0 else f"w dół {-g:g} %")
         tip = (f"🛣️ {r.get('id')} · {r['name']} · {r.get('kind')} · wzdłuż strzałki: {slope} · limit {r.get('speed_limit_kmh', '?')} km/h · "
-               f"{polyline_length_m(r['coords']):.0f} m" + ("" if active else " · PLANOWANA (dziś nieużywana)"))
+               f"{polyline_length_m(r['coords']):.0f} m" + (" · JEDEN PAS – mijanki" if r.get("single_lane") else "")
+               + ("" if active else " · PLANOWANA (dziś nieużywana)"))
         folium.PolyLine(pts, color="#000000", weight=10, opacity=0.55, tooltip=tip).add_to(m)  # dark casing
         folium.PolyLine(pts, color=ROAD_COLORS.get(r.get("kind"), "#ffffff") if active else PLANNED_COLOR, weight=6,
-                        dash_array=None if active else "10 8", tooltip=tip).add_to(m)
+                        dash_array=("14 6" if r.get("single_lane") else None) if active else "10 8", tooltip=tip).add_to(m)
         _direction_arrow(m, pts, g, tip)
     for d in site.get("dedicated", []):
         colors = {"ekipa": "#ff006e", "sztygar": "#3a86ff", "cysterna": "#8338ec"}
         folium.PolyLine([tuple(c) for c in d["coords"]], color=colors.get(d.get("for"), "#ffbe0b"), weight=4,
                         dash_array="6 6", tooltip=f"〰️ trasa {d.get('for')} · dedykowana: {DEDICATED_FOR.get(d.get('for'), 'koparka ' + str(d.get('for')))}"
                         ).add_to(m)
+    for b in site.get("passing_bays", []):
+        folium.Marker((b["lat"], b["lon"]), tooltip=f"⇆ {b.get('id')} · mijanka",
+                      icon=folium.DivIcon(html=f"<div style='font-size:12px;font-weight:700;color:#fff;background:#ff4d6d;"
+                                               f"border:2px solid #000;border-radius:4px;padding:0 3px;white-space:nowrap'>"
+                                               f"⇆ {b.get('id')}</div>")).add_to(m)
     for p in site.get("parking", []):
         folium.Marker((p["lat"], p["lon"]), tooltip=f"🅿️ postój {p.get('excavator')} · miejsce postoju koparki",
                       icon=folium.DivIcon(html=f"<div style='font-size:13px;font-weight:700;color:#fff;"
@@ -160,7 +189,7 @@ def _latlon(coords: list) -> list:
 
 
 DEFAULTS = {
-    "Droga / rampa": {"kind": "droga", "grade_draw_pct": 0.0, "speed_limit_kmh": 40.0},
+    "Droga / rampa": {"kind": "droga", "grade_draw_pct": 0.0, "speed_limit_kmh": 40.0, "single_lane": False},
     "Usyp (materiał)": {"material": "inny", "tonnage_t": 10_000.0, "psd": PRESETS[DEFAULT_PRESET],
                         "loose_density_t_m3": 1.75},
     "Koparka": {"pile": "(najbliższy)", "bucket_m3": 5.0, "swing_cycle_s": 30.0},
@@ -173,7 +202,7 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
     are used when they belong to that type, otherwise defaults (editable later in the tables)."""
     target = GEOM_MODE.get(g["type"])
     if g["type"] == "Point":
-        target = mode if mode in ("Kruszarka", "Miejsce strzelania", "Miejsce postoju koparki") else "Koparka"
+        target = mode if mode in ("Kruszarka", "Miejsce strzelania", "Miejsce postoju koparki", "Mijanka") else "Koparka"
     if g["type"] == "LineString" and mode == "Trasa dedykowana":
         target = mode
     if target == "Trasa dedykowana":
@@ -191,6 +220,8 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
         site["parking"] = [p for p in site["parking"] if p.get("excavator") != who]
         site["parking"].append({"excavator": who, "lat": lat, "lon": lon})
         return f"✅ Ustawiono miejsce postoju koparki {who} (strzelanie / tankowanie)"
+    if target == "Mijanka":
+        return add_bay(site, g["coordinates"][1], g["coordinates"][0])
     if target is None:
         return f"⚠️ Nieobsługiwany kształt: {g['type']}"
     a = dict(attrs) if target == mode else dict(DEFAULTS.get(target, {}))
@@ -224,7 +255,7 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
 
 
 # ---------- editing existing objects (select on the map → move / redraw / delete) ----------
-POINT_KINDS = ("excavator", "crusher", "blast", "parking")
+POINT_KINDS = ("excavator", "crusher", "blast", "parking", "bay")
 
 
 def site_items(site: dict) -> dict:
@@ -240,6 +271,8 @@ def site_items(site: dict) -> dict:
         items["crusher:"] = "🏭 kruszarka"
     if site.get("blast"):
         items["blast:"] = "🧨 miejsce strzelania"
+    for b in site.get("passing_bays", []):
+        items[f"bay:{b['uid']}"] = f"⇆ mijanka {b.get('id')}"
     for p in site.get("parking", []):
         items[f"parking:{p['excavator']}"] = f"🅿️ miejsce postoju koparki {p['excavator']}"
     for d in site.get("dedicated", []):
@@ -253,6 +286,8 @@ def find_obj(site: dict, sel: str | None):
     kind, ident = sel.split(":", 1)
     if kind in ("road", "pile", "excavator"):
         return next((o for o in site.get(kind + "s", []) if o.get("uid") == ident), None)
+    if kind == "bay":
+        return next((o for o in site.get("passing_bays", []) if o.get("uid") == ident), None)
     if kind in ("crusher", "blast"):
         return site.get(kind)
     if kind == "parking":
@@ -265,7 +300,8 @@ def find_obj(site: dict, sel: str | None):
 def sel_from_click(site: dict, tooltip: str | None, latlng: dict | None) -> str | None:
     """Clicked object → selection key: by the tooltip prefix, otherwise the nearest object (≤ 40 m)."""
     head = (tooltip or "").strip().split(" · ")[0].strip()
-    by_id = {"🛣️": ("road", "roads"), "⛰️": ("pile", "piles"), "⛏️": ("excavator", "excavators")}
+    by_id = {"🛣️": ("road", "roads"), "⛰️": ("pile", "piles"), "⛏️": ("excavator", "excavators"),
+             "⇆": ("bay", "passing_bays")}
     for icon, (kind, key) in by_id.items():
         if head.startswith(icon):
             oid = head[len(icon):].strip()
@@ -341,6 +377,9 @@ def delete_obj(site: dict, sel: str) -> str:
     if kind in ("crusher", "blast"):
         site[kind] = None
         return "🗑️ Usunięto " + ("kruszarkę" if kind == "crusher" else "miejsce strzelania")
+    if kind == "bay":
+        site["passing_bays"] = [b for b in site["passing_bays"] if b is not o]
+        return f"🗑️ Usunięto mijankę {o.get('id')}"
     if kind == "parking":
         site["parking"] = [p for p in site["parking"] if p is not o]
         return f"🗑️ Usunięto miejsce postoju koparki {ident}"
@@ -357,6 +396,14 @@ def apply_edit_drawing(site: dict, sel: str, g: dict) -> str:
     if kind in POINT_KINDS:
         if g["type"] != "Point":
             return "⚠️ Aby przesunąć obiekt, postaw znacznik (📍) w nowym miejscu"
+        if kind == "bay":  # a passing bay stays on its road
+            site["passing_bays"] = [b for b in site["passing_bays"] if b is not o]
+            msg = add_bay(site, g["coordinates"][1], g["coordinates"][0])
+            if not msg.startswith("✅"):
+                site["passing_bays"].append(o)
+                return msg
+            site["passing_bays"][-1].update({"id": o.get("id"), "uid": o.get("uid")})
+            return f"✅ Przesunięto mijankę {o.get('id')}"
         o["lon"], o["lat"] = g["coordinates"]
         return "✅ Przesunięto obiekt"
     if kind in ("road", "dedicated"):
@@ -422,6 +469,9 @@ def edit_panel(site: dict) -> None:
             st.rerun()
         put("speed_limit_kmh", float(st.number_input("Limit prędkości [km/h]", 5.0, 80.0,
                                                      float(o.get("speed_limit_kmh", 40.0)), 5.0, key=f"el_{k}")))
+        put("single_lane", st.checkbox("Jeden pas – ruch wahadłowy, mijanki", bool(o.get("single_lane")), key=f"e1_{k}",
+                                       help="Między mijankami jedzie tylko jeden kierunek. Pierwszeństwo ma wozidło "
+                                            "jadące pod górę, jadące w dół czeka na najbliższej mijance."))
         put("active", not st.checkbox("Droga planowana (dziś nieużywana)", not o.get("active", True), key=f"ea_{k}"))
     elif kind == "excavator":
         new_id = st.text_input("Oznaczenie", o["id"], key=f"ei_{k}").strip()
@@ -464,6 +514,23 @@ def edit_panel(site: dict) -> None:
             st.rerun()
 
 
+def add_bay(site: dict, lat: float, lon: float) -> str:
+    """Passing bay: snapped onto the nearest road; that road becomes single-lane."""
+    roads = [r for r in site.get("roads", []) if len(r.get("coords", [])) >= 2]
+    if not roads:
+        return "⚠️ Najpierw narysuj drogę – mijankę stawia się na drodze"
+    best = min(((along_m(r["coords"], (lat, lon)), r) for r in roads), key=lambda x: x[0][1])
+    (a, d), road = best
+    if d > SNAP_M:
+        return f"⚠️ Mijanka musi stać na drodze (najbliższa droga jest {d:.0f} m dalej)"
+    plat, plon = point_along(road["coords"], a)
+    site.setdefault("passing_bays", []).append({"lat": round(plat, 7), "lon": round(plon, 7)})
+    ensure_uids(site)
+    note = "" if road.get("single_lane") else " – droga oznaczona jako jednopasmowa (ruch wahadłowy)"
+    road["single_lane"] = True
+    return f"✅ Dodano mijankę {site['passing_bays'][-1]['id']} na drodze „{road.get('name', road.get('id'))}”{note}"
+
+
 def editing_map(site: dict) -> folium.Map:
     """The drawing map. Its HTML must not depend on the selected mode or on the objects,
     otherwise st_folium rebuilds it on every change and the view/sketches are lost."""
@@ -482,6 +549,8 @@ ROAD_COLS = {"id": "id", "name": "nazwa", "kind": st.column_config.SelectboxColu
                  "nachylenie wzdłuż rysowania [%]", help="+ = droga wznosi się w kierunku rysowania (strzałka na mapie), "
                                                         "− = opada", min_value=-25.0, max_value=25.0, step=0.5),
              "speed_limit_kmh": "limit [km/h]",
+             "single_lane": st.column_config.CheckboxColumn("jeden pas", help="ruch wahadłowy – wozidła mijają się "
+                                                                             "tylko na mijankach"),
              "active": st.column_config.CheckboxColumn("w użyciu", help="odznacz = droga planowana / zamknięta")}
 PILE_COLS = {"id": "usyp", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
              "tonnage_t": "ilość [t]", "fragmentation": "rozdrobnienie (0–1)", "loose_density_t_m3": "gęstość [t/m³]",
@@ -643,6 +712,10 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
             attrs["grade_draw_pct"] = DIRECTIONS[direction] * grade + 0.0
             attrs["speed_limit_kmh"] = st.number_input("Limit prędkości [km/h]", 5.0, 80.0,
                                                        25.0 if attrs["kind"] == "rampa" else 40.0, 5.0)
+            attrs["single_lane"] = st.checkbox(
+                "Jeden pas – ruch wahadłowy (mijanki)",
+                help="Wozidła nie miną się na tej drodze. Postaw na niej mijanki (tryb „Mijanka”). Pierwszeństwo ma "
+                     "wozidło jadące pod górę – jadące w dół czeka na najbliższej mijance.")
             attrs["active"] = not st.checkbox("Droga planowana (dziś nieużywana)",
                                               help="Narysuj ją teraz, a włączysz w kroku „Wariant – co jeśli”.")
             st.caption("Narzędzie „linia” (/). Rysuj po osi drogi, zakończ klikając ostatni punkt. "
@@ -684,6 +757,10 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                        "drogowego – na wprost. Bez znacznika koparka cofa się o kilkaset metrów swoją trasą.")
         elif mode == "Kruszarka":
             st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku).")
+        elif mode == "Mijanka":
+            st.caption("Narzędzie „znacznik” (📍). Postaw go na drodze w miejscu mijanki – przyklei się do drogi, "
+                       "a droga zostanie oznaczona jako jednopasmowa. Odcinek między dwiema mijankami (albo mijanką "
+                       "i końcem drogi) przejeżdża naraz tylko jeden kierunek; pierwszeństwo ma jadący pod górę.")
         elif mode == "Miejsce strzelania":
             st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu strzelania. Godziny przyjazdu ekipy, "
                        "odpalenia i wyjazdu ustawisz niżej w sekcji „Zmiana i zdarzenia”.")
@@ -745,15 +822,16 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
         st.markdown("**Drogi i rampy**")
         if site["roads"]:
             object_table(site, "roads", lambda: pd.DataFrame(
-                [{k: v for k, v in r.items() if k not in ("coords", "uid")} | {"active": r.get("active", True)}
+                [{k: v for k, v in r.items() if k not in ("coords", "uid")} | {"active": r.get("active", True),
+                                                                               "single_lane": bool(r.get("single_lane"))}
                  | {"długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]]),
-                extra=("active",), disabled=["id", "długość [m]"], column_config=ROAD_COLS)
+                extra=("active", "single_lane"), disabled=["id", "długość [m]"], column_config=ROAD_COLS)
         else:
             st.caption("brak")
         st.markdown("**Koparki**")
         if site["excavators"]:
             object_table(site, "excavators", lambda: pd.DataFrame(
-                [{k: v for k, v in e.items() if k != "uid"} for e in site["excavators"]]),
+                [{k: v for k, v in e.items() if k not in ("uid", "spotting")} for e in site["excavators"]]),
                 disabled=["lat", "lon"],
                 column_config={**EX_COLS, "pile": st.column_config.SelectboxColumn(
                     "ładuje z usypu", options=[p["id"] for p in site["piles"]] + ["(najbliższy)"])})
@@ -790,6 +868,8 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                          disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]"], column_config=PILE_COLS)
         else:
             st.caption("brak")
+
+    spotting_editor(site, st.session_state.raw)
 
     if site["piles"]:
         psd_editor(site, float(raw_for_build.get("crusher", {}).get("max_feed_mm", 800)),
@@ -828,12 +908,15 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
     st.subheader("7. Zapisz kopalnię" if simple else "6. Trasy z mapy → scenariusz")
     st.caption("Program wyznacza najkrótszą trasę od każdej koparki do kruszarki po narysowanych drogach, "
                "liczy długości i nachylenia odcinków. Po każdej zmianie na mapie kliknij przycisk ponownie.")
-    if site != (raw_for_build.get("site") or {}) and (site.get("roads") or site.get("piles") or site.get("excavators")):
+    if _plain(site) != _plain(raw_for_build.get("site") or {}) and (site.get("roads") or site.get("piles") or site.get("excavators")):
         st.warning("⚠️ Na mapie są zmiany, których jeszcze nie zapisano – kliknij przycisk poniżej.")
     c1, c2 = st.columns([1, 3])
     if c1.button("💾 Zapisz kopalnię" if simple else "🔁 Zbuduj trasy i przenieś do scenariusza", type="primary"):
         try:
-            new = site_to_scenario(copy.deepcopy(site), copy.deepcopy(raw_for_build))
+            base = copy.deepcopy(raw_for_build)
+            if st.session_state.raw.get("spotting"):  # edited above, kept in the session scenario
+                base["spotting"] = copy.deepcopy(st.session_state.raw["spotting"])
+            new = site_to_scenario(copy.deepcopy(site), base)
             set_raw(new)
             st.session_state.map_msg = True
             st.rerun()
@@ -848,6 +931,63 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                  "limit [km/h]": s.get("speed_limit_kmh")}
                 for rid, r in raw_for_build["routes"].items() for s in r["segments"]]
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+
+def spotting_editor(site: dict, raw: dict) -> None:
+    """How trucks spot at each excavator (shares of the four ways) and how long the manoeuvres take."""
+    st.markdown("#### 🚚 Podstawianie wozideł pod koparki")
+    st.caption("Jak wozidła ustawiają się pod koparką i jak odjeżdżają. Podaj, jaki **procent** wozideł robi to danym "
+               "sposobem (nie musi się sumować do 100 – liczą się proporcje). Puste = jeden stały czas podstawienia. "
+               "**Dwustronnie**: następne wozidło cofa z drugiej strony, gdy poprzednie jest ładowane – koparka "
+               "prawie nie czeka.")
+    if not site["excavators"]:
+        st.caption("brak koparek")
+        return
+    modes = list(SPOT_MODES)
+    ver = st.session_state.obj_ver
+    snap = f"spot_tbl_{ver}"
+    if snap not in st.session_state:
+        st.session_state[snap] = ([e["uid"] for e in site["excavators"]], pd.DataFrame(
+            [{"koparka": e["id"], **{m: (e.get("spotting") or {}).get(m) for m in modes}} for e in site["excavators"]]))
+    uids, df0 = st.session_state[snap]
+    ed = st.data_editor(df0, key=f"spot_{ver}", hide_index=True, width="stretch", disabled=["koparka"],
+                        column_config={m: st.column_config.NumberColumn(f"{SPOT_MODES[m]['short']} [%]", help=SPOT_MODES[m]["label"], min_value=0.0,
+                                                                        max_value=100.0, step=5.0) for m in modes})
+    by_uid = {e["uid"]: e for e in site["excavators"]}
+    for i, row in ed.iterrows():
+        e = by_uid.get(uids[i]) if i < len(uids) else None
+        if e is None:
+            continue
+        mix = {m: float(row[m]) for m in modes if not pd.isna(row[m]) and float(row[m]) > 0}
+        if mix:
+            e["spotting"] = mix
+        else:
+            e.pop("spotting", None)
+    sp = raw.setdefault("spotting", {})
+    times = sp.setdefault("times", {})
+    with st.expander("⏱️ Czasy manewrów (dla całej kopalni)"):
+        k = f"spot_times_{st.session_state.get('ver', 0)}"
+        if k + "_base" not in st.session_state:
+            st.session_state[k + "_base"] = pd.DataFrame(
+                [{"sposób": SPOT_MODES[m]["label"], **{f: {**SPOT_MODES[m], **(times.get(m) or {})}[f]
+                                                       for f in ("in_s", "out_s", "extra_m")}} for m in modes])
+        ted = st.data_editor(st.session_state[k + "_base"], key=k, hide_index=True, width="stretch", disabled=["sposób"],
+                             column_config={"in_s": st.column_config.NumberColumn("wjazd / ustawienie [s]", min_value=0.0),
+                                            "out_s": st.column_config.NumberColumn("wyjazd [s]", min_value=0.0),
+                                            "extra_m": st.column_config.NumberColumn("dodatkowy objazd [m]", min_value=0.0)})
+        for m, (_, row) in zip(modes, ted.iterrows()):
+            diff = {f: float(row[f]) for f in ("in_s", "out_s", "extra_m")
+                    if not pd.isna(row[f]) and float(row[f]) != SPOT_MODES[m][f]}
+            if diff:
+                times[m] = diff
+            else:
+                times.pop(m, None)
+        sp["floor_speed_kmh"] = st.number_input("Prędkość na placu / spągu przy froncie [km/h]", 3.0, 30.0,
+                                                float(sp.get("floor_speed_kmh", 10.0)), 1.0, key=k + "_v",
+                                                help="dla dodatkowego objazdu (rondka) przy koparce")
+        st.caption("Koparka czeka na wozidło: przy podstawianiu z jednej strony – cały wjazd (oraz wyjazd, gdy "
+                   "wyjeżdża cofaniem albo tyłem z jednej strony); dwustronnie – tylko gdy nikt nie stoi po drugiej "
+                   "stronie. Objazd (rondko) wydłuża tylko czas wozidła.")
 
 
 def object_table(site: dict, key: str, make_df, extra: tuple = (), **editor_kw) -> None:

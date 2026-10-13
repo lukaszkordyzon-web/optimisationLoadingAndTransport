@@ -31,7 +31,7 @@ STATE_COLORS = {
     "jazda_pusty": "#8ecae6", "jazda_pelny": "#219ebc", "kolejka_koparka": "#e63946",
     "podstawienie": "#f4a261", "zaladunek": "#2a9d8f", "kolejka_kruszarka": "#d62828",
     "wyladunek": "#264653", "wyladunek_halda": "#6c757d", "awaria": "#000000",
-    "postoj_brak_urobku": "#adb5bd",
+    "postoj_brak_urobku": "#adb5bd", "wyjazd_z_frontu": "#e9c46a", "mijanka": "#ff4d6d",
 }
 BASE_TS = pd.Timestamp("2026-01-01 06:00")
 
@@ -219,7 +219,8 @@ def editor() -> dict:
         c1.caption("Usypy z krzywą uziarnienia: rozdrobnienie liczone z krzywej (edycja na ekranie mapy).")
     route_ids = list(raw["routes"])
     blast_ids = [b["id"] for b in new["blasts"] if "id" in b]
-    ex_df = pd.DataFrame(raw["excavators"])
+    spot_by_id = {e["id"]: e["spotting"] for e in raw["excavators"] if e.get("spotting")}  # set on the map screen
+    ex_df = pd.DataFrame([{k_: v for k_, v in e.items() if k_ != "spotting"} for e in raw["excavators"]])
     for col, default in (("fill_factor", 0.9), ("spot_time_s", 40.0)):
         if col not in ex_df:
             ex_df[col] = default
@@ -228,6 +229,11 @@ def editor() -> dict:
                        "blast": st.column_config.SelectboxColumn("Odstrzał", options=blast_ids),
                        "route": st.column_config.SelectboxColumn("Trasa", options=route_ids),
                        "fill_factor": "Wsp. napełnienia", "spot_time_s": "Podstawienie [s]"}))
+    for e in new["excavators"]:
+        if e.get("id") in spot_by_id:
+            e["spotting"] = spot_by_id[e["id"]]
+    if spot_by_id:
+        c2.caption("Koparki ze sposobami podstawiania (ekran mapy): „Podstawienie [s]” nie jest używane.")
 
     st.subheader("Wozidła")
     st.caption("**Koparki** – do których koparek grupa może jeździć, np. `K-1, K-2` (puste = wszystkie). "

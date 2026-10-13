@@ -98,7 +98,8 @@ N.roads.forEach(r => {
   }
   const c = r.kind === 'rampa' ? '#d500f9' : '#ffffff';
   L.polyline(r.coords, { color: '#000', weight: 10, opacity: 0.55 }).addTo(map);
-  L.polyline(r.coords, { color: c, weight: 6, opacity: 0.95 }).bindTooltip(`${r.name} · ${r.grade} %`).addTo(map);
+  L.polyline(r.coords, { color: c, weight: 6, opacity: 0.95, dashArray: r.single ? '14 6' : null })
+    .bindTooltip(`${r.name} · ${r.grade} %${r.single ? ' · jeden pas (mijanki)' : ''}`).addTo(map);
   r.coords.forEach(p => bounds.push(p));
 });
 N.piles.forEach(p => {
@@ -112,6 +113,8 @@ N.junctions.forEach(j => L.circleMarker([j.lat, j.lon], { radius: 5, color: '#00
 const DED_COLOR = { 'ekipa': '#ff006e', 'sztygar': '#3a86ff', 'cysterna': '#8338ec' };
 (N.dedicated || []).forEach(d => L.polyline(d.coords, { color: DED_COLOR[d.for] || '#ffbe0b', weight: 3, dashArray: '6 6' })
   .bindTooltip(`trasa dedykowana: ${d.for}`).addTo(map));
+(N.bays || []).forEach(b => L.marker([b.lat, b.lon], { icon: L.divIcon({ className: '',
+  html: '<div class="tag">⇆ M</div>' }) }).bindTooltip('mijanka').addTo(map));
 (N.parking || []).forEach(p => L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '',
   html: `<div class="tag">🅿️ ${p.excavator}</div>` }) }).addTo(map));
 if (N.blast) L.marker([N.blast.lat, N.blast.lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:20px">💥</div>' }) })
