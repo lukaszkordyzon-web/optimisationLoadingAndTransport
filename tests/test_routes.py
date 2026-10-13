@@ -42,21 +42,31 @@ def test_legacy_grades_are_converted_keeping_the_numbers():
     assert all("grade_pct" not in r for r in site["roads"]) and before != site
 
 
-def test_dedicated_route_shares_roads_and_has_stops():
+def test_crew_goes_to_the_planned_blast_by_road():
+    """No blast marker and no dedicated routes: the crew drives on the roads to the planned blast."""
+    from kruszyk.site import blast_point, centroid
+
     sc = load_scenario(DEMO)
     site = copy.deepcopy(sc.site)
-    r = round_route(site, "sztygar", [(49.9968, 20.0085)])
-    names = [s["name"] for s in r["segments"]]
-    assert "droga główna" in names and "rampa główna" in names
-    ramp = next(s for s in r["segments"] if s["name"] == "rampa główna")
-    assert ramp["grade_pct"] < 0  # driven down the ramp
-    assert r["stop_after"] and r["stop_after"][0] == len(r["segments"]) - 1
+    assert "blast" not in site and "dedicated" not in site
+    first = min(site["planned_piles"], key=lambda p: p["blast_day"])
+    assert blast_point(site) == pytest.approx(centroid(first["polygon"]))
+    r = crew_route(site)
+    assert r["path"][0] == pytest.approx(list(blast_point(site)), abs=1e-6)
 
 
-def test_crew_route_starts_at_blast_point():
-    sc = load_scenario(DEMO)
-    r = crew_route(copy.deepcopy(sc.site))
-    assert r["path"][0] == pytest.approx([sc.site["blast"]["lat"], sc.site["blast"]["lon"]], abs=1e-6)
+def test_road_grade_comes_from_levels():
+    from kruszyk.site import apply_levels, polyline_length_m
+
+    site = {"levels": [{"name": "Poziom +240", "elev_m": 240.0}, {"name": "Poziom +210", "elev_m": 210.0}],
+            "roads": [{"id": "R1", "coords": [[50.0, 20.0], [50.003, 20.0]], "grade_draw_pct": 0.0,
+                       "level_from": "Poziom +240", "level_to": "Poziom +210"}],
+            "crusher": {"lat": 50.0, "lon": 20.0, "level": "Poziom +240"},
+            "piles": [{"id": "U-01", "level": "Poziom +210", "polygon": [[50, 20], [50, 20.001], [49.999, 20.001]]}]}
+    apply_levels(site)
+    L = polyline_length_m(site["roads"][0]["coords"])
+    assert site["roads"][0]["grade_draw_pct"] == pytest.approx(-3000 / L, abs=0.01)  # 30 m down over the road
+    assert site["crusher"]["elev_m"] == 240.0 and site["piles"][0]["level_m"] == 210.0
 
 
 def test_excavator_goes_to_parking_or_backs_off():

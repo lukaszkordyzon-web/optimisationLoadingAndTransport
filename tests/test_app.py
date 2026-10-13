@@ -34,10 +34,10 @@ def test_switching_draw_mode_keeps_map():
     key_before = at.session_state["map_key"]
     for group, mode in [("⛏️ Urobek i koparki", "Usyp (materiał)"), ("⛏️ Urobek i koparki", "Koparka"),
                         ("🛣️ Drogi", "Kruszarka"), ("🛣️ Drogi", "Droga / rampa"), ("📅 Plan strzałów", None),
-                        ("🧨 Strzelanie i objazdy", "Trasa dedykowana")]:
+                        ("⛏️ Urobek i koparki", "Kierunek urabiania koparki")]:
         at.radio(key="draw_group").set_value(group).run()
         if mode:
-            gi = ["🛣️ Drogi", "⛏️ Urobek i koparki", "🧨 Strzelanie i objazdy"].index(group)
+            gi = ["🛣️ Drogi", "⛏️ Urobek i koparki"].index(group)
             at.radio(key=f"draw_mode_{gi}").set_value(mode).run()
         assert not at.exception, (mode, at.exception)
         assert at.session_state["map_key"] == key_before  # map not rebuilt

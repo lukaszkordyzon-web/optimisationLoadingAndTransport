@@ -47,9 +47,11 @@ def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict |
     with tabs[1]:
         bl = raw.setdefault("blasting", {})
         bl["enabled"] = st.toggle("Strzelanie na tej zmianie", bool(bl.get("enabled", False)), key=k("bl_en"))
-        if not (site or {}).get("blast"):
-            st.info("Postaw na mapie znacznik **Miejsce strzelania** (sekcja 2, „Co dodajesz?”). Bez niego ekipa nie "
-                    "jeździ po mapie, ale zamknięcie wyrobiska i tak obowiązuje.")
+        from kruszyk.site import blast_point
+
+        if not blast_point(site or {}):
+            st.info("Ekipa jedzie do usypu ze stanem **„planowany odstrzał”** (grupa „⛏️ Urobek i koparki” → Usyp). "
+                    "Bez takiego usypu ekipa nie jeździ po mapie, ale zamknięcie wyrobiska i tak obowiązuje.")
         c = st.columns(5)
         with c[0]:
             bl["crew_arrive"] = _time("Przyjazd ekipy", bl.get("crew_arrive", "09:00"), k("bl_a"))
@@ -68,9 +70,9 @@ def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict |
         tr0 = raw.setdefault("traffic", {})
         tr0["excavator_move_kmh"] = c[1].number_input("Prędkość przejazdu koparki [km/h]", 0.5, 15.0,
                                                       float(tr0.get("excavator_move_kmh", 2.5)), 0.5, key=k("bl_v"))
-        st.caption("Koparka zjeżdża przed ewakuacją na **miejsce postoju** (znacznik 🅿️ na mapie; trasą dedykowaną, "
-                   "a gdy jej nie ma – najkrótszą drogą) i wraca po otwarciu – ten czas wydłuża jej postój. "
-                   "Ekipa jedzie swoją trasą dedykowaną albo najkrótszą drogą.")
+        st.caption("Koparka zjeżdża przed ewakuacją na **miejsce postoju** (znacznik 🅿️ na mapie, najkrótszą drogą) "
+                   "i wraca po otwarciu – ten czas wydłuża jej postój. Ekipa, sztygar i cysterna jeżdżą po "
+                   "narysowanych drogach (najkrótszą trasą).")
         st.caption("Ekipa jedzie samochodem po drogach do miejsca strzelania. **Mijanie:** jadący w dół ustępuje "
                    "jadącemu w górę – gdy ekipa wyjeżdża pod górę, wozidło zjeżdżające w dół musi jej ustąpić. "
                    "Od „ewakuacji” do „otwarcia” żadne wozidło nie wjeżdża do wyrobiska, koparki stoją.")

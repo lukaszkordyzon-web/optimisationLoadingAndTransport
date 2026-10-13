@@ -281,10 +281,41 @@ class RoadGraph:
         return elev, sorted(set(warnings))
 
 
+def level_elev(site: dict, name) -> float | None:
+    """Elevation of a named mine level (site["levels"] = [{name, elev_m}])."""
+    for lv in site.get("levels") or []:
+        if lv.get("name") == name:
+            return float(lv.get("elev_m") or 0.0)
+    return None
+
+
+def apply_levels(site: dict) -> dict:
+    """Mine levels are the single source of heights: a road from one level to another gets its grade from them,
+    the crusher / piles / areas get their elevation from their level."""
+    if not site.get("levels"):
+        return site
+    for r in site.get("roads", []):
+        a, b = level_elev(site, r.get("level_from")), level_elev(site, r.get("level_to"))
+        if a is not None and b is not None and len(r.get("coords", [])) >= 2:
+            L = polyline_length_m(r["coords"])
+            r["grade_draw_pct"] = round(100 * (b - a) / L, 2) if L > 0 else 0.0
+            r.pop("grade_pct", None)
+    c = site.get("crusher")
+    if c and level_elev(site, c.get("level")) is not None:
+        c["elev_m"] = level_elev(site, c.get("level"))
+    for key in ("piles", "planned_piles", "areas"):
+        for o in site.get(key, []):
+            z = level_elev(site, o.get("level"))
+            if z is not None:
+                o["level_m"] = z
+    return site
+
+
 def normalize_roads(site: dict) -> dict:
     """Give every road `grade_draw_pct` (grade along its drawing direction). Old roads stored `grade_pct`
     = grade towards the crusher: the magnitude is kept, the sign follows whether the road was drawn
     towards the crusher (its last point is nearer the crusher along the network) or away from it."""
+    apply_levels(site)
     roads = site.get("roads", [])
     legacy = [r for r in roads if "grade_draw_pct" not in r]
     if not legacy:
@@ -494,6 +525,8 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
     """Replace blasts/excavators/routes of a raw scenario with what is drawn on the map.
     Trucks, crusher parameters, costs etc. stay as they are. Also builds links between every pair
     of excavators (for trucks that load at two piles in one trip)."""
+    site.pop("dedicated", None)  # everyone drives on the drawn roads
+    site.pop("blast", None)      # the blast place comes from the planned blast itself
     normalize_roads(site)
     piles = site.get("piles", [])
     excavators = site.get("excavators", [])
@@ -688,6 +721,18 @@ def polyline_route(site: dict, coords: list, name: str = "trasa dedykowana", ste
     return route
 
 
+def blast_point(site: dict) -> tuple[float, float] | None:
+    """Where the blasting crew goes: the blast marker (older maps), otherwise the planned blast with the
+    earliest day, otherwise the first extraction area."""
+    if site.get("blast"):
+        return (site["blast"]["lat"], site["blast"]["lon"])
+    planned = sorted(site.get("planned_piles", []), key=lambda p: int(p.get("blast_day") or 1))
+    for src in planned + list(site.get("areas", [])):
+        if len(src.get("polygon") or []) >= 3:
+            return centroid(src["polygon"])
+    return None
+
+
 def dedicated(site: dict, role: str) -> list | None:
     """Coordinates of the route drawn for a role ('ekipa', 'sztygar', 'cysterna' or an excavator id)."""
     for d in site.get("dedicated", []):
@@ -698,9 +743,9 @@ def dedicated(site: dict, role: str) -> list | None:
 
 def crew_route(site: dict) -> dict | None:
     """Blasting crew: blast point -> exit (driven backwards when arriving). Dedicated route if drawn."""
-    if not site.get("blast"):
+    bp = blast_point(site)
+    if bp is None:
         return None
-    bp = (site["blast"]["lat"], site["blast"]["lon"])
     coords = dedicated(site, "ekipa")
     if coords:
         # orient: start at the blast point

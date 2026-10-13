@@ -14,7 +14,7 @@ import pandas as pd
 import simpy
 
 from .config import Excavator, Scenario, TruckFleet, clock_to_s
-from .site import haversine_m
+from .site import blast_point, haversine_m
 from .physics import (crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_t, load_time_s, passes_per_truck,
                       route_time_s, segment_time_s)
 
@@ -388,7 +388,7 @@ class Simulation:
         start = sc.shift_plan.start_time
         bl = sc.blasting
         site = sc.site or {}
-        if bl.enabled and site.get("blast") and site.get("roads") and site.get("crusher"):
+        if bl.enabled and blast_point(site) and site.get("roads") and site.get("crusher"):
             from .config import _routes
             from .site import crew_route
 

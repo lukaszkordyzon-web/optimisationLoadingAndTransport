@@ -12,7 +12,7 @@ from streamlit_folium import st_folium
 
 from kruszyk.config import PRODUCTS, SPOT_MODES
 from kruszyk.psd import DEFAULT_PRESET, PRESETS, SIEVES_MM, clean, preset_of, rosin_rammler, summary
-from kruszyk.site import (SNAP_M, along_m, analyze_site, normalize_roads, centroid, haversine_m, parse_coords,
+from kruszyk.site import (SNAP_M, along_m, level_elev, analyze_site, normalize_roads, centroid, haversine_m, parse_coords,
                           point_along, polygon_area_m2, polyline_length_m, site_to_scenario)
 
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -40,8 +40,7 @@ EDIT = "✏️ Edytuj / przesuń / usuń"
 MODE_GROUPS = {
     "🛣️ Drogi": ["Droga / rampa", "Mijanka", "Kruszarka"],
     "⛏️ Urobek i koparki": ["Usyp (materiał)", "Koparka", "Kierunek urabiania koparki", "Miejsce postoju koparki"],
-    "🧨 Strzelanie i objazdy": ["Miejsce strzelania", "Trasa dedykowana"],
-    "📅 Plan strzałów": ["Obszar wydobycia (strzały automatycznie)", "Planowany strzał (nowy usyp)"],
+    "📅 Plan strzałów": ["Obszar wydobycia (strzały automatycznie)"],
     "✏️ Edycja": [EDIT],
 }
 DEDICATED_FOR = {"ekipa": "🧨 ekipa strzałowa", "sztygar": "👷 sztygar", "cysterna": "⛽ cysterna"}
@@ -93,6 +92,8 @@ def get_site(raw: dict) -> dict:
     if "site" not in st.session_state or st.session_state.get("site_ver") != st.session_state.ver:
         old = st.session_state.get("site")
         new = copy.deepcopy(raw.get("site") or empty_site())
+        new.pop("dedicated", None)  # everyone drives on the drawn roads
+        new.pop("blast", None)      # the blast place comes from the planned blast (pile) itself
         normalize_roads(new)
         ensure_uids(new)
         st.session_state.site = new
@@ -261,7 +262,9 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
         n = -(-a["reserves_t"] // a["blast_max_t"])
         return (f"✅ Obszar {a['id']}: {a['reserves_t']:,.0f} t ≈ {n:.0f} strzałów po ≤ {a['blast_max_t']:,.0f} t – "
                 "terminy ustali harmonogram").replace(",", " ")
-    if g["type"] == "Polygon" and mode == "Planowany strzał (nowy usyp)":
+    if g["type"] == "Polygon" and (mode == "Planowany strzał (nowy usyp)"
+                                   or (mode == "Usyp (materiał)" and attrs.get("status") == "planned")):
+        attrs = {k: v for k, v in attrs.items() if k != "status"}
         site.setdefault("planned_piles", [])
         ids = {p["id"] for p in site["piles"]} | {p["id"] for p in site["planned_piles"]}
         a = dict(attrs)
@@ -297,7 +300,7 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
         return add_bay(site, g["coordinates"][1], g["coordinates"][0])
     if target is None:
         return f"⚠️ Nieobsługiwany kształt: {g['type']}"
-    a = dict(attrs) if target == mode else dict(DEFAULTS.get(target, {}))
+    a = {k: v for k, v in attrs.items() if k != "status"} if target == mode else dict(DEFAULTS.get(target, {}))
     note = "" if target == mode else " (parametry domyślne – popraw w tabeli poniżej)"
     if target == "Droga / rampa":
         a.setdefault("name", f"{a['kind']} {len(site['roads']) + 1}")
@@ -325,7 +328,8 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
                                      "kwh_per_t": attrs.get("kwh_per_t")})
             ensure_uids(site)
             return f"✅ Dodano kruszarkę {cid} – zbuduj trasy (zapisz kopalnię), żeby wozidła do niej jeździły"
-        site["crusher"] = {**(site.get("crusher") or {}), "lat": lat, "lon": lon}
+        site["crusher"] = {**(site.get("crusher") or {}), "lat": lat, "lon": lon,
+                           **({"level": attrs["level"]} if attrs.get("level") else {})}
         return "✅ Ustawiono kruszarkę główną"
     if target == "Miejsce strzelania":
         site["blast"] = {"lat": lat, "lon": lon}
@@ -668,6 +672,63 @@ def set_dig_path(ex: dict, coords: list, attrs: dict | None = None) -> None:
         ex[key] = float((attrs or {}).get(key) or ex.get(key) or default)
 
 
+def level_col(site: dict, label: str = "poziom"):
+    return st.column_config.SelectboxColumn(label, options=level_names(site),
+                                            help="poziom kopalni (dodasz je w „📏 Poziomy kopalni” nad mapą)")
+
+
+def level_names(site: dict) -> list[str]:
+    return [lv["name"] for lv in site.get("levels") or [] if lv.get("name")]
+
+
+def level_select(label: str, site: dict, key: str, current: str | None = None) -> str | None:
+    """Pick one of the mine levels (None = not set)."""
+    names = level_names(site)
+    if not names:
+        return None
+    opts = ["—"] + names
+    idx = opts.index(current) if current in opts else 0
+    v = st.selectbox(label, opts, index=idx, key=key,
+                     format_func=lambda n: n if n == "—" else f"{n} ({level_elev(site, n):+g} m)")
+    return None if v == "—" else v
+
+
+def levels_editor(site: dict) -> None:
+    """Mine levels with their elevations – the reference for roads, piles, areas and the crusher."""
+    with st.expander(f"📏 Poziomy kopalni – rzędne ({len(level_names(site))})", expanded=not site.get("levels")):
+        st.caption("Wpisz poziomy (piętra) z rzędnymi, np. „Poziom +240” = 240 m. Potem przy usypie, obszarze, "
+                   "kruszarce wybierasz poziom, a drodze podajesz poziom początku i końca – **nachylenie policzy się "
+                   "samo** i wszystko będzie się zgadzać wysokościowo.")
+        snap = f"levels_tbl_{st.session_state.obj_ver}"
+        if snap not in st.session_state:
+            st.session_state[snap] = pd.DataFrame(site.get("levels") or [], columns=["name", "elev_m"])
+        ed = st.data_editor(st.session_state[snap], key=snap + "_ed", num_rows="dynamic", hide_index=True,
+                            width="stretch",
+                            column_config={"name": st.column_config.TextColumn("poziom", required=True),
+                                           "elev_m": st.column_config.NumberColumn("rzędna [m]", required=True)})
+        old = [lv.get("name") for lv in site.get("levels") or []]
+        new = [{"name": str(r["name"]).strip(), "elev_m": float(r["elev_m"])} for _, r in ed.iterrows()
+               if r["name"] and not pd.isna(r["name"]) and not pd.isna(r["elev_m"])]
+        for i, lv in enumerate(new):  # a renamed level keeps its objects
+            if i < len(old) and old[i] and old[i] != lv["name"]:
+                _rename_level(site, old[i], lv["name"])
+        if new != (site.get("levels") or []):
+            site["levels"] = new
+
+
+def _rename_level(site: dict, old: str, new: str) -> None:
+    for key in ("piles", "planned_piles", "areas"):
+        for o in site.get(key, []):
+            if o.get("level") == old:
+                o["level"] = new
+    for r in site.get("roads", []):
+        for f in ("level_from", "level_to"):
+            if r.get(f) == old:
+                r[f] = new
+    if (site.get("crusher") or {}).get("level") == old:
+        site["crusher"]["level"] = new
+
+
 def blast_times_form(prefix: str, defaults: dict | None = None) -> dict:
     """Crew times of a blast: arrival, firing window, evacuation, departure."""
     from app_events import _time
@@ -733,6 +794,11 @@ PILE_COLS = {"id": "usyp", "material": st.column_config.SelectboxColumn("materia
              "tonnage_t": "ilość [t]", "fragmentation": "rozdrobnienie (0–1)", "loose_density_t_m3": "gęstość [t/m³]",
              "target_share": st.column_config.NumberColumn("udział w nadawie [%]", min_value=0.0, max_value=100.0,
                                                            help="ile procent nadawy ma iść z tego usypu (puste = bez celu)")}
+TIME_COLS = {"crew_arrive": st.column_config.TextColumn("przyjazd ekipy"),
+             "fire_from": st.column_config.TextColumn("odpalenie od"),
+             "fire_to": st.column_config.TextColumn("odpalenie do"),
+             "evacuation_min": st.column_config.NumberColumn("ewakuacja [min]", min_value=0.0),
+             "crew_leave": st.column_config.TextColumn("wyjazd ekipy")}
 EX_COLS = {"id": "koparka", "bucket_m3": "łyżka [m³]", "swing_cycle_s": "cykl łyżki [s]", "lat": "szer.", "lon": "dł.",
            "relocate_every_t": st.column_config.NumberColumn("przestawienie co [t]", min_value=50.0,
                                                              help="tylko z narysowanym kierunkiem urabiania"),
@@ -871,6 +937,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             st.error("Nie rozpoznano współrzędnych. W Google Maps: prawy klik na mapie → kliknij współrzędne (kopiują się).")
 
     st.subheader("2. Rysowanie obiektów")
+    levels_editor(site)
     groups = [g for g in MODE_GROUPS if schedule is not False or g != "📅 Plan strzałów"]
     if st.session_state.get("draw_group") not in groups:
         st.session_state.draw_group = groups[0]
@@ -894,10 +961,17 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                  help="Kierunek, w którym będziesz klikać punkty: zaczynasz na górze i idziesz w dół "
                                       "(⬇), zaczynasz na dole i idziesz w górę (⬆) albo droga jest płaska (➡). "
                                       "Na mapie strzałka pokaże kierunek rysowania.")
+            lf = level_select("Poziom początku (pierwszy punkt)", site, "road_lf")
+            lt = level_select("Poziom końca (ostatni punkt)", site, "road_lt")
+            by_levels = lf is not None and lt is not None
             grade = st.number_input("Nachylenie [%]", 0.0, 25.0, 9.0 if attrs["kind"] == "rampa" else 1.0, 0.5,
-                                    disabled=DIRECTIONS[direction] == 0,
+                                    disabled=DIRECTIONS[direction] == 0 or by_levels,
                                     help="Rampa: zwykle 8–10 %. Droga technologiczna: 0–3 %.")
             attrs["grade_draw_pct"] = DIRECTIONS[direction] * grade + 0.0
+            if by_levels:
+                attrs["level_from"], attrs["level_to"] = lf, lt
+                st.caption(f"Nachylenie policzy się z poziomów: {level_elev(site, lf):+g} m → {level_elev(site, lt):+g} m "
+                           "na długości narysowanej drogi.")
             attrs["speed_limit_kmh"] = st.number_input("Limit prędkości [km/h]", 5.0, 80.0,
                                                        25.0 if attrs["kind"] == "rampa" else 40.0, 5.0)
             attrs["single_lane"] = st.checkbox(
@@ -909,9 +983,17 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             st.caption("Narzędzie „linia” (/). Rysuj po osi drogi, zakończ klikając ostatni punkt. "
                        "Końce dróg, które się łączą, stawiaj blisko siebie (≤ 30 m).")
         elif mode == "Usyp (materiał)":
-            attrs["id"] = st.text_input("Oznaczenie usypu", f"U-{len(site['piles']) + 1:02d}")
+            planned = st.radio("Stan", ["leży – urobek gotowy", "planowany odstrzał"], horizontal=True,
+                               key="pile_status") == "planowany odstrzał"
+            attrs["status"] = "planned" if planned else "lying"
+            n_all = len(site["piles"]) + len(site.get("planned_piles", []))
+            attrs["id"] = st.text_input("Oznaczenie usypu", f"{'S' if planned else 'U'}-{n_all + 1:02d}", key=f"pile_id_{planned}")
             attrs["material"] = st.selectbox("Materiał", MATERIALS)
-            attrs["tonnage_t"] = st.number_input("Ilość [t]", 0.0, 10_000_000.0, 10_000.0, 500.0)
+            lvl = level_select("Poziom", site, "pile_lvl")
+            if lvl:
+                attrs["level"] = lvl
+            attrs["tonnage_t"] = st.number_input("Ile ton da strzał" if planned else "Ilość [t]", 0.0, 10_000_000.0,
+                                                 15_000.0 if planned else 10_000.0, 500.0, key=f"pile_t_{planned}")
             preset = st.selectbox("Uziarnienie (krzywą można potem dokładnie ustawić)", list(PRESETS),
                                   index=list(PRESETS).index(DEFAULT_PRESET))
             attrs["psd"] = PRESETS[preset]
@@ -921,7 +1003,20 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                          "dla wozideł nieprzypisanych na sztywno do jednej koparki.")
             if share > 0:
                 attrs["target_share"] = share
-            st.caption("Narzędzie „wielokąt” (⬠). Obrysuj usyp, zamknij klikając pierwszy punkt.")
+            if planned:
+                attrs["blast_day"] = int(st.number_input("Strzał w dniu roboczym nr", 1, 300, 3, 1, key="pile_day",
+                                                         help="licząc od pierwszego dnia harmonogramu (1 = pierwszy "
+                                                              "dzień roboczy)"))
+                c = st.columns(2)
+                attrs["t_per_m"] = c[0].number_input("Ton na metr wiercenia [t/mb]", 5.0, 500.0, 50.0, 5.0,
+                                                     key="pile_tpm")
+                attrs["drilled"] = c[1].checkbox("Już nawiercony", key="pile_drilled")
+                attrs.update(blast_times_form("pile"))
+                st.caption("Narzędzie „wielokąt” (⬠). Obrysuj miejsce strzału (urobek po strzale). W dniu strzału "
+                           "wyrobisko jest zamykane w podanych godzinach, ekipa jedzie w to miejsce, a koparka bez "
+                           "urobku przejeżdża tu sama.")
+            else:
+                st.caption("Narzędzie „wielokąt” (⬠). Obrysuj usyp, zamknij klikając pierwszy punkt.")
         elif mode == "Planowany strzał (nowy usyp)":
             n_pl = len(site.get("planned_piles", []))
             attrs["id"] = st.text_input("Oznaczenie", f"S-{n_pl + 1:02d}")
@@ -956,10 +1051,11 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             attrs["psd"], attrs["loose_density_t_m3"] = PRESETS[preset], 1.75
             attrs["reserves_t"] = st.number_input("Zasoby w obszarze [t] (0 = policz z powierzchni)", 0.0, 50_000_000.0,
                                                   0.0, 10_000.0, key="ar_res")
-            attrs["level_m"] = st.number_input("Poziom – rzędna [m] (puste = odczytaj z dróg)", -2000.0, 3000.0,
-                                               value=None, step=1.0, key="ar_lvl",
-                                               help="piętro obszaru; strzały na niższym poziomie czekają na wyprzedzenie "
-                                                    "frontu wyższego poziomu")
+            lvl = level_select("Poziom (piętro)", site, "ar_lvl")
+            if lvl:
+                attrs["level"], attrs["level_m"] = lvl, level_elev(site, lvl)
+            else:
+                st.caption("Bez poziomu rzędna zostanie odczytana z dróg przy obszarze (dodaj poziomy powyżej mapy).")
             c = st.columns(2)
             attrs["bench_m"] = c[0].number_input("Wysokość piętra [m]", 1.0, 50.0, 15.0, 1.0, key="ar_h")
             attrs["solid_density_t_m3"] = c[1].number_input("Gęstość w caliźnie [t/m³]", 1.5, 3.5, 2.6, 0.05, key="ar_d")
@@ -992,24 +1088,19 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             attrs["bucket_m3"] = st.number_input("Łyżka [m³]", 0.5, 30.0, 5.0, 0.5)
             attrs["swing_cycle_s"] = st.number_input("Cykl łyżki [s]", 10.0, 90.0, 30.0, 1.0)
             st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu pracy koparki.")
-        elif mode == "Trasa dedykowana":
-            ex_ids = [e["id"] for e in site["excavators"]]
-            options = list(DEDICATED_FOR) + ex_ids
-            attrs["for"] = st.selectbox("Dla kogo?", options, format_func=lambda x: DEDICATED_FOR.get(x, f"⛏️ przejazd koparki {x}"))
-            st.caption("Narzędzie „linia” (/). Trasa, którą jeździ tylko ten pojazd. **Ekipa:** od wjazdu do miejsca "
-                       "strzelania. **Sztygar / cysterna:** cała runda – postoje przy koparkach ustawią się same "
-                       "w najbliższych punktach trasy. **Koparka:** od koparki do jej miejsca postoju. Bez trasy "
-                       "dedykowanej pojazd jedzie najkrótszą drogą po sieci.")
         elif mode == "Miejsce postoju koparki":
             ex_ids = [e["id"] for e in site["excavators"]]
             attrs["excavator"] = st.selectbox("Której koparki?", ex_ids) if ex_ids else None
             st.caption("Narzędzie „znacznik” (📍). Tu koparka zjeżdża na czas strzelania (i tankowania, jeśli tak "
-                       "ustawisz). Dojedzie trasą dedykowaną, a gdy jej nie ma – najkrótszą drogą; bez połączenia "
-                       "drogowego – na wprost. Bez znacznika koparka cofa się o kilkaset metrów swoją trasą.")
+                       "ustawisz). Dojedzie najkrótszą drogą; bez połączenia drogowego – na wprost. Bez znacznika koparka cofa się o kilkaset metrów swoją trasą.")
         elif mode == "Kruszarka":
             if site.get("crusher"):
                 attrs["new_crusher"] = st.radio("Kruszarka", ["Przesuń główną", "Dodaj kolejną"], key="cr_which",
                                                 horizontal=True) == "Dodaj kolejną"
+            if not attrs.get("new_crusher"):
+                lvl = level_select("Poziom kruszarki", site, "cr_lvl", (site.get("crusher") or {}).get("level"))
+                if lvl:
+                    attrs["level"] = lvl
             if attrs.get("new_crusher"):
                 n_cr = len(site.get("crushers", []))
                 attrs["id"] = st.text_input("Oznaczenie", f"C-{n_cr + 2}", key="cr_id")
@@ -1102,20 +1193,27 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                "„✏️ Edytuj / przesuń / usuń”.")
     n_pl = len(site.get("planned_piles", [])) + len(site.get("areas", []))
     names = [f"🛣️ Drogi, mijanki, kruszarki ({len(site['roads'])})", f"⛰️ Usypy i uziarnienie ({len(site['piles'])})",
-             f"⛏️ Koparki i podstawianie ({len(site['excavators'])})", "🧨 Strzelanie, objazdy, postoje"]
+             f"⛏️ Koparki i podstawianie ({len(site['excavators'])})"]
     if schedule is not False:
         names.append(f"📅 Plan strzałów ({n_pl})")
     tabs = st.tabs(names)
-    t_road, t_pile, t_ex, t_ev = tabs[:4]
-    t_plan = tabs[4] if len(tabs) > 4 else None
+    t_road, t_pile, t_ex = tabs[:3]
+    t_ev = t_ex
+    t_plan = tabs[3] if len(tabs) > 3 else None
     with t_road:
         crushers_table(site, raw_for_build)
         if site["roads"]:
             object_table(site, "roads", lambda: pd.DataFrame(
                 [{k: v for k, v in r.items() if k not in ("coords", "uid")} | {"active": r.get("active", True),
-                                                                               "single_lane": bool(r.get("single_lane"))}
+                                                                               "single_lane": bool(r.get("single_lane")),
+                                                                               "level_from": r.get("level_from"),
+                                                                               "level_to": r.get("level_to")}
                  | {"długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]]),
-                extra=("active", "single_lane"), disabled=["id", "długość [m]"], column_config=ROAD_COLS)
+                extra=("active", "single_lane", "level_from", "level_to"), disabled=["id", "długość [m]"],
+                column_config={**ROAD_COLS, "level_from": level_col(site, "poziom początku"),
+                               "level_to": level_col(site, "poziom końca")})
+            if site.get("levels"):
+                st.caption("Gdy droga ma poziom początku i końca, jej nachylenie liczy się z rzędnych tych poziomów.")
         else:
             st.caption("brak dróg")
         bays = site.get("passing_bays", [])
@@ -1130,13 +1228,39 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                     sm = summary(p["psd"], max_feed)
                     row |= {"uziarnienie": preset_of(p["psd"]), "P80 [mm]": sm["P80 [mm]"], "nadziarno [%]": sm["nadziarno [%]"]}
                 row.setdefault("target_share", None)
+                row["level"] = p.get("level")
+                row["level_m"] = p.get("level_m")
                 row["pow. [m²]"] = round(polygon_area_m2(p["polygon"]))
                 rows.append(row)
-            object_table(site, "piles", lambda: pd.DataFrame(rows), extra=("target_share",),
-                         disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]"], column_config=PILE_COLS)
+            object_table(site, "piles", lambda: pd.DataFrame(rows), extra=("target_share", "level"),
+                         disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]", "level_m"],
+                         column_config={**PILE_COLS, "level": level_col(site),
+                                        "level_m": st.column_config.NumberColumn("rzędna [m]", format="%.1f")})
             psd_editor(site, max_feed, float(raw_for_build.get("crusher", {}).get("fragmentation_penalty", 0.4)))
         else:
             st.caption("brak usypów")
+        st.markdown("**🧨 Planowane odstrzały** – usypy, które dopiero będą odstrzelone (dzień i godziny strzału).")
+        if site.get("planned_piles"):
+            object_table(site, "planned_piles", lambda: pd.DataFrame(
+                [{"id": p["id"], "material": p.get("material", ""), "level": p.get("level"),
+                  "tonnage_t": p.get("tonnage_t", 0.0),
+                  "blast_day": int(p.get("blast_day", 1)), "target_share": p.get("target_share"),
+                  "t_per_m": p.get("t_per_m", 50.0), "drilled": bool(p.get("drilled")),
+                  **{k: p.get(k) for k in TIME_COLS},
+                  "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "–"}
+                 for p in site["planned_piles"]]),
+                extra=("target_share", "t_per_m", "drilled", "level", *TIME_COLS), disabled=["uziarnienie"],
+                column_config={"id": "strzał", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
+                               "level": level_col(site),
+                               "tonnage_t": st.column_config.NumberColumn("ilość [t]", min_value=0.0),
+                               "blast_day": st.column_config.NumberColumn("dzień roboczy strzału", min_value=1, step=1),
+                               "target_share": st.column_config.NumberColumn(
+                                   "udział w nadawie [%]", min_value=0.0, max_value=100.0,
+                                   help="ile procent nadawy ma iść z tego usypu, gdy już jest odstrzelony"),
+                           "t_per_m": st.column_config.NumberColumn("t/mb", min_value=5.0),
+                           "drilled": st.column_config.CheckboxColumn("nawiercony"), **TIME_COLS})
+        else:
+            st.caption("brak – narysuj usyp ze stanem „planowany odstrzał”")
     with t_ex:
         if site["excavators"]:
             object_table(site, "excavators", lambda: pd.DataFrame(
@@ -1153,42 +1277,33 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             st.caption("brak koparek")
         spotting_editor(site, st.session_state.raw)
     with t_ev:
-        st.markdown(f"**Miejsce strzelania:** {'✅ ustawione' if site.get('blast') else '— brak'} "
-                    "(godziny strzelania, objazd sztygara i tankowanie – w sekcji 5 „Zmiana i zdarzenia”)")
-        items = ([f"trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}"
-                  for d in site.get("dedicated", [])] +
-                 [f"miejsce postoju: {p['excavator']}" for p in site.get("parking", [])])
+        items = [f"miejsce postoju: {p['excavator']}" for p in site.get("parking", [])]
         if items:
-            st.markdown("**Trasy dedykowane i miejsca postoju koparek**  \n" + "  \n".join(f"• {x}" for x in items))
+            st.markdown("**Miejsca postoju koparek** (zjazd na strzelanie / tankowanie)  \n"
+                        + "  \n".join(f"• {x}" for x in items))
             rm = st.multiselect("Usuń", items, key=f"rm_{st.session_state.obj_ver}")
             if rm and st.button("🗑️ Usuń zaznaczone", key=f"rmb_{st.session_state.obj_ver}"):
-                site["dedicated"] = [d for d in site.get("dedicated", [])
-                                     if f"trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}" not in rm]
                 site["parking"] = [p for p in site.get("parking", []) if f"miejsce postoju: {p['excavator']}" not in rm]
                 st.session_state.obj_ver += 1
                 st.rerun()
-        else:
-            st.caption("brak tras dedykowanych i miejsc postoju")
-    if len(tabs) > 4:
+    if len(tabs) > 3:
         with t_plan:
-            TIME_COLS = {"crew_arrive": st.column_config.TextColumn("przyjazd ekipy"),
-                         "fire_from": st.column_config.TextColumn("odpalenie od"),
-                         "fire_to": st.column_config.TextColumn("odpalenie do"),
-                         "evacuation_min": st.column_config.NumberColumn("ewakuacja [min]", min_value=0.0),
-                         "crew_leave": st.column_config.TextColumn("wyjazd ekipy")}
             st.markdown("**🟧 Obszary wydobycia** – program sam ustala terminy strzałów (krok „🗓️ Harmonogram”).")
             if site.get("areas"):
                 object_table(site, "areas", lambda: pd.DataFrame(
-                    [{"id": a["id"], "level_m": a.get("level_m"), "material": a.get("material", ""),
+                    [{"id": a["id"], "level": a.get("level"), "level_m": a.get("level_m"), "material": a.get("material", ""),
                   "reserves_t": a.get("reserves_t", 0.0),
                       "blast_max_t": a.get("blast_max_t", 20000.0), "reblast_below_t": a.get("reblast_below_t", 0.0),
                       "min_gap_days": int(a.get("min_gap_days", 1)), "max_per_day": int(a.get("max_per_day", 1)),
                       "target_share": a.get("target_share"), "t_per_m": a.get("t_per_m", 50.0),
                       "first_drilled": bool(a.get("first_drilled", True)), **{k: a.get(k) for k in TIME_COLS},
                       "pow. [m²]": round(polygon_area_m2(a["polygon"]))} for a in site["areas"]]),
-                    extra=("target_share", "t_per_m", "first_drilled", "level_m"), disabled=["pow. [m²]"],
+                    extra=("target_share", "t_per_m", "first_drilled", "level", "level_m"), disabled=["pow. [m²]"],
                     column_config={"id": "obszar", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
-                                   "level_m": st.column_config.NumberColumn("poziom [m]", help="rzędna piętra"),
+                                   "level": level_col(site),
+                                   "level_m": st.column_config.NumberColumn(
+                                       "rzędna [m]", help="z wybranego poziomu; bez poziomu – wpisz albo zostaw "
+                                                          "puste (odczyt z dróg)"),
                                    "reserves_t": st.column_config.NumberColumn("zasoby [t]", min_value=0.0),
                                    "blast_max_t": st.column_config.NumberColumn("największy strzał [t]", min_value=1000.0),
                                    "reblast_below_t": st.column_config.NumberColumn("strzelaj poniżej [t]", min_value=0.0),
@@ -1200,26 +1315,6 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                    "first_drilled": st.column_config.CheckboxColumn("1. pas nawiercony"), **TIME_COLS})
             else:
                 st.caption("brak – narysuj trybem „Obszar wydobycia (strzały automatycznie)”")
-            st.markdown("**📅 Planowane strzały** – konkretny dzień i miejsce.")
-            if site.get("planned_piles"):
-                object_table(site, "planned_piles", lambda: pd.DataFrame(
-                    [{"id": p["id"], "material": p.get("material", ""), "tonnage_t": p.get("tonnage_t", 0.0),
-                      "blast_day": int(p.get("blast_day", 1)), "target_share": p.get("target_share"),
-                      "t_per_m": p.get("t_per_m", 50.0), "drilled": bool(p.get("drilled")),
-                      **{k: p.get(k) for k in TIME_COLS},
-                      "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "–"}
-                     for p in site["planned_piles"]]),
-                    extra=("target_share", "t_per_m", "drilled", *TIME_COLS), disabled=["uziarnienie"],
-                    column_config={"id": "strzał", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
-                                   "tonnage_t": st.column_config.NumberColumn("ilość [t]", min_value=0.0),
-                                   "blast_day": st.column_config.NumberColumn("dzień roboczy strzału", min_value=1, step=1),
-                                   "target_share": st.column_config.NumberColumn(
-                                       "udział w nadawie [%]", min_value=0.0, max_value=100.0,
-                                       help="ile procent nadawy ma iść z tego usypu, gdy już jest odstrzelony"),
-                               "t_per_m": st.column_config.NumberColumn("t/mb", min_value=5.0),
-                               "drilled": st.column_config.CheckboxColumn("nawiercony"), **TIME_COLS})
-            else:
-                st.caption("brak – narysuj trybem „Planowany strzał (nowy usyp)”")
 
     st.subheader("4. Sieć dróg, poziomy i nachylenia")
     st.caption("Rzędne liczone od kruszarki wzdłuż nachyleń dróg – także dla odgałęzień ze środka rampy. "
@@ -1240,9 +1335,18 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         for w in info["warnings"]:
             st.warning(w)
         if info["levels"]:
-            st.dataframe(pd.DataFrame([{"koparka": k, "poziom (rzędna) [m]": v["elev_m"],
-                                        "odległość od drogi [m]": v["dist_to_road_m"]} for k, v in info["levels"].items()]),
-                         hide_index=True, width="stretch")
+            pile_lvl = {p["id"]: p for p in site.get("piles", [])}
+            rows = []
+            for k_, v in info["levels"].items():
+                ex = next((e for e in site["excavators"] if e["id"] == k_), {})
+                p = pile_lvl.get(ex.get("pile"), {})
+                row = {"koparka": k_, "rzędna z dróg [m]": v["elev_m"], "odległość od drogi [m]": v["dist_to_road_m"],
+                       "usyp": ex.get("pile"), "poziom usypu": p.get("level") or "–", "rzędna usypu [m]": p.get("level_m")}
+                if p.get("level_m") is not None and v["elev_m"] is not None and abs(p["level_m"] - v["elev_m"]) > 3:
+                    st.warning(f"Koparka {k_}: usyp {ex.get('pile')} jest na poziomie {p['level']} ({p['level_m']:+g} m), "
+                               f"a drogi dochodzą tam na {v['elev_m']:+g} m – sprawdź poziomy dróg / nachylenia.")
+                rows.append(row)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     from app_events import events_editor
 

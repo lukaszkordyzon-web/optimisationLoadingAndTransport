@@ -86,12 +86,9 @@ site["areas"] = [{"id": "O1", "material": "wapień", "psd": PRESETS["średnie"],
                   "polygon": [[49.99365, 20.0228], [49.99365, 20.0262], [49.9929, 20.0262], [49.9929, 20.0228]]}]
 for p in site["planned_piles"]:
     p.update({"crew_arrive": "08:30", "fire_from": "11:00", "fire_to": "11:20", "evacuation_min": 10, "crew_leave": "11:40"})
-site["blast"] = {"lat": 49.99405, "lon": 20.0262}  # next blast: on the bottom level, east of U-03
 # where excavators go for blasting / refuelling (K-1 has no marker: it backs off along its route)
 site["parking"] = [{"excavator": "K-2", "lat": 49.9953, "lon": 20.0195},
                    {"excavator": "K-3", "lat": 49.99515, "lon": 20.0200}]
-# foreman's own route: main road, ramp, intermediate level and back
-site["dedicated"] = [{"for": "sztygar", "coords": [C, [50.0003, 20.0060], J1, MID, [49.9972, 20.0110], [49.9968, 20.0085]]}]
 raw["blasting"] = {"enabled": True, "crew_arrive": "09:00", "fire_from": "11:00", "fire_to": "11:20",
                    "evacuation_min": 10, "crew_leave": "11:40"}
 raw["inspection"] = {"enabled": True, "start": "09:30", "stops": ["K-1", "K-2", "K-3"], "stop_min": 10}
@@ -100,6 +97,16 @@ raw["shift_plan"] = {"start_time": "06:00", "startup_min": 15, "end_early_min": 
                      "breaks": [{"start": "10:00", "min": 20}]}
 raw["crusher"]["capacity_tph"] = 2600
 raw["crusher"]["hopper_t"] = 250
+# mine levels (piles and areas are assigned to them; the roads keep their drawn grades)
+site["levels"] = [{"name": "Poziom kruszarki", "elev_m": 0.0}, {"name": "Poziom pośredni", "elev_m": -37.6},
+                  {"name": "Poziom dolny", "elev_m": -66.2}]
+site["crusher"]["level"] = "Poziom kruszarki"
+for p in site["piles"]:
+    p["level"] = "Poziom pośredni" if p["id"] == "U-01" else "Poziom dolny"
+for p in site["planned_piles"]:
+    p["level"] = "Poziom dolny" if p["id"] == "S-01" else "Poziom pośredni"
+for a in site["areas"]:
+    a["level"] = "Poziom dolny"
 new = site_to_scenario(site, raw)
 info = analyze_site(site)
 print("poziomy koparek:", info["levels"])

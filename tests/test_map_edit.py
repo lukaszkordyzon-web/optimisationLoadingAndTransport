@@ -27,8 +27,6 @@ def test_click_tooltip_selects_object(site):
     assert sel_from_click(site, "🏭 Kruszarka", None) == "crusher:"
     p = site["parking"][0]
     assert sel_from_click(site, f"🅿️ postój {p['excavator']} · miejsce postoju koparki", None) == f"parking:{p['excavator']}"
-    d = site["dedicated"][0]
-    assert sel_from_click(site, f"〰️ trasa {d['for']} · dedykowana", None) == f"dedicated:{d['for']}"
     # no tooltip → nearest object
     assert sel_from_click(site, None, {"lat": ex["lat"], "lng": ex["lon"]}) == f"excavator:{ex['uid']}"
     assert sel_from_click(site, None, {"lat": 0.0, "lng": 0.0}) is None
@@ -118,3 +116,19 @@ def test_second_crusher_on_the_map(site):
     assert sel_from_click(site, "🏭 C-1 · kruszarka główna", None) == "crusher:"
     delete_obj(site, sel)
     assert site["crushers"] == []
+
+
+def test_pile_lying_or_planned_blast(site):
+    from app_map import add_drawing
+
+    poly = {"type": "Polygon", "coordinates": [[[20.030, 49.993], [20.031, 49.993], [20.031, 49.9925], [20.030, 49.993]]]}
+    n_p, n_pl = len(site["piles"]), len(site.get("planned_piles", []))
+    add_drawing(site, poly, "Usyp (materiał)", {"status": "lying", "id": "U-09", "material": "wapień",
+                                                "tonnage_t": 5000.0, "level": "Poziom dolny"})
+    assert len(site["piles"]) == n_p + 1 and "status" not in site["piles"][-1]
+    msg = add_drawing(site, poly, "Usyp (materiał)", {"status": "planned", "id": "S-09", "material": "wapień",
+                                                      "tonnage_t": 12000.0, "blast_day": 3, "fire_from": "10:00",
+                                                      "fire_to": "10:15", "crew_arrive": "08:00", "level": "Poziom dolny"})
+    assert msg.startswith("✅") and len(site["planned_piles"]) == n_pl + 1
+    pl = site["planned_piles"][-1]
+    assert pl["blast_day"] == 3 and pl["fire_from"] == "10:00" and "status" not in pl
