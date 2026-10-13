@@ -230,13 +230,96 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         bar.empty()
         st.session_state.period = (key, df, plan, df_rl)
     res = st.session_state.get("period")
-    if not res:
+    if res:
+        if res[0] != key:
+            st.warning("Ustawienia zmieniły się od ostatniego liczenia – kliknij **Policz okres** ponownie.")
+        if len(res) > 3 and res[3] is not None:
+            _rl_compare(res[1], res[3], res[2], sc)
+        _results(res[1], res[2], sc)
+    st.divider()
+    _chance_section(sc, plan, seed, key)
+
+
+def _chance_section(sc, plan: PeriodPlan, seed: int, key: str) -> None:
+    """Monte Carlo: the same plan many times with different weather, breakdowns, drivers – how sure is it?"""
+    from kruszyk.montecarlo import chance, run_many
+
+    st.markdown("#### 🎲 Szansa realizacji")
+    st.caption("Jedno „Policz okres” to **jeden możliwy miesiąc**. Tu ten sam plan liczy się wiele razy, za każdym razem "
+               "z innym losowaniem pogody, awarii, kierowców i czasów – widać, **jak pewny** jest wynik. To informacja: "
+               "plan się nie zmienia.")
+    gp = st.session_state.get("prod_applied")
+    target = float(plan.target_t or 0.0)
+    c = st.columns([1, 1, 2])
+    n = c[0].selectbox("Przebiegów", [10, 20, 40], index=1, key="mc_n",
+                       help="więcej = dokładniej, dłużej; 20 daje szansę z dokładnością ok. ±10–20 pp")
+    calibrated = bool(sc.calibration.measured)
+    model_unc = c[1].toggle("Niepewność kalibracji", calibrated, key="mc_model", disabled=not calibrated,
+                            help="model z jednej zmiany też nie jest pewny – każdy przebieg dostaje trochę inne czasy "
+                                 "i przestoje (±5 %, przestoje ±10 %)")
+    per = max(1, len(plan.shifts()) // 4)
+    import os
+
+    c[2].caption(f"ok. {max(1, n * per // max(1, os.cpu_count() or 1) // 60)} min "
+                 f"{n * per // max(1, os.cpu_count() or 1) % 60} s · cel nadawy: "
+                 + (f"**{target:,.0f} t**".replace(",", " ") if target else "brak – ustaw w kalendarzu lub z celu produkcyjnego"))
+    mc_key = repr((key, n, model_unc, gp.total_t if gp else None))
+    if st.button("🎲 Policz szansę realizacji", key="mc_go", disabled=not plan.shifts()):
+        bar = st.progress(0.0, "liczę przebiegi…")
+        runs = run_many(sc, plan, n=n, seed=seed, model_sd=0.05 if model_unc else 0.0,
+                        progress=lambda i, k: bar.progress(i / k, f"przebieg {i} z {k}"))
+        bar.empty()
+        st.session_state.mc_res = (mc_key, chance(runs, plan, target, goal=gp))
+    got = st.session_state.get("mc_res")
+    if not got:
         return
-    if res[0] != key:
-        st.warning("Ustawienia zmieniły się od ostatniego liczenia – kliknij **Policz okres** ponownie.")
-    if len(res) > 3 and res[3] is not None:
-        _rl_compare(res[1], res[3], res[2], sc)
-    _results(res[1], res[2], sc)
+    if got[0] != mc_key:
+        st.info("Plan zmienił się od ostatniego liczenia – policz szansę ponownie.")
+    _chance_results(got[1])
+
+
+def _chance_results(r: dict) -> None:
+    def t(x) -> str:
+        return f"{x:,.0f}".replace(",", " ")
+    c = st.columns(4)
+    if r.get("p") is not None:
+        p = 100 * r["p"]
+        c[0].metric(f"Szansa: {t(r['target_t'])} t do {r['deadline'].strftime('%d.%m')}", f"{p:.0f} %",
+                    f"± {100 * r['p_margin']:.0f} pp (z {r['n']} przebiegów)", delta_color="off")
+    c[1].metric("Wywiezione (P10 / P50 / P90)", f"{t(r['t_p50'])} t", f"{t(r['t_p10'])} – {t(r['t_p90'])} t",
+                delta_color="off", help="P10 = w 9 na 10 miesięcy co najmniej tyle; P90 = tylko 1 na 10 miesięcy więcej")
+    c[2].metric("Koszt na tonę (P50)", f"{r['cost_p50']:.2f} zł/t", f"{r['cost_p10']:.2f} – {r['cost_p90']:.2f} zł/t",
+                delta_color="off")
+    if r.get("hit_p50"):
+        c[3].metric("Cel zrobiony (typowo)", r["hit_p50"].strftime("%d.%m"),
+                    f"9 na 10: do {r['hit_p90'].strftime('%d.%m')}" if r.get("hit_p90") else "w 1 na 10 – nie w okresie",
+                    delta_color="off")
+    if r.get("products"):
+        st.markdown("**Szansa dla produktów z celu produkcyjnego**")
+        st.dataframe(pd.DataFrame(r["products"]), hide_index=True, width="stretch",
+                     column_config={"cel_t": st.column_config.NumberColumn("cel [t]", format="%.0f"),
+                                    "szansa_pct": st.column_config.ProgressColumn("szansa [%]", min_value=0, max_value=100,
+                                                                                  format="%d %%"),
+                                    "p10_t": st.column_config.NumberColumn("P10 [t]", format="%.0f"),
+                                    "p50_t": st.column_config.NumberColumn("P50 [t]", format="%.0f")})
+    b = r["band"]
+    fig = go.Figure()
+    fig.add_scatter(x=b["data"], y=b["p90"], mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip")
+    fig.add_scatter(x=b["data"], y=b["p10"], mode="lines", line=dict(width=0), fill="tonexty",
+                    fillcolor="rgba(33,158,188,0.25)", name="P10–P90 (8 na 10 miesięcy)")
+    fig.add_scatter(x=b["data"], y=b["p50"], mode="lines", line=dict(color="#219ebc", width=3), name="P50 (typowo)")
+    if r["target_t"]:
+        fig.add_hline(y=r["target_t"], line_dash="dash", line_color="#e63946", annotation_text="cel")
+        fig.add_vline(x=r["deadline"], line_dash="dot", line_color="#e63946")
+    fig.update_layout(height=320, margin=dict(t=30, b=10), title="Tony narastająco – pasmo możliwych miesięcy",
+                      legend=dict(orientation="h"))
+    st.plotly_chart(fig, width="stretch")
+    if r["drivers"]:
+        st.markdown("**Co mają nieudane przebiegi:**  \n" + "  \n".join("• " + d for d in r["drivers"]))
+    if r["t_p90"] - r["t_p10"] < 0.02 * max(r["t_p50"], 1):
+        st.info("📏 Wyniki prawie się nie różnią – produkcję ogranicza stały element (zwykle kruszarka), a losowe "
+                "zdarzenia go nie dotykają. W modelu psują się na razie tylko wozidła, więc ta pewność może być "
+                "**zawyżona** – awarie kruszarek i koparek zmieniłyby obraz.")
 
 
 def _reset_tables() -> None:

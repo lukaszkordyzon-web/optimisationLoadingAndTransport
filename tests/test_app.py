@@ -235,3 +235,14 @@ def test_calibration_screen_fits_and_saves():
     assert not at.exception, at.exception
     assert at.session_state["raw"]["calibration"]["measured"]["tonnes_t"] == 3500
     assert any("Model skalibrowany" in c.value for c in at.caption)
+
+
+def test_chance_of_the_plan():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
+    at.number_input(key="per_days").set_value(2).run()
+    at.number_input(key="per_target").set_value(8000.0).run()
+    at.selectbox(key="mc_n").set_value(10).run()
+    next(b for b in at.button if "Policz szansę" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert any(m.label.startswith("Szansa:") for m in at.metric)
