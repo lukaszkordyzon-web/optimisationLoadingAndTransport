@@ -254,13 +254,32 @@ class RoadGraph:
             v = u
         return list(reversed(edges))
 
-    def elevations(self, root: int, root_elev: float) -> tuple[dict[int, float], list[str]]:
-        """Node elevations from the crusher along the shortest-path tree. Going away from the
-        crusher on a road with grade g (towards the crusher) changes the height by -g*len/100.
-        Returns elevations and warnings about loops whose grades do not close (> 3 m)."""
+    def ramp_anchors(self) -> list[tuple[int, float]]:
+        """Ramps with a known inlet elevation (first drawn point): extra fixed heights for the network."""
+        out = []
+        for road in self.roads:
+            z = road.get("inlet_elev_m")
+            if z is None or z == "" or not road.get("coords"):
+                continue
+            p = tuple(road["coords"][0])
+            n = min(range(len(self.nodes)), key=lambda i: haversine_m(self.nodes[i], p), default=None)
+            if n is not None:
+                out.append((n, float(z)))
+        return out
+
+    def elevations(self, root: int, root_elev: float,
+                   anchors: list[tuple[int, float]] | None = None) -> tuple[dict[int, float], list[str]]:
+        """Node elevations along the road grades, from the crusher and from every ramp inlet with a given
+        elevation (each node takes its height from the nearest such point). Flat roads therefore get the
+        height of the place where they meet a ramp. Returns elevations and warnings where the drawn grades
+        do not agree with the known heights (> 3 m)."""
+        anchors = [(root, root_elev)] + (self.ramp_anchors() if anchors is None else anchors)
         adj = self.adj()
-        elev, dist = {root: root_elev}, {root: 0.0}
-        pq = [(0.0, root)]
+        elev, dist, pq = {}, {}, []
+        for n, z in anchors:
+            elev[n], dist[n] = z, 0.0
+            pq.append((0.0, n))
+        heapq.heapify(pq)
         while pq:
             d, u = heapq.heappop(pq)
             if d > dist.get(u, math.inf):
@@ -274,10 +293,11 @@ class RoadGraph:
         for (a, b), (w, ri) in self.edges.items():
             if a in elev and b in elev:
                 g = self.dz(a, b, w, ri)
-                if g == 0 and abs(elev[a] - elev[b]) > 3:
+                if abs(elev[b] - elev[a] - g) > 3:
                     name = self.roads[ri].get("name") or self.roads[ri].get("id")
-                    warnings.append(f"Droga „{name}”: płaska, a jej końce wyszły na różnych wysokościach "
-                                    f"({elev[a]:.0f} / {elev[b]:.0f} m) – sprawdź nachylenia w pętli")
+                    kind = "płaska, a jej końce wyszły" if g == 0 else "jej nachylenie nie zgadza się z rzędnymi –"
+                    warnings.append(f"Droga „{name}”: {kind} na różnych wysokościach ({elev[a]:.0f} / {elev[b]:.0f} m) – "
+                                    "sprawdź nachylenia i rzędne wlotów pochylni")
         return elev, sorted(set(warnings))
 
 
@@ -527,6 +547,7 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
     of excavators (for trucks that load at two piles in one trip)."""
     site.pop("dedicated", None)  # everyone drives on the drawn roads
     site.pop("blast", None)      # the blast place comes from the planned blast itself
+    sync_levels(site)
     normalize_roads(site)
     piles = site.get("piles", [])
     excavators = site.get("excavators", [])
@@ -892,3 +913,78 @@ def poly_distance_m(a: list, b: list) -> float:
     if any(cross(*e1, *e2) for e1 in ea for e2 in eb):
         return 0.0
     return min(min(seg_dist(p, *e) for p in pa for e in eb), min(seg_dist(p, *e) for p in pb for e in ea))
+
+
+# ---------------------------------------------------------------- automatic levels from flat roads
+LEVEL_SNAP_M = 1.0     # flat roads within this height are one level
+LEVEL_NEAR_M = 150.0   # a pile / area closer than this to a level road belongs to that level
+
+
+def _network_elev(site: dict):
+    roads = [r for r in site.get("roads", []) if r.get("active", True) and len(r.get("coords", [])) >= 2]
+    if not roads:
+        return None, {}
+    g = RoadGraph(site["roads"])
+    c = site.get("crusher")
+    if c:
+        root, _ = g.attach((c["lat"], c["lon"]))
+        elev, _ = g.elevations(root, float(c.get("elev_m", 0.0)))
+    else:
+        anchors = g.ramp_anchors()
+        if not anchors:
+            return g, {}
+        elev, _ = g.elevations(anchors[0][0], anchors[0][1], anchors[1:])
+    return g, elev
+
+
+def auto_levels(site: dict) -> list[dict]:
+    """Levels found from the flat roads: each flat road lies at the height where it meets a ramp."""
+    g, elev = _network_elev(site)
+    if g is None or not elev:
+        return []
+    found: list[dict] = []
+    for r in g.roads:
+        if abs(float(r.get("grade_draw_pct") or 0.0)) >= 0.05:
+            continue
+        zs = [elev[n] for n in range(len(g.nodes)) if n in elev
+              and min(haversine_m(g.nodes[n], tuple(c)) for c in r["coords"]) < SNAP_M]
+        if not zs:
+            continue
+        z = round(sum(zs) / len(zs), 1)
+        lv = next((x for x in found if abs(x["elev_m"] - z) <= LEVEL_SNAP_M), None)
+        if lv is None:
+            lv = {"name": f"Poziom {z:+.0f}", "elev_m": z, "auto": True, "roads": []}
+            found.append(lv)
+        lv["roads"].append(r.get("name") or r.get("id"))
+    return sorted(found, key=lambda x: -x["elev_m"])
+
+
+def sync_levels(site: dict) -> dict:
+    """Keep the automatic levels up to date and put piles / planned blasts / areas without a level on the level
+    of the nearest flat road. Manual levels (typed by the user) are kept and take precedence."""
+    manual = [lv for lv in site.get("levels") or [] if not lv.get("auto")]
+    autos = [lv for lv in auto_levels(site)
+             if not any(abs(float(m.get("elev_m") or 0) - lv["elev_m"]) <= LEVEL_SNAP_M for m in manual)]
+    site["levels"] = manual + [{k: v for k, v in lv.items() if k != "roads"} | {"roads": lv["roads"]} for lv in autos]
+    if not site["levels"]:
+        site.pop("levels")
+        return site
+    flat = [r for r in site.get("roads", []) if r.get("active", True) and abs(float(r.get("grade_draw_pct") or 0)) < 0.05
+            and len(r.get("coords", [])) >= 2]
+    road_level = {}
+    for lv in site["levels"]:
+        for name in lv.get("roads", []):
+            road_level[name] = lv["name"]
+    for key in ("piles", "planned_piles", "areas"):
+        for o in site.get(key, []):
+            if o.get("level") and o.get("level") != o.get("level_auto"):
+                o.pop("level_auto", None)  # chosen by the user – keep it
+                continue
+            if len(o.get("polygon") or []) < 3 or not flat:
+                continue
+            pts = [tuple(c) for c in o["polygon"]] + [centroid(o["polygon"])]
+            d, road = min(((min(along_m(r["coords"], q)[1] for q in pts), r) for r in flat), key=lambda x: x[0])
+            name = road_level.get(road.get("name") or road.get("id"))
+            if name and d <= LEVEL_NEAR_M:
+                o["level"] = o["level_auto"] = name
+    return site

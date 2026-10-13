@@ -73,7 +73,7 @@ def ensure_uids(site: dict) -> None:
         seen.add(r["id"])
 
 
-DEFAULT_FLAGS = {"active": True, "single_lane": False}
+DEFAULT_FLAGS = {"active": True, "single_lane": False, "t_per_m": 50.0, "drilled": False, "first_drilled": True}
 
 
 def _plain(site: dict) -> dict:
@@ -695,25 +695,33 @@ def level_select(label: str, site: dict, key: str, current: str | None = None) -
 
 def levels_editor(site: dict) -> None:
     """Mine levels with their elevations – the reference for roads, piles, areas and the crusher."""
-    with st.expander(f"📏 Poziomy kopalni – rzędne ({len(level_names(site))})", expanded=not site.get("levels")):
-        st.caption("Wpisz poziomy (piętra) z rzędnymi, np. „Poziom +240” = 240 m. Potem przy usypie, obszarze, "
-                   "kruszarce wybierasz poziom, a drodze podajesz poziom początku i końca – **nachylenie policzy się "
-                   "samo** i wszystko będzie się zgadzać wysokościowo.")
+    with st.expander(f"📏 Poziomy kopalni – rzędne ({len(level_names(site))})", expanded=False):
+        st.caption("Rzędne liczą się od kruszarki i od **wlotów pochylni** (przy pochylni podajesz tylko rzędną "
+                   "wlotu i nachylenie). Każda **droga pozioma** leży na rzędnej miejsca, gdzie styka się z pochylnią "
+                   "– z niej powstaje poziom. Usypy i obszary przy takiej drodze dostają ten poziom same "
+                   "(możesz go zmienić w tabeli).")
+        autos = [lv for lv in site.get("levels") or [] if lv.get("auto")]
+        if autos:
+            st.markdown("**Wyznaczone automatycznie z dróg poziomych:**  \n" + "  \n".join(
+                f"• **{lv['name']}** ({lv['elev_m']:+.1f} m) – {', '.join(lv.get('roads', []))}" for lv in autos))
+        st.markdown("**Własne poziomy** (opcjonalnie – np. gdy poziom nie ma jeszcze drogi):")
         snap = f"levels_tbl_{st.session_state.obj_ver}"
         if snap not in st.session_state:
-            st.session_state[snap] = pd.DataFrame(site.get("levels") or [], columns=["name", "elev_m"])
+            st.session_state[snap] = pd.DataFrame([lv for lv in site.get("levels") or [] if not lv.get("auto")],
+                                                  columns=["name", "elev_m"])
         ed = st.data_editor(st.session_state[snap], key=snap + "_ed", num_rows="dynamic", hide_index=True,
                             width="stretch",
                             column_config={"name": st.column_config.TextColumn("poziom", required=True),
                                            "elev_m": st.column_config.NumberColumn("rzędna [m]", required=True)})
-        old = [lv.get("name") for lv in site.get("levels") or []]
+        old = [lv.get("name") for lv in site.get("levels") or [] if not lv.get("auto")]
         new = [{"name": str(r["name"]).strip(), "elev_m": float(r["elev_m"])} for _, r in ed.iterrows()
                if r["name"] and not pd.isna(r["name"]) and not pd.isna(r["elev_m"])]
         for i, lv in enumerate(new):  # a renamed level keeps its objects
             if i < len(old) and old[i] and old[i] != lv["name"]:
                 _rename_level(site, old[i], lv["name"])
-        if new != (site.get("levels") or []):
-            site["levels"] = new
+        manual_now = [{"name": lv["name"], "elev_m": lv["elev_m"]} for lv in site.get("levels") or [] if not lv.get("auto")]
+        if new != manual_now:
+            site["levels"] = new + autos
 
 
 def _rename_level(site: dict, old: str, new: str) -> None:
@@ -937,6 +945,9 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             st.error("Nie rozpoznano współrzędnych. W Google Maps: prawy klik na mapie → kliknij współrzędne (kopiują się).")
 
     st.subheader("2. Rysowanie obiektów")
+    from kruszyk.site import sync_levels
+
+    sync_levels(site)
     levels_editor(site)
     groups = [g for g in MODE_GROUPS if schedule is not False or g != "📅 Plan strzałów"]
     if st.session_state.get("draw_group") not in groups:
@@ -961,17 +972,19 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                  help="Kierunek, w którym będziesz klikać punkty: zaczynasz na górze i idziesz w dół "
                                       "(⬇), zaczynasz na dole i idziesz w górę (⬆) albo droga jest płaska (➡). "
                                       "Na mapie strzałka pokaże kierunek rysowania.")
-            lf = level_select("Poziom początku (pierwszy punkt)", site, "road_lf")
-            lt = level_select("Poziom końca (ostatni punkt)", site, "road_lt")
-            by_levels = lf is not None and lt is not None
             grade = st.number_input("Nachylenie [%]", 0.0, 25.0, 9.0 if attrs["kind"] == "rampa" else 1.0, 0.5,
-                                    disabled=DIRECTIONS[direction] == 0 or by_levels,
+                                    disabled=DIRECTIONS[direction] == 0,
                                     help="Rampa: zwykle 8–10 %. Droga technologiczna: 0–3 %.")
             attrs["grade_draw_pct"] = DIRECTIONS[direction] * grade + 0.0
-            if by_levels:
-                attrs["level_from"], attrs["level_to"] = lf, lt
-                st.caption(f"Nachylenie policzy się z poziomów: {level_elev(site, lf):+g} m → {level_elev(site, lt):+g} m "
-                           "na długości narysowanej drogi.")
+            if attrs["kind"] == "rampa":
+                z = st.number_input("Rzędna wlotu [m] (pierwszy narysowany punkt)", -2000.0, 3000.0, value=None,
+                                    step=0.5, key="road_inlet",
+                                    help="Wystarczy rzędna wlotu – dalej liczy się z nachylenia. Puste = rzędna "
+                                         "z sieci dróg od kruszarki.")
+                if z is not None:
+                    attrs["inlet_elev_m"] = z
+            elif DIRECTIONS[direction] == 0:
+                st.caption("Droga pozioma: jej poziom wyznaczy się sam – z rzędnej miejsca, gdzie styka się z pochylnią.")
             attrs["speed_limit_kmh"] = st.number_input("Limit prędkości [km/h]", 5.0, 80.0,
                                                        25.0 if attrs["kind"] == "rampa" else 40.0, 5.0)
             attrs["single_lane"] = st.checkbox(
@@ -1200,20 +1213,19 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
     t_road, t_pile, t_ex = tabs[:3]
     t_ev = t_ex
     t_plan = tabs[3] if len(tabs) > 3 else None
+    road_levels = {n: lv["name"] for lv in site.get("levels") or [] for n in lv.get("roads", [])}
     with t_road:
         crushers_table(site, raw_for_build)
         if site["roads"]:
             object_table(site, "roads", lambda: pd.DataFrame(
                 [{k: v for k, v in r.items() if k not in ("coords", "uid")} | {"active": r.get("active", True),
                                                                                "single_lane": bool(r.get("single_lane")),
-                                                                               "level_from": r.get("level_from"),
-                                                                               "level_to": r.get("level_to")}
-                 | {"długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]]),
-                extra=("active", "single_lane", "level_from", "level_to"), disabled=["id", "długość [m]"],
-                column_config={**ROAD_COLS, "level_from": level_col(site, "poziom początku"),
-                               "level_to": level_col(site, "poziom końca")})
-            if site.get("levels"):
-                st.caption("Gdy droga ma poziom początku i końca, jej nachylenie liczy się z rzędnych tych poziomów.")
+                                                                               "inlet_elev_m": r.get("inlet_elev_m")}
+                 | {"poziom (auto)": road_levels.get(r.get("name") or r.get("id"), "–"),
+                    "długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]]),
+                extra=("active", "single_lane", "inlet_elev_m"), disabled=["id", "długość [m]", "poziom (auto)"],
+                column_config={**ROAD_COLS, "inlet_elev_m": st.column_config.NumberColumn(
+                    "rzędna wlotu [m]", help="pochylnia: rzędna pierwszego narysowanego punktu (puste = z sieci)")})
         else:
             st.caption("brak dróg")
         bays = site.get("passing_bays", [])
@@ -1223,7 +1235,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             max_feed = float(raw_for_build.get("crusher", {}).get("max_feed_mm", 800))
             rows = []
             for p in site["piles"]:
-                row = {k: v for k, v in p.items() if k not in ("polygon", "psd", "fragmentation", "uid")}
+                row = {k: v for k, v in p.items() if k not in ("polygon", "psd", "fragmentation", "uid", "level_auto")}
                 if p.get("psd"):
                     sm = summary(p["psd"], max_feed)
                     row |= {"uziarnienie": preset_of(p["psd"]), "P80 [mm]": sm["P80 [mm]"], "nadziarno [%]": sm["nadziarno [%]"]}

@@ -180,3 +180,26 @@ def test_excavator_advances_along_digging_line():
     assert len(used & set(k3.dig_routes)) >= 2  # trucks drove to more than one place on the face
     track = res.excavator_tracks["K-3"]
     assert len({(round(a, 6), round(b, 6)) for _, a, b in track}) >= 2  # the excavator moves in the animation
+
+
+def test_ramp_inlet_sets_heights_and_flat_roads_become_levels():
+    from kruszyk.site import analyze_site, sync_levels
+
+    sc = load_scenario(DEMO)
+    site = copy.deepcopy(sc.site)
+    ramp = next(r for r in site["roads"] if r["id"] == "R2")
+    ramp["inlet_elev_m"] = 100.0  # move the ramp up: everything below it follows
+    for k in ("piles", "planned_piles", "areas"):
+        for o in site.get(k, []):
+            if o.get("level_auto"):
+                o.pop("level"), o.pop("level_auto")
+    site["levels"] = []
+    sync_levels(site)
+    names = {lv["name"]: lv["elev_m"] for lv in site["levels"]}
+    assert all(lv.get("auto") for lv in site["levels"]) and len(names) == 2
+    bottom = min(names.values())
+    assert bottom == pytest.approx(100.0 - 0.09 * 636, abs=1.5)  # inlet - 9 % of the ramp length
+    u03 = next(p for p in site["piles"] if p["id"] == "U-03")
+    assert names[u03["level"]] == bottom  # the pile next to the bottom road is on the bottom level
+    info = analyze_site(site)
+    assert any("nie zgadza" in w or "różnych wysokościach" in w for w in info["warnings"])  # crusher at 0 m vs inlet 100 m

@@ -255,7 +255,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3:
     segments:
@@ -308,7 +308,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@1:
     segments:
@@ -361,7 +361,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@2:
     segments:
@@ -414,7 +414,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@3:
     segments:
@@ -467,7 +467,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@4:
     segments:
@@ -520,7 +520,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@5:
     segments:
@@ -573,7 +573,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@6:
     segments:
@@ -626,7 +626,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@7:
     segments:
@@ -679,7 +679,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@8:
     segments:
@@ -732,7 +732,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@9:
     segments:
@@ -785,7 +785,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@10:
     segments:
@@ -838,7 +838,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@11:
     segments:
@@ -891,7 +891,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@12:
     segments:
@@ -944,7 +944,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@13:
     segments:
@@ -997,7 +997,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@14:
     segments:
@@ -1050,7 +1050,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@15:
     segments:
@@ -1103,7 +1103,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@16:
     segments:
@@ -1156,7 +1156,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@17:
     segments:
@@ -1209,7 +1209,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@18:
     segments:
@@ -1262,7 +1262,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@19:
     segments:
@@ -1315,7 +1315,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   T-K-3@20:
     segments:
@@ -1368,7 +1368,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   P-S-01:
     segments:
@@ -1421,7 +1421,7 @@ routes:
       - 20.0
     - - 50.0
       - 20.0
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: 0.0
   P-S-02:
     segments:
@@ -1576,7 +1576,7 @@ links:
     - - 49.99475
       - 20.0225
     elev_start_m: -37.6
-    elev_end_m: -66.2
+    elev_end_m: -66.3
   K-1>K-3:
     segments:
     - name: front
@@ -1625,7 +1625,7 @@ links:
     - - 49.99435
       - 20.027
     elev_start_m: -37.6
-    elev_end_m: -66.2
+    elev_end_m: -66.3
   K-2>K-1:
     segments:
     - name: front
@@ -1673,7 +1673,7 @@ links:
       - 20.0085
     - - 49.99665
       - 20.0085
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: -37.6
   K-2>K-3:
     segments:
@@ -1698,8 +1698,8 @@ links:
       - 20.027
     - - 49.99435
       - 20.027
-    elev_start_m: -66.2
-    elev_end_m: -66.2
+    elev_start_m: -66.3
+    elev_end_m: -66.3
   K-3>K-1:
     segments:
     - name: front
@@ -1747,7 +1747,7 @@ links:
       - 20.0085
     - - 49.99665
       - 20.0085
-    elev_start_m: -66.2
+    elev_start_m: -66.3
     elev_end_m: -37.6
   K-3>K-2:
     segments:
@@ -1772,8 +1772,8 @@ links:
       - 20.022565265520978
     - - 49.99475
       - 20.0225
-    elev_start_m: -66.2
-    elev_end_m: -66.2
+    elev_start_m: -66.3
+    elev_end_m: -66.3
 planned_blasts:
 - id: S-01
   tonnage_t: 15000.0
@@ -1907,8 +1907,9 @@ areas:
     - 20.0262
   - - 49.9929
     - 20.0228
-  level: Poziom dolny
-  level_m: -66.2
+  level: Poziom -66
+  level_auto: Poziom -66
+  level_m: -66.3
 crushers_extra: []
 site:
   center:
@@ -1919,7 +1920,6 @@ site:
     lat: 50.0
     lon: 20.0
     elev_m: 0.0
-    level: Poziom kruszarki
   roads:
   - id: R1
     name: droga główna
@@ -1944,6 +1944,7 @@ site:
       - 20.0125
     - - 49.9955
       - 20.018
+    inlet_elev_m: -9.0
   - id: R3
     name: zjazd na poziom pośredni
     kind: droga
@@ -2017,7 +2018,8 @@ site:
       - 20.0092
     - - 49.9957
       - 20.0078
-    level: Poziom pośredni
+    level: Poziom -38
+    level_auto: Poziom -38
     level_m: -37.6
   - id: U-02
     target_share: 30
@@ -2054,8 +2056,9 @@ site:
       - 20.0232
     - - 49.9939
       - 20.0218
-    level: Poziom dolny
-    level_m: -66.2
+    level: Poziom -66
+    level_auto: Poziom -66
+    level_m: -66.3
   - id: U-03
     target_share: 30
     material: wapień
@@ -2091,8 +2094,9 @@ site:
       - 20.028
     - - 49.9935
       - 20.0265
-    level: Poziom dolny
-    level_m: -66.2
+    level: Poziom -66
+    level_auto: Poziom -66
+    level_m: -66.3
   excavators:
   - id: K-1
     lat: 49.99665
@@ -2178,8 +2182,9 @@ site:
     fire_to: '11:20'
     evacuation_min: 10
     crew_leave: '11:40'
-    level: Poziom dolny
-    level_m: -66.2
+    level: Poziom -66
+    level_auto: Poziom -66
+    level_m: -66.3
   - id: S-02
     material: wapień
     tonnage_t: 12000
@@ -2221,7 +2226,8 @@ site:
     fire_to: '11:20'
     evacuation_min: 10
     crew_leave: '11:40'
-    level: Poziom pośredni
+    level: Poziom -38
+    level_auto: Poziom -38
     level_m: -37.6
   areas:
   - id: O1
@@ -2267,8 +2273,9 @@ site:
       - 20.0262
     - - 49.9929
       - 20.0228
-    level: Poziom dolny
-    level_m: -66.2
+    level: Poziom -66
+    level_auto: Poziom -66
+    level_m: -66.3
   parking:
   - excavator: K-2
     lat: 49.9953
@@ -2277,9 +2284,13 @@ site:
     lat: 49.99515
     lon: 20.02
   levels:
-  - name: Poziom kruszarki
-    elev_m: 0.0
-  - name: Poziom pośredni
+  - name: Poziom -38
     elev_m: -37.6
-  - name: Poziom dolny
-    elev_m: -66.2
+    auto: true
+    roads:
+    - zjazd na poziom pośredni
+  - name: Poziom -66
+    elev_m: -66.3
+    auto: true
+    roads:
+    - poziom dolny

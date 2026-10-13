@@ -97,16 +97,8 @@ raw["shift_plan"] = {"start_time": "06:00", "startup_min": 15, "end_early_min": 
                      "breaks": [{"start": "10:00", "min": 20}]}
 raw["crusher"]["capacity_tph"] = 2600
 raw["crusher"]["hopper_t"] = 250
-# mine levels (piles and areas are assigned to them; the roads keep their drawn grades)
-site["levels"] = [{"name": "Poziom kruszarki", "elev_m": 0.0}, {"name": "Poziom pośredni", "elev_m": -37.6},
-                  {"name": "Poziom dolny", "elev_m": -66.2}]
-site["crusher"]["level"] = "Poziom kruszarki"
-for p in site["piles"]:
-    p["level"] = "Poziom pośredni" if p["id"] == "U-01" else "Poziom dolny"
-for p in site["planned_piles"]:
-    p["level"] = "Poziom dolny" if p["id"] == "S-01" else "Poziom pośredni"
-for a in site["areas"]:
-    a["level"] = "Poziom dolny"
+# heights: the crusher is at 0 m, the main ramp's inlet at -9 m; the flat roads get their levels automatically
+next(r for r in site["roads"] if r["id"] == "R2")["inlet_elev_m"] = -9.0
 new = site_to_scenario(site, raw)
 info = analyze_site(site)
 print("poziomy koparek:", info["levels"])
