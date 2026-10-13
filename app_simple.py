@@ -422,9 +422,10 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
 
 def render_simple(raw: dict, set_raw, render_map_tab) -> None:
     st.markdown("Cztery kroki: **① opisz kopalnię (stan obecny) → ② zobacz, jak jest dziś → ③ sprawdź wariant "
-                "„co jeśli” → ④ zoptymalizuj.** Szczegółowe ustawienia i analizy są w **Trybie zaawansowanym** "
+                "„co jeśli” → ④ zoptymalizuj**, a w **📅 Tydzień / miesiąc** – to samo dzień po dniu. Szczegółowe ustawienia i analizy są w **Trybie zaawansowanym** "
                 "(przełącznik w panelu bocznym).")
-    tabs = st.tabs(["① Kopalnia – stan obecny", "② Jak jest dziś", "③ Wariant – co jeśli", "④ Optymalizacja"])
+    tabs = st.tabs(["① Kopalnia – stan obecny", "② Jak jest dziś", "③ Wariant – co jeśli", "④ Optymalizacja",
+                    "📅 Tydzień / miesiąc"])
     with tabs[0]:
         render_map_tab(raw, set_raw, simple=True)
     seed = int(raw.get("seed", 42))
@@ -446,3 +447,7 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
         step_variant(raw, yaml_text, seed)
     with tabs[3]:
         step_optimize(raw, yaml_text, seed)
+    with tabs[4]:
+        from app_period import step_period
+
+        step_period(raw, yaml_text, seed)

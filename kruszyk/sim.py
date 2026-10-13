@@ -1019,11 +1019,13 @@ class SimResult:
         self.segments = pd.DataFrame(sim.segments)
         self.states = pd.DataFrame(sim.states, columns=["truck", "state", "start_s", "end_s",
                                                         "duration_s", "excavator", "trip"])
-        self.loads = pd.DataFrame(sim.loads)
+        self.loads = pd.DataFrame(sim.loads, columns=None if sim.loads else [
+            "truck", "excavator", "blast", "material", "tonnes", "fragmentation", "loaded_at_s", "trip", "dumped_at_s"])
         self.hopper = pd.DataFrame(sim.hopper_log)
         self.truck_ids = [t.id for t in sim.trucks]
         self.light_vehicles = sim.light_vehicles
         self.excavator_down = {e.cfg.id: list(e.down) for e in sim.excavators.values()}
+        self.excavator_steps = {k: ex.dig_step for k, ex in sim.excavators.items()}  # advance along the face
         self.excavator_tracks = {k: _shift_tracks(sorted(v), sim.relocated_at.get(k, []), sim.sc.routes, sim.excavators[k])
                                  for k, v in sim.excavator_tracks.items()}
         self.closure = sim.closure
