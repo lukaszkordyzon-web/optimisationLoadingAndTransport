@@ -151,3 +151,22 @@ def test_spotting_modes_two_sided_is_faster():
         out[mode] = replicate(v, 3)
     assert out["tyl_2"]["throughput_tph"] > out["tyl_1"]["throughput_tph"]
     assert out["tyl_2"]["excavator_utilization"] < out["tyl_1"]["excavator_utilization"]  # spotting hidden
+
+
+def test_excavator_advances_along_digging_line():
+    from kruszyk.config import load_scenario
+
+    sc = load_scenario(Path(__file__).parent.parent / "scenarios" / "kruszyk_mapa_demo.yaml")
+    k3 = next(e for e in sc.excavators if e.id == "K-3")
+    assert len(k3.dig_routes) > 2 and k3.route == k3.dig_routes[0]
+    fronts = [sc.routes[r].segments[0].length_m for r in k3.dig_routes]
+    assert fronts[-1] > fronts[0] + 30  # the end of the line is further from the road
+    sim = Simulation(sc, seed=2)
+    res = sim.run()
+    ex = sim.excavators["K-3"]
+    assert ex.relocations >= 1 and ex.route_id == k3.dig_routes[ex.dig_step]
+    assert res.kpi["excavator_down_h"]["przestawienie"] > 0
+    used = set(res.segments.loc[res.segments["excavator"] == "K-3", "route"])
+    assert len(used & set(k3.dig_routes)) >= 2  # trucks drove to more than one place on the face
+    track = res.excavator_tracks["K-3"]
+    assert len({(round(a, 6), round(b, 6)) for _, a, b in track}) >= 2  # the excavator moves in the animation

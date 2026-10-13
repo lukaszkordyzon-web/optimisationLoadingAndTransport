@@ -93,6 +93,9 @@ def _losses(k: dict) -> list[str]:
         out.append(f"⏸ Przerwy: wozidła **{k['truck_break_h']:.1f} h** łącznie.")
     if k.get("excavator_down_h", {}).get("tankowanie", 0) > 0.05:
         out.append(f"⛽ Tankowanie koparek z cysterny: **{k['excavator_down_h']['tankowanie']:.1f} h** postoju.")
+    if k.get("relocations", 0):
+        out.append(f"⤳ Przestawianie koparek wzdłuż frontu: **{k['relocations']}** razy, "
+                   f"**{60 * k.get('excavator_down_h', {}).get('przestawienie', 0):.0f} min** postoju koparek.")
     if k.get("truck_refuels", 0):
         out.append(f"⛽ Wozidła zjeżdżały tankować **{k['truck_refuels']}** razy.")
     if k.get("yields", 0):

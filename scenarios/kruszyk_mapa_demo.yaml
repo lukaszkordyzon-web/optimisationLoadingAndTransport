@@ -108,6 +108,37 @@ excavators:
   swing_cycle_s: 34.0
   blast: U-03
   route: T-K-3
+  dig_routes:
+  - T-K-3
+  - T-K-3@1
+  - T-K-3@2
+  - T-K-3@3
+  - T-K-3@4
+  - T-K-3@5
+  - T-K-3@6
+  - T-K-3@7
+  - T-K-3@8
+  - T-K-3@9
+  - T-K-3@10
+  - T-K-3@11
+  - T-K-3@12
+  - T-K-3@13
+  - T-K-3@14
+  - T-K-3@15
+  - T-K-3@16
+  - T-K-3@17
+  - T-K-3@18
+  - T-K-3@19
+  - T-K-3@20
+  dig_path:
+  - - 49.99435
+    - 20.027
+  - - 49.99413
+    - 20.0272
+  - - 49.9941
+    - 20.028
+  relocate_every_t: 600.0
+  relocate_min: 4.0
   spotting:
     tyl_1: 50.0
     bok_cofanie: 50.0
@@ -261,6 +292,1066 @@ routes:
     path:
     - - 49.99435
       - 20.027
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@1:
+    segments:
+    - name: front
+      length_m: 20.5
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.994316761017224
+      - 20.02703021725707
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@2:
+    segments:
+    - name: front
+      length_m: 24.5
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99428352203444
+      - 20.02706043451414
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@3:
+    segments:
+    - name: front
+      length_m: 28.5
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99425028305167
+      - 20.02709065177121
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@4:
+    segments:
+    - name: front
+      length_m: 32.6
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99421704406889
+      - 20.02712086902828
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@5:
+    segments:
+    - name: front
+      length_m: 36.8
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99418380508612
+      - 20.027151086285347
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@6:
+    segments:
+    - name: front
+      length_m: 41.0
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.994150566103336
+      - 20.027181303542417
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@7:
+    segments:
+    - name: front
+      length_m: 44.2
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99412914522533
+      - 20.02722279399119
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@8:
+    segments:
+    - name: front
+      length_m: 46.1
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99412690328492
+      - 20.02728257906879
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@9:
+    segments:
+    - name: front
+      length_m: 48.4
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99412466134451
+      - 20.02734236414639
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@10:
+    segments:
+    - name: front
+      length_m: 50.9
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.9941224194041
+      - 20.02740214922399
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@11:
+    segments:
+    - name: front
+      length_m: 53.6
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99412017746369
+      - 20.02746193430159
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@12:
+    segments:
+    - name: front
+      length_m: 56.5
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99411793552328
+      - 20.02752171937919
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@13:
+    segments:
+    - name: front
+      length_m: 59.6
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99411569358287
+      - 20.027581504456794
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@14:
+    segments:
+    - name: front
+      length_m: 62.8
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99411345164246
+      - 20.027641289534394
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@15:
+    segments:
+    - name: front
+      length_m: 66.2
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.994111209702055
+      - 20.027701074611993
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@16:
+    segments:
+    - name: front
+      length_m: 69.6
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99410896776164
+      - 20.027760859689597
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@17:
+    segments:
+    - name: front
+      length_m: 73.2
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99410672582123
+      - 20.027820644767196
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@18:
+    segments:
+    - name: front
+      length_m: 76.8
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.994104483880825
+      - 20.027880429844796
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@19:
+    segments:
+    - name: front
+      length_m: 80.5
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.99410224194041
+      - 20.0279402149224
+    - - 49.9945
+      - 20.027
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  T-K-3@20:
+    segments:
+    - name: front
+      length_m: 84.2
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 652.9
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.9941
+      - 20.028
     - - 49.9945
       - 20.027
     - - 49.995
@@ -790,6 +1881,15 @@ site:
     spotting:
       tyl_1: 50
       bok_cofanie: 50
+    dig_path:
+    - - 49.99435
+      - 20.027
+    - - 49.99413
+      - 20.0272
+    - - 49.9941
+      - 20.028
+    relocate_every_t: 600
+    relocate_min: 4
   passing_bays:
   - id: M1
     lat: 49.997749999999996

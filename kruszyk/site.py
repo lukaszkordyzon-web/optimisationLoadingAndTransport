@@ -449,6 +449,22 @@ def build_route(site: dict, start: tuple[float, float], route_id: str, end=None,
     return r
 
 
+DIG_STEPS = 30  # the digging line is divided into this many relocations at most
+
+
+def dig_points(e: dict, tonnes: float | None = None) -> list[tuple[float, float]]:
+    """Evenly spaced points of an excavator's digging line (start first), or [] without a line.
+    One point per relocation: the excavator's share of the pile / tonnes between relocations."""
+    path = e.get("dig_path") or []
+    if len(path) < 2:
+        return []
+    L = polyline_length_m(path)
+    every = float(e.get("relocate_every_t") or 600.0)
+    n = math.ceil(tonnes / every) if tonnes else DIG_STEPS
+    n = max(1, min(DIG_STEPS, n, int(L // 3) or 1))
+    return [point_along(path, L * i / n) for i in range(n + 1)]
+
+
 def site_to_scenario(site: dict, raw: dict) -> dict:
     """Replace blasts/excavators/routes of a raw scenario with what is drawn on the map.
     Trucks, crusher parameters, costs etc. stay as they are. Also builds links between every pair
@@ -480,9 +496,22 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
         if pile not in pile_ids:  # nearest pile by centroid
             pile = min(piles, key=lambda p: haversine_m(pos, centroid(p["polygon"])))["id"]
         rid = f"T-{e['id']}"
+        share = next((float(p.get("tonnage_t", 0)) for p in piles if p["id"] == pile), 0.0) / max(
+            1, sum(1 for x in excavators if (x.get("pile") if x.get("pile") in pile_ids else None) == pile))
+        dig = dig_points(e, share)
+        if dig:
+            pos = dig[0]
         new["routes"][rid] = build_route(site, pos, rid)
         ex = {"id": e["id"], "bucket_m3": float(e.get("bucket_m3", 5.0)),
               "swing_cycle_s": float(e.get("swing_cycle_s", 30.0)), "blast": pile, "route": rid}
+        if dig:
+            ex["dig_routes"], ex["dig_path"] = [rid], [list(p) for p in e["dig_path"]]
+            for i, p in enumerate(dig[1:], start=1):
+                new["routes"][f"{rid}@{i}"] = build_route(site, p, f"{rid}@{i}")
+                ex["dig_routes"].append(f"{rid}@{i}")
+            for key in ("relocate_every_t", "relocate_min"):
+                if e.get(key) is not None:
+                    ex[key] = float(e[key])
         if e.get("spotting"):
             ex["spotting"] = {k: float(v) for k, v in e["spotting"].items() if v}
         new["excavators"].append(ex)

@@ -49,7 +49,10 @@ site = {
         {"id": "K-2", "lat": 49.99475, "lon": 20.0225, "pile": "U-02", "bucket_m3": 4.5, "swing_cycle_s": 28,
          "spotting": {"tyl_1": 100}},
         {"id": "K-3", "lat": 49.99435, "lon": 20.0270, "pile": "U-03", "bucket_m3": 7.5, "swing_cycle_s": 34,
-         "spotting": {"tyl_1": 50, "bok_cofanie": 50}},
+         "spotting": {"tyl_1": 50, "bok_cofanie": 50},
+         # works its way east along the face of U-03: relocates every 600 t, the access over the floor grows
+         "dig_path": [[49.99435, 20.0270], [49.99413, 20.0272], [49.99410, 20.0280]],
+         "relocate_every_t": 600, "relocate_min": 4},
     ],
 }
 

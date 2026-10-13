@@ -51,6 +51,12 @@ class Excavator:
     spot_time_s: float = 40.0  # used when `spotting` is empty (one fixed spotting time)
     # how trucks spot at this excavator: mode (see SPOT_MODES) -> % of trucks, e.g. {tyl_1: 60, bok_rondo: 40}
     spotting: dict = field(default_factory=dict)
+    # advance along the face: routes from evenly spaced points of the digging line (start -> end);
+    # the excavator moves to the next point every `relocate_every_t` tonnes, standing `relocate_min` meanwhile
+    dig_routes: list = field(default_factory=list)
+    dig_path: list | None = None
+    relocate_every_t: float = 600.0
+    relocate_min: float = 4.0
 
 
 @dataclass
@@ -275,6 +281,9 @@ class Scenario:
                 raise ValueError(f"Koparka {ex.id}: nieznany odstrzał '{ex.blast}'")
             if ex.route not in self.routes:
                 raise ValueError(f"Koparka {ex.id}: nieznana trasa '{ex.route}'")
+            missing = [r for r in ex.dig_routes if r not in self.routes]
+            if missing:
+                raise ValueError(f"Koparka {ex.id}: brak tras postępu {', '.join(missing)} – zbuduj trasy z mapy")
             bad = [m for m in ex.spotting if m not in SPOT_MODES]
             if bad:
                 raise ValueError(f"Koparka {ex.id}: nieznany sposób podstawiania {', '.join(bad)}")

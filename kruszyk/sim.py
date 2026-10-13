@@ -59,6 +59,30 @@ class ExcavatorState:
     down: list = field(default_factory=list)  # (from, to, reason): breaks, blasting, refuelling
     bays: simpy.Resource | None = None  # loading positions: 2 when trucks are loaded from both sides
     spot_modes: list = field(default_factory=list)  # [(share, mode dict)]
+    route_id: str = ""          # current route to the crusher (changes as the excavator advances along the face)
+    initial_t: float = 0.0
+    loaded_t: float = 0.0
+    next_reloc_t: float = math.inf
+    dig_step: int = 0
+    relocations: int = 0
+
+
+def _shift_tracks(frames: list, relocs: list, routes: dict, ex) -> list:
+    """Moves to the parking place were planned from the starting point of the face; after the excavator
+    has advanced, they start and end at its current place instead."""
+    if not relocs:
+        return frames
+    base = tuple(routes[ex.cfg.route].path[0])
+    out = []
+    for t, lat, lon in frames:
+        cur = base
+        for tr, new, _ in relocs:
+            if tr <= t:
+                cur = new
+        if cur != base and haversine_m((lat, lon), base) < 1.0 and not any(abs(t - tr) < 0.2 for tr, *_ in relocs):
+            lat, lon = cur
+        out.append([t, lat, lon])
+    return out
 
 
 class Simulation:
@@ -73,7 +97,7 @@ class Simulation:
         self.weather_factor = 1 + (v.rain_slowdown if self.rain else 0.0)
 
         self.excavators = {
-            e.id: ExcavatorState(e, simpy.Resource(self.env, 1), sc.blast(e.blast).tonnage_t)
+            e.id: ExcavatorState(e, simpy.PriorityResource(self.env, 1), sc.blast(e.blast).tonnage_t, route_id=e.route)
             for e in sc.excavators
         }
         for ex in self.excavators.values():
@@ -93,6 +117,9 @@ class Simulation:
         for exs in by_blast.values():
             for ex in exs:
                 ex.remaining_t /= len(exs)
+                ex.initial_t = ex.remaining_t
+                if len(ex.cfg.dig_routes) > 1 and ex.cfg.relocate_every_t > 0:
+                    ex.next_reloc_t = ex.cfg.relocate_every_t
 
         self.trucks: list[TruckState] = []
         # driver/truck style is persistent across shifts (drawn from the scenario seed, not the shift seed)
@@ -140,6 +167,7 @@ class Simulation:
                 self.pinned.add(f.excavators[0])
         self.flex_trucks = sum(f.count for f in sc.trucks if not f.blend and len(f.excavators) != 1)
         self.yields, self.yield_s = 0, 0.0
+        self.relocated_at: dict[str, list] = {}  # excavator -> [(time, new position, previous position)]
         self.sections: dict[str, dict] = {}  # single-lane stretches between passing bays
         self.bay_stops = 0
         self.truck_refuels = 0
@@ -208,6 +236,33 @@ class Simulation:
         spot = sum(p * self._blocking_s(m) for p, m in ex.spot_modes)
         return spot + load_time_s(ex.cfg, fleet, blast, self.sc.loose_density_t_m3)
 
+    def _route_of(self, ex: ExcavatorState):
+        return self.sc.routes[ex.route_id or ex.cfg.route]
+
+    def _relocate(self, ex: ExcavatorState):
+        """The excavator moves to the next point of its digging line: the loader stands meanwhile
+        (trucks wait), then trucks use the route from the new position."""
+        env, cfg = self.env, ex.cfg
+        n = len(cfg.dig_routes) - 1
+        step = min(n, ex.dig_step + 1)
+        if step <= ex.dig_step:
+            return
+        with ex.resource.request(priority=-1) as req:  # before the next truck in the queue
+            yield req
+            a = env.now
+            old = self.sc.routes[cfg.dig_routes[ex.dig_step]].path
+            new = self.sc.routes[cfg.dig_routes[step]].path
+            yield env.timeout(cfg.relocate_min * 60)
+            ex.down.append((a, env.now, "przestawienie"))
+            ex.dig_step, ex.route_id = step, cfg.dig_routes[step]
+            ex.relocations += 1
+            ex.last_end = env.now
+            if old and new:
+                fr = self.excavator_tracks.setdefault(cfg.id, [[0.0, *old[0]]])
+                fr.append([round(a, 1), *old[0]])
+                fr.append([round(env.now, 1), *new[0]])
+                self.relocated_at.setdefault(cfg.id, []).append((env.now, tuple(new[0]), tuple(old[0])))
+
     def _queue_len(self, ex: ExcavatorState) -> int:
         return len(ex.bays.queue) + len(ex.resource.queue)
 
@@ -268,21 +323,21 @@ class Simulation:
         for x in stops:
             ex = self.excavators[x]
             if prev is None:
-                t = self._light_trip(name, sc.routes[ex.cfg.route], False, t, frames)
+                t = self._light_trip(name, self._route_of(ex), False, t, frames)
             else:
                 link = sc.links.get(f"{prev}>{x}")
                 if link is not None:
                     t = self._light_trip(name, link, True, t, frames)
                 else:  # no link drawn: back to the crusher and down again
-                    t = self._light_trip(name, sc.routes[self.excavators[prev].cfg.route], True, t, frames)
-                    t = self._light_trip(name, sc.routes[ex.cfg.route], False, t, frames)
+                    t = self._light_trip(name, self._route_of(self.excavators[prev]), True, t, frames)
+                    t = self._light_trip(name, self._route_of(ex), False, t, frames)
             if refuel:
                 self._refuel_window(ex, t, stop_s)
             if frames:
                 frames.append([round(t + stop_s, 1), frames[-1][1], frames[-1][2]])
             t += stop_s
             prev = x
-        t = self._light_trip(name, sc.routes[self.excavators[prev].cfg.route], True, t, frames)
+        t = self._light_trip(name, self._route_of(self.excavators[prev]), True, t, frames)
         self.light_vehicles.append({"name": name, "kind": kind, "frames": frames})
 
     def _schedule_light_vehicles(self) -> None:
@@ -461,7 +516,7 @@ class Simulation:
     def features(self, truck: TruckState, ex: ExcavatorState) -> list[float]:
         """What the dispatcher knows about sending `truck` to `ex` now (RL state for one action)."""
         sc = self.sc
-        route = sc.routes[ex.cfg.route]
+        route = self._route_of(ex)
         travel = route_time_s(route, truck.fleet, False, sc.rolling_resistance_pct)
         haul = route_time_s(route, truck.fleet, True, sc.rolling_resistance_pct)
         service = self._expected_service(ex, truck.fleet)
@@ -500,7 +555,7 @@ class Simulation:
             return min(active, key=lambda ex: float(np.dot(w, feats[ex.cfg.id])))
         best, best_finish = None, math.inf
         for ex in active:
-            travel = route_time_s(self.sc.routes[ex.cfg.route], truck.fleet, False,
+            travel = route_time_s(self._route_of(ex), truck.fleet, False,
                                   self.sc.rolling_resistance_pct)
             finish = self.predicted_finish(ex, self.env.now + travel, self._expected_service(ex, truck.fleet))
             if finish < best_finish:
@@ -709,6 +764,10 @@ class Simulation:
                                    "loaded_at_s": env.now, "trip": truck.trip})
                 if ex.remaining_t <= 1e-6 and ex.depleted_at is None:
                     ex.depleted_at = env.now
+                ex.loaded_t += tonnes
+                if ex.loaded_t >= ex.next_reloc_t and ex.remaining_t > 1e-6:
+                    ex.next_reloc_t += ex.cfg.relocate_every_t
+                    env.process(self._relocate(ex))
                 if mode["out_blocks"] and mode["out_s"] > 0:  # nobody can spot until this truck has left
                     t0 = env.now
                     yield env.timeout(mode["out_s"] * self._noise(0.2))
@@ -742,7 +801,7 @@ class Simulation:
         """Expected (time until loaded, full cycle) for the truck's usual excavator – for shift planning."""
         sc = self.sc
         ex = self.excavators.get(truck.home_excavator) or next(iter(self.excavators.values()))
-        r = sc.routes[ex.cfg.route]
+        r = self._route_of(ex)
         to_loaded = route_time_s(r, truck.fleet, False, sc.rolling_resistance_pct) + self._expected_service(ex, truck.fleet)
         if truck.fleet.blend:  # two piles: one more drive and one more loading in the pit
             to_loaded *= 1.8
@@ -785,7 +844,7 @@ class Simulation:
             for ex, amount in plan:
                 ex.committed_t += amount
             first = plan[0][0]
-            travel = route_time_s(sc.routes[first.cfg.route], fleet, False, sc.rolling_resistance_pct)
+            travel = route_time_s(self._route_of(first), fleet, False, sc.rolling_resistance_pct)
             service = self._expected_service(first, fleet)
             pace_empty = 1.0
             if sc.advisor.enabled:
@@ -796,7 +855,7 @@ class Simulation:
             first.pending[truck.id] = (env.now + travel * pace_empty, service)
             cycle_start = env.now
 
-            yield from self._drive(truck, sc.routes[first.cfg.route], False, 0.0, "pusty", first.cfg.id, pace_empty)
+            yield from self._drive(truck, self._route_of(first), False, 0.0, "pusty", first.cfg.id, pace_empty)
             tonnes, prev = 0.0, None
             for ex, amount in plan:
                 if prev is not None:
@@ -811,7 +870,7 @@ class Simulation:
             frag = float(np.mean([sc.blast(e.cfg.blast).fragmentation for e, _ in plan]))
 
             # speed advice: if we would only queue at the crusher, drive slower instead
-            route = sc.routes[last.cfg.route]
+            route = self._route_of(last)
             pace = 1.0
             if (sc.pacing.enabled and sc.dispatch != "natural") or sc.advisor.enabled:
                 haul = route_time_s(route, fleet, True, sc.rolling_resistance_pct)
@@ -923,8 +982,8 @@ class Simulation:
             k = max(1, math.ceil(self.flex_trucks / pol.min_trucks_per_excavator))
             pinned = [ex for ex in cand if ex.cfg.id in self.pinned]
             free = sorted((ex for ex in cand if ex.cfg.id not in self.pinned),
-                          key=lambda ex: route_time_s(sc.routes[ex.cfg.route], fleet, False, sc.rolling_resistance_pct)
-                          + route_time_s(sc.routes[ex.cfg.route], fleet, True, sc.rolling_resistance_pct)
+                          key=lambda ex: route_time_s(self._route_of(ex), fleet, False, sc.rolling_resistance_pct)
+                          + route_time_s(self._route_of(ex), fleet, True, sc.rolling_resistance_pct)
                           + self._expected_service(ex, fleet))
             keep = {ex.cfg.id for ex in pinned} | {ex.cfg.id for ex in free[:max(0, k - len(pinned))]}
             now = self.env.now
@@ -965,7 +1024,8 @@ class SimResult:
         self.truck_ids = [t.id for t in sim.trucks]
         self.light_vehicles = sim.light_vehicles
         self.excavator_down = {e.cfg.id: list(e.down) for e in sim.excavators.values()}
-        self.excavator_tracks = {k: sorted(v) for k, v in sim.excavator_tracks.items()}
+        self.excavator_tracks = {k: _shift_tracks(sorted(v), sim.relocated_at.get(k, []), sim.sc.routes, sim.excavators[k])
+                                 for k, v in sim.excavator_tracks.items()}
         self.closure = sim.closure
         self.breaks = sim.breaks
         self.t_start, self.work_end = sim.t_start, sim.work_end
@@ -1052,6 +1112,7 @@ class SimResult:
             "yields": sim.yields,
             "yield_h": round(sim.yield_s / 3600, 2),
             "bay_stops": sim.bay_stops,
+            "relocations": sum(e.relocations for e in sim.excavators.values()),
             "bay_wait_h": round(float(st.get("mijanka", 0.0)), 2),
             "spot_exit_h": round(float(st.get("podstawienie", 0.0)) + float(st.get("wyjazd_z_frontu", 0.0)), 2),
             "over_limit_pct": round(100 * sim.over_limit_segments / max(sim.drive_segments, 1), 1),
@@ -1063,7 +1124,7 @@ class SimResult:
             "truck_excavator_down_h": round(float(st.get("postoj_koparki", 0.0)), 2),
             "excavator_down_h": {r: round(sum(max(0.0, min(b, shift_s) - a) for e in sim.excavators.values()
                                               for a, b, rr in e.down if rr == r) / 3600, 2)
-                                 for r in ("przerwa", "strzelanie", "tankowanie")},
+                                 for r in ("przerwa", "strzelanie", "tankowanie", "przestawienie")},
             "truck_queue_excavator_h": round(float(st.get("kolejka_koparka", 0.0)), 2),
             "truck_queue_crusher_h": round(float(st.get("kolejka_kruszarka", 0.0)), 2),
             "truck_breakdown_h": round(float(st.get("awaria", 0.0)), 2),

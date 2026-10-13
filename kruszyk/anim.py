@@ -77,6 +77,7 @@ def trajectories(res) -> dict[str, list[list]]:
             geo[rid] = (r.path, cum, bounds)
     crusher = (sc.site["crusher"]["lat"], sc.site["crusher"]["lon"])
     ex_pos = {e.id: tuple(routes[e.route].path[0]) for e in sc.excavators if e.route in geo}
+    moving = {e.id for e in sc.excavators if len(e.dig_routes) > 1}  # advance along the face
     code = {s: i for i, s in enumerate(STATE_CODES)}
 
     out: dict[str, list[list]] = {}
@@ -110,7 +111,7 @@ def trajectories(res) -> dict[str, list[list]]:
                     last = _at(path, cum, d1)
                 continue
             if state in ("kolejka_koparka", "podstawienie", "zaladunek", "postoj_koparki", "wyjazd_z_frontu"):
-                spot = ex_pos.get(row.excavator, last)
+                spot = last if row.excavator in moving else ex_pos.get(row.excavator, last)
             elif state in CRUSHER_SIDE:
                 spot = crusher
             else:
@@ -145,6 +146,7 @@ def network(sc) -> dict:
         "blast": site.get("blast"),
         "parking": site.get("parking", []),
         "bays": site.get("passing_bays", []),
+        "dig": [{"id": e["id"], "coords": e["dig_path"]} for e in site.get("excavators", []) if len(e.get("dig_path") or []) >= 2],
         "dedicated": site.get("dedicated", []),
         "junctions": nodes,
         "center": site.get("center"), "zoom": site.get("zoom", 15),

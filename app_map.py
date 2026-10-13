@@ -29,6 +29,7 @@ MODES = {
     "Miejsce strzelania": "marker",
     "Miejsce postoju koparki": "marker",
     "Mijanka": "marker",
+    "Kierunek urabiania koparki": "polyline",
     "Trasa dedykowana": "polyline",
     "✏️ Edytuj / przesuń / usuń": None,
 }
@@ -71,7 +72,7 @@ def _plain(site: dict) -> dict:
     out = {}
     for k, v in site.items():
         if isinstance(v, list):
-            out[k] = [{kk: vv for kk, vv in o.items() if kk != "uid" and not (kk in DEFAULT_FLAGS and vv == DEFAULT_FLAGS[kk])}
+            out[k] = [{kk: vv for kk, vv in o.items() if kk != "uid" and vv is not None and not (kk in DEFAULT_FLAGS and vv == DEFAULT_FLAGS[kk])}
                       if isinstance(o, dict) else o for o in v]
         else:
             out[k] = v
@@ -172,6 +173,13 @@ def draw_site(m, site: dict) -> None:
             html=f"<div style='color:#fff;font-weight:700;text-shadow:0 0 3px #000;white-space:nowrap'>"
                  f"{p['id']} · {p.get('material', '')}</div>")).add_to(m)
     for e in site.get("excavators", []):
+        dp = e.get("dig_path") or []
+        if len(dp) >= 2:
+            tip = (f"⤳ urabianie {e['id']} · kierunek urabiania: start przy koparce → koniec (strzałka); "
+                   f"przestawienie co {e.get('relocate_every_t', 600):g} t, {e.get('relocate_min', 4):g} min")
+            folium.PolyLine([tuple(c) for c in dp], color="#ff9f1c", weight=5, dash_array="2 8", tooltip=tip).add_to(m)
+            _direction_arrow(m, [tuple(c) for c in dp[-2:]], 0.0, tip)
+    for e in site.get("excavators", []):
         folium.Marker((e["lat"], e["lon"]), tooltip=f"⛏️ {e['id']} · koparka → {e.get('pile', '?')}",
                       icon=folium.Icon(color="orange", icon="wrench", prefix="fa")).add_to(m)
     if site.get("crusher"):
@@ -203,8 +211,15 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
     target = GEOM_MODE.get(g["type"])
     if g["type"] == "Point":
         target = mode if mode in ("Kruszarka", "Miejsce strzelania", "Miejsce postoju koparki", "Mijanka") else "Koparka"
-    if g["type"] == "LineString" and mode == "Trasa dedykowana":
+    if g["type"] == "LineString" and mode in ("Trasa dedykowana", "Kierunek urabiania koparki"):
         target = mode
+    if target == "Kierunek urabiania koparki":
+        ex = next((e for e in site["excavators"] if e["id"] == attrs.get("excavator")), None)
+        if ex is None:
+            return "⚠️ Najpierw dodaj koparkę, potem narysuj jej kierunek urabiania"
+        set_dig_path(ex, _latlon(g["coordinates"]), attrs)
+        return (f"✅ Kierunek urabiania koparki {ex['id']}: {polyline_length_m(ex['dig_path']):.0f} m – koparka "
+                f"startuje na początku linii i co {ex['relocate_every_t']:g} t przesuwa się dalej")
     if target == "Trasa dedykowana":
         who = attrs.get("for", "sztygar")
         site.setdefault("dedicated", [])
@@ -271,6 +286,9 @@ def site_items(site: dict) -> dict:
         items["crusher:"] = "🏭 kruszarka"
     if site.get("blast"):
         items["blast:"] = "🧨 miejsce strzelania"
+    for e in site.get("excavators", []):
+        if len(e.get("dig_path") or []) >= 2:
+            items[f"dig:{e['uid']}"] = f"⤳ kierunek urabiania {e['id']}"
     for b in site.get("passing_bays", []):
         items[f"bay:{b['uid']}"] = f"⇆ mijanka {b.get('id')}"
     for p in site.get("parking", []):
@@ -288,6 +306,9 @@ def find_obj(site: dict, sel: str | None):
         return next((o for o in site.get(kind + "s", []) if o.get("uid") == ident), None)
     if kind == "bay":
         return next((o for o in site.get("passing_bays", []) if o.get("uid") == ident), None)
+    if kind == "dig":
+        e = next((o for o in site.get("excavators", []) if o.get("uid") == ident), None)
+        return {"coords": e["dig_path"], "_ex": e} if e and len(e.get("dig_path") or []) >= 2 else None
     if kind in ("crusher", "blast"):
         return site.get(kind)
     if kind == "parking":
@@ -308,6 +329,11 @@ def sel_from_click(site: dict, tooltip: str | None, latlng: dict | None) -> str 
             o = next((o for o in site.get(key, []) if str(o.get("id")) == oid), None)
             if o:
                 return f"{kind}:{o['uid']}"
+    if head.startswith("⤳"):
+        who = head.split("urabianie", 1)[-1].strip()
+        e = next((o for o in site.get("excavators", []) if o["id"] == who), None)
+        if e:
+            return f"dig:{e['uid']}"
     if head.startswith("🏭") and site.get("crusher"):
         return "crusher:"
     if head.startswith("🧨") and site.get("blast"):
@@ -380,6 +406,9 @@ def delete_obj(site: dict, sel: str) -> str:
     if kind == "bay":
         site["passing_bays"] = [b for b in site["passing_bays"] if b is not o]
         return f"🗑️ Usunięto mijankę {o.get('id')}"
+    if kind == "dig":
+        o["_ex"].pop("dig_path", None)
+        return f"🗑️ Usunięto kierunek urabiania koparki {o['_ex']['id']} (koparka stoi w miejscu)"
     if kind == "parking":
         site["parking"] = [p for p in site["parking"] if p is not o]
         return f"🗑️ Usunięto miejsce postoju koparki {ident}"
@@ -404,8 +433,17 @@ def apply_edit_drawing(site: dict, sel: str, g: dict) -> str:
                 return msg
             site["passing_bays"][-1].update({"id": o.get("id"), "uid": o.get("uid")})
             return f"✅ Przesunięto mijankę {o.get('id')}"
-        o["lon"], o["lat"] = g["coordinates"]
+        lon, lat = g["coordinates"]
+        if kind == "excavator" and len(o.get("dig_path") or []) >= 2:  # the digging line moves with it
+            dlat, dlon = lat - o["lat"], lon - o["lon"]
+            o["dig_path"] = [[round(a + dlat, 7), round(b + dlon, 7)] for a, b in o["dig_path"]]
+        o["lon"], o["lat"] = lon, lat
         return "✅ Przesunięto obiekt"
+    if kind == "dig":
+        if g["type"] != "LineString":
+            return "⚠️ Aby przerysować kierunek urabiania, narysuj linię (/)"
+        set_dig_path(o["_ex"], _latlon(g["coordinates"]))
+        return f"✅ Przerysowano kierunek urabiania koparki {o['_ex']['id']}"
     if kind in ("road", "dedicated"):
         if g["type"] != "LineString":
             return "⚠️ Aby przerysować drogę / trasę, narysuj linię (/)"
@@ -514,6 +552,17 @@ def edit_panel(site: dict) -> None:
             st.rerun()
 
 
+def set_dig_path(ex: dict, coords: list, attrs: dict | None = None) -> None:
+    """Digging line of an excavator: starts at the end nearer to the excavator, which is moved there."""
+    pos = (ex["lat"], ex["lon"])
+    if haversine_m(coords[-1], pos) < haversine_m(coords[0], pos):
+        coords = list(reversed(coords))
+    ex["dig_path"] = coords
+    ex["lat"], ex["lon"] = coords[0]
+    for key, default in (("relocate_every_t", 600.0), ("relocate_min", 4.0)):
+        ex[key] = float((attrs or {}).get(key) or ex.get(key) or default)
+
+
 def add_bay(site: dict, lat: float, lon: float) -> str:
     """Passing bay: snapped onto the nearest road; that road becomes single-lane."""
     roads = [r for r in site.get("roads", []) if len(r.get("coords", [])) >= 2]
@@ -556,7 +605,10 @@ PILE_COLS = {"id": "usyp", "material": st.column_config.SelectboxColumn("materia
              "tonnage_t": "ilość [t]", "fragmentation": "rozdrobnienie (0–1)", "loose_density_t_m3": "gęstość [t/m³]",
              "target_share": st.column_config.NumberColumn("udział w nadawie [%]", min_value=0.0, max_value=100.0,
                                                            help="ile procent nadawy ma iść z tego usypu (puste = bez celu)")}
-EX_COLS = {"id": "koparka", "bucket_m3": "łyżka [m³]", "swing_cycle_s": "cykl łyżki [s]", "lat": "szer.", "lon": "dł."}
+EX_COLS = {"id": "koparka", "bucket_m3": "łyżka [m³]", "swing_cycle_s": "cykl łyżki [s]", "lat": "szer.", "lon": "dł.",
+           "relocate_every_t": st.column_config.NumberColumn("przestawienie co [t]", min_value=50.0,
+                                                             help="tylko z narysowanym kierunkiem urabiania"),
+           "relocate_min": st.column_config.NumberColumn("przestawienie [min]", min_value=0.0)}
 
 
 def checklist(site: dict, raw: dict) -> None:
@@ -757,6 +809,17 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                        "drogowego – na wprost. Bez znacznika koparka cofa się o kilkaset metrów swoją trasą.")
         elif mode == "Kruszarka":
             st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku).")
+        elif mode == "Kierunek urabiania koparki":
+            ex_ids = [e["id"] for e in site["excavators"]]
+            attrs["excavator"] = st.selectbox("Której koparki?", ex_ids, key="dig_ex") if ex_ids else None
+            attrs["relocate_every_t"] = st.number_input("Przestawienie koparki co [t]", 50.0, 20_000.0, 600.0, 50.0,
+                                                        help="po tylu tonach koparka przesuwa się do przodu wzdłuż linii")
+            attrs["relocate_min"] = st.number_input("Czas przestawienia [min]", 0.5, 60.0, 4.0, 0.5,
+                                                    help="ile koparka nie ładuje przy każdym przestawieniu")
+            st.caption("Narzędzie „linia” (/). Narysuj po froncie, którędy koparka będzie szła w trakcie urabiania: "
+                       "od miejsca startu do miejsca, w którym skończy usyp. Koparka przeniesie się na początek linii; "
+                       "wozidła dojeżdżają zawsze do jej aktualnego miejsca (dojazd po placu wydłuża się albo skraca). "
+                       "Koniec ≈ cały urobek tej koparki z usypu.")
         elif mode == "Mijanka":
             st.caption("Narzędzie „znacznik” (📍). Postaw go na drodze w miejscu mijanki – przyklei się do drogi, "
                        "a droga zostanie oznaczona jako jednopasmowa. Odcinek między dwiema mijankami (albo mijanką "
@@ -831,7 +894,11 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
         st.markdown("**Koparki**")
         if site["excavators"]:
             object_table(site, "excavators", lambda: pd.DataFrame(
-                [{k: v for k, v in e.items() if k not in ("uid", "spotting")} for e in site["excavators"]]),
+                [{k: v for k, v in e.items() if k not in ("uid", "spotting", "dig_path")}
+                 | {"relocate_every_t": e.get("relocate_every_t") if e.get("dig_path") else None,
+                    "relocate_min": e.get("relocate_min") if e.get("dig_path") else None}
+                 for e in site["excavators"]]),
+                extra=("relocate_every_t", "relocate_min"),
                 disabled=["lat", "lon"],
                 column_config={**EX_COLS, "pile": st.column_config.SelectboxColumn(
                     "ładuje z usypu", options=[p["id"] for p in site["piles"]] + ["(najbliższy)"])})
