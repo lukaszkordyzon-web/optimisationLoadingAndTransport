@@ -465,6 +465,9 @@ def dig_points(e: dict, tonnes: float | None = None) -> list[tuple[float, float]
     return [point_along(path, L * i / n) for i in range(n + 1)]
 
 
+BLAST_TIMES = ("crew_arrive", "fire_from", "fire_to", "evacuation_min", "crew_leave")
+
+
 def loading_point(site: dict, polygon: list) -> tuple[float, float]:
     """Where trucks load at a pile: its corner (or centre) closest to the road network."""
     cands = [tuple(c) for c in polygon] + [centroid(polygon)]
@@ -562,10 +565,12 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
               "blast_day": int(p.get("blast_day") or 1), "route": rid,
               "crusher_routes": _crusher_routes(site, load_at, rid, new["routes"]),
               "fragmentation": float(p.get("fragmentation", 0.3))}
-        for key in ("psd", "loose_density_t_m3", "target_share"):
+        for key in ("psd", "loose_density_t_m3", "target_share", "polygon", "t_per_m", "drilled", *BLAST_TIMES):
             if p.get(key):
                 pb[key] = p[key]
         new["planned_blasts"].append(pb)
+    new["areas"] = [{k: v for k, v in a.items() if k != "uid"} for a in site.get("areas", [])
+                    if len(a.get("polygon") or []) >= 3 and a.get("active", True)]
     # crushers: the main one keeps its parameters from the scenario; more crushers come from the map
     main = site.get("crusher") or {}
     new["crusher"] = {**raw.get("crusher", {}), "id": main.get("id") or raw.get("crusher", {}).get("id") or "C-1",
@@ -745,3 +750,59 @@ def excavator_move(site: dict, ex: dict, route_to_crusher_path: list | None, ret
         acc += d
     return {"segments": [{"name": "odjazd z frontu", "length_m": round(acc, 1), "grade_pct": 0.0,
                           "speed_limit_kmh": 5.0}], "path": path, "parking": False}
+
+
+# ---------------------------------------------------------------- extraction areas: automatic blasts
+def _clip(poly: list, axis: tuple[float, float], lo: float, hi: float) -> list:
+    """Part of a polygon (local metres) between lo <= dot(p, axis) <= hi (Sutherland–Hodgman, two half-planes)."""
+    def cut(pts, keep, edge):
+        out = []
+        for i, cur in enumerate(pts):
+            prev = pts[i - 1]
+            ci, pi = keep(cur), keep(prev)
+            if ci != pi:
+                sp, sc_ = edge(prev), edge(cur)
+                t = sp / (sp - sc_) if sp != sc_ else 0.0
+                out.append((prev[0] + t * (cur[0] - prev[0]), prev[1] + t * (cur[1] - prev[1])))
+            if ci:
+                out.append(cur)
+        return out
+
+    dot = lambda p: p[0] * axis[0] + p[1] * axis[1]  # noqa: E731
+    pts = cut(poly, lambda p: dot(p) >= lo, lambda p: dot(p) - lo)
+    return cut(pts, lambda p: dot(p) <= hi, lambda p: dot(p) - hi) if pts else []
+
+
+def area_strips(site: dict, polygon: list, n: int) -> list[list]:
+    """Divide an extraction area into n blasts: strips across its longer axis, starting at the end nearer
+    to the roads (that is where the first blast is fired). Returns lat/lon polygons in firing order."""
+    if n < 1 or len(polygon) < 3:
+        return []
+    lat0, lon0 = centroid(polygon)
+    k = math.cos(math.radians(lat0))
+    to_xy = lambda c: (math.radians(c[1] - lon0) * R_EARTH * k, math.radians(c[0] - lat0) * R_EARTH)  # noqa: E731
+    to_ll = lambda p: [round(lat0 + math.degrees(p[1] / R_EARTH), 7),  # noqa: E731
+                       round(lon0 + math.degrees(p[0] / (R_EARTH * k)), 7)]
+    xy = [to_xy(c) for c in polygon]
+    # longer axis: principal direction of the vertices
+    sxx = sum(x * x for x, _ in xy)
+    syy = sum(y * y for _, y in xy)
+    sxy = sum(x * y for x, y in xy)
+    ang = 0.5 * math.atan2(2 * sxy, sxx - syy)
+    axis = (math.cos(ang), math.sin(ang))
+    proj = [x * axis[0] + y * axis[1] for x, y in xy]
+    lo, hi = min(proj), max(proj)
+    w = (hi - lo) / n
+    strips = []
+    for i in range(n):
+        part = _clip(xy, axis, lo + i * w - 1e-6, lo + (i + 1) * w + 1e-6)
+        if len(part) >= 3:
+            strips.append([to_ll(p) for p in part])
+    roads = [r for r in site.get("roads", []) if r.get("active", True) and len(r.get("coords", [])) >= 2]
+    if roads and len(strips) > 1:
+        def d(poly):
+            c = centroid(poly)
+            return min(along_m(r["coords"], c)[1] for r in roads)
+        if d(strips[-1]) < d(strips[0]):
+            strips.reverse()
+    return strips

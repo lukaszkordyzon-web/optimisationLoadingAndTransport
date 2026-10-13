@@ -1469,6 +1469,10 @@ crusher:
   fragmentation_penalty: 0.4
   kwh_per_t: 1.1
   kwh_fragmentation_extra: 0.6
+  id: C-1
+  accepts: []
+  product: ''
+  target_t: 0.0
 variability:
   driver_sd: 0.07
   trip_sd: 0.08
@@ -1776,6 +1780,7 @@ planned_blasts:
   material: wapień
   blast_day: 2
   route: P-S-01
+  crusher_routes: {}
   fragmentation: 0.3
   psd:
   - - 10.0
@@ -1800,11 +1805,26 @@ planned_blasts:
     - 100.0
   loose_density_t_m3: 1.75
   target_share: 35
+  polygon:
+  - - 49.9942
+    - 20.025
+  - - 49.9942
+    - 20.0261
+  - - 49.99372
+    - 20.0261
+  - - 49.99372
+    - 20.025
+  crew_arrive: 08:30
+  fire_from: '11:00'
+  fire_to: '11:20'
+  evacuation_min: 10
+  crew_leave: '11:40'
 - id: S-02
   tonnage_t: 12000.0
   material: wapień
   blast_day: 4
   route: P-S-02
+  crusher_routes: {}
   fragmentation: 0.3
   psd:
   - - 10.0
@@ -1829,6 +1849,65 @@ planned_blasts:
     - 100.0
   loose_density_t_m3: 1.75
   target_share: 30
+  polygon:
+  - - 49.9964
+    - 20.0064
+  - - 49.9964
+    - 20.0076
+  - - 49.99595
+    - 20.0076
+  - - 49.99595
+    - 20.0064
+  crew_arrive: 08:30
+  fire_from: '11:00'
+  fire_to: '11:20'
+  evacuation_min: 10
+  crew_leave: '11:40'
+areas:
+- id: O1
+  material: wapień
+  psd:
+  - - 10.0
+    - 2.7
+  - - 25.0
+    - 7.8
+  - - 50.0
+    - 17.1
+  - - 100.0
+    - 35.0
+  - - 200.0
+    - 62.8
+  - - 300.0
+    - 80.0
+  - - 500.0
+    - 94.9
+  - - 800.0
+    - 99.5
+  - - 1000.0
+    - 99.9
+  - - 1200.0
+    - 100.0
+  loose_density_t_m3: 1.75
+  reserves_t: 150000
+  blast_max_t: 20000
+  reblast_below_t: 8000
+  min_gap_days: 2
+  max_per_day: 1
+  crew_arrive: 08:00
+  fire_from: '10:00'
+  fire_to: '10:15'
+  evacuation_min: 15
+  crew_leave: '10:40'
+  polygon:
+  - - 49.99365
+    - 20.0228
+  - - 49.99365
+    - 20.0262
+  - - 49.9929
+    - 20.0262
+  - - 49.9929
+    - 20.0228
+crushers_extra: []
 site:
   center:
   - 49.9975
@@ -2085,6 +2164,11 @@ site:
       - 20.0261
     - - 49.99372
       - 20.025
+    crew_arrive: 08:30
+    fire_from: '11:00'
+    fire_to: '11:20'
+    evacuation_min: 10
+    crew_leave: '11:40'
   - id: S-02
     material: wapień
     tonnage_t: 12000
@@ -2121,6 +2205,55 @@ site:
       - 20.0076
     - - 49.99595
       - 20.0064
+    crew_arrive: 08:30
+    fire_from: '11:00'
+    fire_to: '11:20'
+    evacuation_min: 10
+    crew_leave: '11:40'
+  areas:
+  - id: O1
+    material: wapień
+    psd:
+    - - 10.0
+      - 2.7
+    - - 25.0
+      - 7.8
+    - - 50.0
+      - 17.1
+    - - 100.0
+      - 35.0
+    - - 200.0
+      - 62.8
+    - - 300.0
+      - 80.0
+    - - 500.0
+      - 94.9
+    - - 800.0
+      - 99.5
+    - - 1000.0
+      - 99.9
+    - - 1200.0
+      - 100.0
+    loose_density_t_m3: 1.75
+    reserves_t: 150000
+    blast_max_t: 20000
+    reblast_below_t: 8000
+    min_gap_days: 2
+    max_per_day: 1
+    crew_arrive: 08:00
+    fire_from: '10:00'
+    fire_to: '10:15'
+    evacuation_min: 15
+    crew_leave: '10:40'
+    polygon:
+    - - 49.99365
+      - 20.0228
+    - - 49.99365
+      - 20.0262
+    - - 49.9929
+      - 20.0262
+    - - 49.9929
+      - 20.0228
   blast:
     lat: 49.99405
     lon: 20.0262

@@ -96,7 +96,8 @@ class Crusher:
     target_t: float = 0.0      # production plan per shift [t] (0 = none)
 
     def takes(self, blast_id: str) -> bool:
-        return not self.accepts or blast_id in self.accepts
+        # blasts generated in an extraction area are called "<area>/<n>" – accepting the area accepts them
+        return not self.accepts or blast_id in self.accepts or blast_id.split("/")[0] in self.accepts
 
 
 @dataclass
@@ -279,6 +280,8 @@ class Scenario:
     # fragmentation, loose_density_t_m3, blast_day, route}] – `route` = from its loading point to the crusher
     planned_blasts: list = field(default_factory=list)
     crushers_extra: list = field(default_factory=list)  # second, third … crusher [Crusher]
+    # extraction areas: the week / month run fires blasts in them automatically (see period.py)
+    areas: list = field(default_factory=list)
 
     @property
     def crushers(self) -> list:
@@ -414,13 +417,14 @@ def scenario_from_dict(raw: dict) -> Scenario:
         rl_weights=raw.get("rl_weights"),
         planned_blasts=[dict(p) for p in raw.get("planned_blasts") or []],
         crushers_extra=[_build(Crusher, c) for c in raw.get("crushers_extra") or []],
+        areas=[dict(a) for a in raw.get("areas") or []],
     )
     from .psd import fragmentation_index
 
     for b in sc.blasts:  # a grading curve, when given, decides how blocky the material is
         if b.psd:
             b.fragmentation = fragmentation_index(b.psd, sc.crusher.max_feed_mm)
-    for p in sc.planned_blasts:
+    for p in sc.planned_blasts + sc.areas:
         if p.get("psd"):
             p["fragmentation"] = fragmentation_index(p["psd"], sc.crusher.max_feed_mm)
     sc.validate()

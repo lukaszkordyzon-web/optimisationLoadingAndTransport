@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import math
 from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .config import Scenario
+from .config import Scenario, _routes
 from .sim import simulate
+from .site import BLAST_TIMES, _crusher_routes, area_strips, build_route, centroid, loading_point
 
 WEEKDAYS = ["pon", "wt", "śr", "czw", "pt", "sob", "nd"]
 
@@ -44,6 +46,12 @@ class PeriodPlan:
     target_t: float = 0.0             # production target for the period (0 = none)
     move_excavators: bool = True      # an excavator without material drives to the nearest free blasted pile
     move_setup_min: float = 15.0      # + this on top of the drive (preparing the new face)
+    # drilling: blasts in new places must be drilled first (0 rigs = drilling not modelled)
+    drills: int = 0
+    drill_speed_kmh: float = 2.0      # moving between blasts
+    drill_m_per_shift: float = 250.0  # drilling output of one rig per shift [m]
+    clear_pct: float = 10.0           # the next strip of an area can be drilled when ≤ this % of the previous blast is left
+    t_per_m: float = 50.0             # default tonnes per metre drilled (when a blast / area has none)
 
     def working_days(self) -> list[dt.date]:
         out = []
@@ -107,18 +115,148 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
     share = {b.id: b.target_share for b in sc.blasts}
     share |= {b.pile: b.share for b in plan.blasts if b.pile in share}
     share |= {pid: p.get("target_share") for pid, p in planned.items()}
+    # extraction areas: blasts are fired automatically, strip after strip, when the area runs short of material
+    areas = []
+    for a in sc.areas:
+        reserve = float(a.get("reserves_t") or 0)
+        size = max(float(a.get("blast_max_t") or 0), 1.0)
+        n = min(60, max(1, math.ceil(reserve / size))) if reserve > 0 else 0
+        strips = area_strips(sc.site or {}, a["polygon"], n) if sc.site and n else []
+        areas.append({"cfg": a, "reserve": reserve, "strips": strips, "next": 0, "last_day": -10_000})
+    blast_log: list[dict] = []
+    warnings: list[str] = []
+    # drilling jobs: blast id -> metres to drill / drilled; rigs move between them
+    drilling = plan.drills > 0
+    jobs: dict[str, dict] = {}
+    rigs = [{"id": f"W{i + 1}", "pos": None, "job": None, "travel_h": 0.0} for i in range(plan.drills)]
+    drill_log: list[dict] = []
+    fired: set[str] = set()
+
+    def tpm(src: dict) -> float:
+        return float(src.get("t_per_m") or plan.t_per_m or 50.0)
+
+    for pid, p in planned.items():
+        m = float(p["tonnage_t"]) / tpm(p)
+        jobs[pid] = {"m": m, "done": m if not drilling or p.get("drilled") else 0.0, "poly": p.get("polygon"),
+                     "prio": (0, int(p.get("blast_day") or 1))}
+
+    def area_job(ar) -> str | None:
+        """The next strip of an area becomes a drilling job once the previous blast has been taken out."""
+        a = ar["cfg"]
+        if ar["reserve"] <= 1 or ar["next"] >= len(ar["strips"]):
+            return None
+        pid = f"{a['id']}/{ar['next'] + 1}"
+        if pid in jobs:
+            return pid
+        if ar["next"] > 0:
+            prev = f"{a['id']}/{ar['next']}"
+            if prev not in planned or left.get(prev, 0.0) > plan.clear_pct / 100 * float(planned[prev]["tonnage_t"]):
+                return None  # previous blast not taken out yet – no access for the rigs
+        m = min(float(a["blast_max_t"]), ar["reserve"]) / tpm(a)
+        first_ready = ar["next"] == 0 and a.get("first_drilled", True)
+        jobs[pid] = {"m": m, "done": m if not drilling or first_ready else 0.0, "poly": ar["strips"][ar["next"]],
+                     "prio": (1, ar["next"])}
+        return pid
+
+    def ready(pid: str) -> bool:
+        return pid in jobs and jobs[pid]["done"] >= jobs[pid]["m"] - 1e-6
+
+    def drill_shift(day, shift_no):
+        """One shift of drilling: free rigs take the most urgent job, drive there and drill."""
+        if not drilling:
+            return
+        for r in rigs:
+            if r["job"] is None:
+                todo = sorted((j["prio"], pid) for pid, j in jobs.items()
+                              if not ready(pid) and pid not in fired and not any(x["job"] == pid for x in rigs))
+                if todo:
+                    pid = todo[0][1]
+                    r["job"] = pid
+                    poly = jobs[pid]["poly"]
+                    if r["pos"] is not None and poly:
+                        r["travel_h"] = haversine_m(r["pos"], centroid(poly)) / 1000 / max(plan.drill_speed_kmh, 0.1)
+        for r in rigs:
+            if r["job"] is None:
+                continue
+            j = jobs[r["job"]]
+            move = min(sc.shift_hours, r["travel_h"])
+            r["travel_h"] -= move
+            j["done"] = min(j["m"], j["done"] + plan.drill_m_per_shift * (sc.shift_hours - move) / sc.shift_hours)
+            if ready(r["job"]):
+                drill_log.append({"strzal": r["job"], "wiertnica": r["id"], "data": day, "zmiana": shift_no})
+                if j["poly"]:
+                    r["pos"] = centroid(j["poly"])
+                r["job"] = None
+
     rows = []
     for i, (day, wd, shift_no) in enumerate(shifts):
         blasted = {}
+        def self_blast(ar, a):
+            """Fire the next strip of an extraction area (a new pile with its own route)."""
+            pid = f"{a['id']}/{ar['next'] + 1}"
+            poly = ar["strips"][ar["next"]]
+            ar["next"] += 1
+            t = min(float(a["blast_max_t"]), ar["reserve"])
+            load_at = loading_point(sc.site, poly)
+            try:
+                sc.routes[f"P-{pid}"] = _routes({"r": build_route(sc.site, load_at, f"P-{pid}")})["r"]
+            except ValueError:
+                warnings.append(f"Strzał {pid}: brak dojazdu drogą – doprowadź drogę do obszaru {a['id']}")
+                return
+            raw_routes: dict = {}
+            croutes = _crusher_routes(sc.site, load_at, f"P-{pid}", raw_routes)
+            for rid in croutes.values():
+                sc.routes[rid] = _routes({"r": raw_routes[rid]})["r"]
+            ar["reserve"] -= t
+            ar["last_day"] = wd
+            planned[pid] = {"id": pid, "tonnage_t": t, "material": a.get("material", ""), "auto": True,
+                            "fragmentation": float(a.get("fragmentation", 0.3)), "psd": a.get("psd"),
+                            "loose_density_t_m3": a.get("loose_density_t_m3"), "polygon": poly,
+                            **{k: a[k] for k in BLAST_TIMES if a.get(k)}}
+            left[pid], pile_route[pid], pile_croutes[pid] = t, f"P-{pid}", croutes
+            taken[pid] = any(c.takes(pid) for c in sc.crushers)
+            share[pid] = a.get("target_share")
+            blasted[pid] = t
+            blast_log.append({"strzal": pid, "obszar": a["id"], "data": day, "t": t, "polygon": poly, "auto": True})
+
         if shift_no == 1:  # blasts are fired on the first shift of a working day
             for pid, b in blasts.items():
                 if b.every_days > 0 and wd >= b.first_day and (wd - b.first_day) % b.every_days == 0 and pid in left:
                     left[pid] += float(b.tonnage_t)
                     blasted[pid] = float(b.tonnage_t)
-            for pid, p in planned.items():
-                if int(p.get("blast_day") or 1) == wd:
-                    left[pid] += float(p["tonnage_t"])
-                    blasted[pid] = float(p["tonnage_t"])
+            for pid, p in list(planned.items()):
+                if p.get("auto") or pid in fired or int(p.get("blast_day") or 1) > wd:
+                    continue
+                if not ready(pid):
+                    if int(p.get("blast_day") or 1) == wd:
+                        warnings.append(f"Strzał {pid}: w dniu {wd} otwór niegotowy (wiercenie) – strzał przesunięty")
+                    continue
+                fired.add(pid)
+                left[pid] += float(p["tonnage_t"])
+                blasted[pid] = float(p["tonnage_t"])
+                late = wd - int(p.get("blast_day") or 1)
+                blast_log.append({"strzal": pid, "obszar": "", "data": day, "t": float(p["tonnage_t"]),
+                                  "polygon": p.get("polygon"), "auto": False, "opoznienie_dni": late})
+            # excavators without material and no free pile to go to = blasts needed now
+            idle = [x for x in ex_pile if left[ex_pile[x]] < MIN_PILE_T]
+            busy_piles = {ex_pile[x] for x in ex_pile if left[ex_pile[x]] >= MIN_PILE_T}
+            free_piles = [p for p in left if left[p] >= MIN_PILE_T and p not in busy_piles and taken.get(p)]
+            need = max(0, len(idle) - len(free_piles)) if plan.move_excavators else 0
+            for ar in areas:
+                a = ar["cfg"]
+                open_t = sum(t for pid, t in left.items() if pid.startswith(f"{a['id']}/"))
+                if ar["reserve"] <= 1 or wd - ar["last_day"] < int(a.get("min_gap_days") or 1):
+                    continue
+                n_blasts = max(1 if open_t < float(a.get("reblast_below_t") or 0) else 0, need)
+                n_blasts = min(n_blasts, int(a.get("max_per_day") or 1), len(ar["strips"]) - ar["next"])
+                for _ in range(n_blasts):
+                    pid = area_job(ar)
+                    if pid is None or not ready(pid):
+                        break  # the strip is not drilled yet (or the previous blast is not taken out)
+                    need = max(0, need - 1)
+                    fired.add(pid)
+                    self_blast(ar, a)
+
         # an excavator without material drives to the nearest blasted pile nobody else works
         moves, delay = [], {}
         if plan.move_excavators:
@@ -153,6 +291,15 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             b.target_share = share.get(b.id) if b.id in worked and share.get(b.id) else None
         v.stockpile.initial_t = stock
         v.blasting.enabled = bool(sc.blasting.enabled and blasted)
+        timed = next((planned[p] for p in blasted if p in planned and planned[p].get("fire_from")), None)
+        if timed:  # the blast brings its own crew times and place
+            v.blasting.enabled = True
+            for k_ in BLAST_TIMES:
+                if timed.get(k_):
+                    setattr(v.blasting, k_, timed[k_])
+            if timed.get("polygon") and v.site is not None:
+                c_ = centroid(timed["polygon"])
+                v.site["blast"] = {"lat": c_[0], "lon": c_[1]}
         v.shift_plan.start_time = _shift_start(first_start, shift_no, sc.shift_hours)
         for e in v.excavators:
             moved = ex_pile[e.id] != e.blast
@@ -169,6 +316,9 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
         for pid in left:
             left[pid] = max(0.0, left[pid] - float(loaded.get(pid, 0.0)))
         stock = float(k.get("stockpile_end_t", stock) or 0.0)
+        for ar in areas:
+            area_job(ar)
+        drill_shift(day, shift_no)
         for e in v.excavators:
             if e.dig_routes:
                 dig_step[e.id] += int(res.excavator_steps.get(e.id, 0))
@@ -187,6 +337,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             "kruszarka_bez_nadawy_h": k["crusher_starved_h"], "awarie_h": k["truck_breakdown_h"],
             "strzal": ", ".join(f"{p} +{t:,.0f} t".replace(",", " ") for p, t in blasted.items()),
             "przejazdy_koparek": ", ".join(moves),
+            "wiercenie": ", ".join(f"{r['id']}: {r['job']} {jobs[r['job']]['done']:.0f}/{jobs[r['job']]['m']:.0f} m"
+                                   for r in rigs if r["job"]),
             "koparki_na": ", ".join(f"{x}:{ex_pile[x]}" for x in ex_pile),
             "skonczyl_sie_urobek": ", ".join(idle_empty),
             "sklad_cel": ", ".join(f"{b} {t:.0f}%" for b, t in (k.get("feed_target") or {}).items() if t > 0),
@@ -199,7 +351,13 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
         })
         if progress:
             progress(i + 1, len(shifts))
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    zero = [c for c in df.columns if (c.startswith("z_") or c.startswith("zostalo_")) and c.endswith("_t")]
+    df[zero] = df[zero].fillna(0)  # piles blasted during the period have no values before their blast
+    df.attrs["blasts"] = blast_log
+    df.attrs["drilling"] = drill_log
+    df.attrs["warnings"] = sorted(set(warnings))
+    return df
 
 
 def _shares(df: pd.DataFrame) -> dict:

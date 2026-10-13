@@ -437,13 +437,11 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
 
 
 def render_simple(raw: dict, set_raw, render_map_tab) -> None:
-    st.markdown("Cztery kroki: **① opisz kopalnię (stan obecny) → ② zobacz, jak jest dziś → ③ sprawdź wariant "
-                "„co jeśli” → ④ zoptymalizuj**, a w **📅 Tydzień / miesiąc** – to samo dzień po dniu. Szczegółowe ustawienia i analizy są w **Trybie zaawansowanym** "
-                "(przełącznik w panelu bocznym).")
-    tabs = st.tabs(["① Kopalnia – stan obecny", "② Jak jest dziś", "③ Wariant – co jeśli", "④ Optymalizacja",
-                    "📅 Tydzień / miesiąc"])
-    with tabs[0]:
-        render_map_tab(raw, set_raw, simple=True)
+    kind = st.radio("Co planujesz?", ["📋 Jedna zmiana (dzień)", "🗓️ Harmonogram (tydzień / miesiąc)"],
+                    horizontal=True, key="work_kind",
+                    help="Jedna zmiana: jak jest dziś, warianty i optymalizacja ruchu. Harmonogram: wiele zmian po "
+                         "kolei – strzały, obszary wydobycia, cel na miesiąc.")
+    schedule = kind.startswith("🗓️")
     seed = int(raw.get("seed", 42))
     try:
         sc = scenario_from_dict(copy.deepcopy(raw))
@@ -453,6 +451,23 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
     except Exception as e:  # noqa: BLE001
         sc, yaml_text = None, None
         msg = str(e)
+    if schedule:
+        st.markdown("Dwa kroki: **① opisz kopalnię** razem z planem strzałów (obszary wydobycia, planowane strzały – "
+                    "grupa „📅 Plan strzałów” na mapie) → **② harmonogram**: kalendarz, strzały, cel i dobór planu.")
+        tabs = st.tabs(["① Kopalnia i plan strzałów", "② Harmonogram"])
+        with tabs[0]:
+            render_map_tab(raw, set_raw, simple=True, schedule=True)
+        with tabs[1]:
+            from app_period import step_period
+
+            step_period(raw, yaml_text, seed)
+        return
+    st.markdown("Cztery kroki: **① opisz kopalnię (stan obecny) → ② zobacz, jak jest dziś → ③ sprawdź wariant "
+                "„co jeśli” → ④ zoptymalizuj.** Szczegółowe ustawienia i analizy są w **Trybie zaawansowanym** "
+                "(przełącznik w panelu bocznym).")
+    tabs = st.tabs(["① Kopalnia – stan obecny", "② Jak jest dziś", "③ Wariant – co jeśli", "④ Optymalizacja"])
+    with tabs[0]:
+        render_map_tab(raw, set_raw, simple=True, schedule=False)
     with tabs[1]:
         if sc is None:
             st.info(f"Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia** ({msg}) – albo wczytaj przykład.")
@@ -463,7 +478,3 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
         step_variant(raw, yaml_text, seed)
     with tabs[3]:
         step_optimize(raw, yaml_text, seed)
-    with tabs[4]:
-        from app_period import step_period
-
-        step_period(raw, yaml_text, seed)

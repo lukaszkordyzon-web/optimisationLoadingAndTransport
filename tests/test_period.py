@@ -35,6 +35,7 @@ def test_piles_run_out_and_blasts_refill_them():
 
 def test_shift_without_material_does_not_crash():
     sc = load_scenario(DEMO)
+    sc.areas, sc.planned_blasts = [], []
     for b in sc.blasts:
         b.tonnage_t = 0.0
     df = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=1, shifts_per_day=1), seed=1)
@@ -43,6 +44,7 @@ def test_shift_without_material_does_not_crash():
 
 def test_planned_blasts_appear_and_idle_excavators_move_there():
     sc = load_scenario(DEMO)
+    sc.areas = []  # only the blasts planned on the map
     assert {p["id"] for p in sc.planned_blasts} == {"S-01", "S-02"}
     df = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=7, shifts_per_day=2), seed=1)
     assert df["strzal"].str.contains("S-01").any() and df["strzal"].str.contains("S-02").any()
@@ -84,3 +86,45 @@ def test_goal_ranks_plans():
     assert best["cel_osiagniety"] is not None and best["cel_osiagniety"] <= dt.date(2026, 11, 5)
     ok = dl[dl["cel_osiagniety"].notna()]
     assert best["koszt_na_t"] == ok["koszt_na_t"].min()  # the cheapest of the plans that make it in time
+
+
+def test_extraction_area_is_blasted_automatically_strip_by_strip():
+    from kruszyk.site import area_strips, polygon_area_m2
+
+    sc = load_scenario(DEMO)
+    area = sc.areas[0]
+    strips = area_strips(sc.site, area["polygon"], 4)
+    assert len(strips) == 4
+    assert abs(sum(polygon_area_m2(s) for s in strips) - polygon_area_m2(area["polygon"])) < 0.02 * polygon_area_m2(area["polygon"])
+    for p in sc.planned_blasts:  # only the area this time
+        p["blast_day"] = 999
+    plan = PeriodPlan(start=dt.date(2026, 11, 2), days=14, shifts_per_day=2)
+    df = run_period(sc, plan, seed=1)
+    auto = [b for b in df.attrs["blasts"] if b["auto"]]
+    assert len(auto) >= 2 and [b["strzal"] for b in auto][:2] == ["O1/1", "O1/2"]
+    assert all(b["t"] <= area["blast_max_t"] for b in auto)
+    days = [b["data"] for b in auto]
+    wd = {d: i for i, d in enumerate(plan.working_days(), start=1)}
+    assert all(wd[b] - wd[a] >= area["min_gap_days"] for a, b in zip(days, days[1:]))  # gap respected
+    assert sum(b["t"] for b in auto) <= area["reserves_t"]
+    assert df[[c for c in df.columns if c.startswith("z_O1/")]].sum().sum() > 0  # material reached the crushers
+    # the blast closes the pit at the area's own hours: fired on the first shift of that day
+    first = df[(df["data"] == days[0]) & (df["zmiana"] == 1)]
+    assert first["strzal"].str.contains("O1/1").all()
+
+
+def test_drilling_limits_blasts():
+    """Blasts in new places wait for drilling; the next strip of an area only after the previous blast is taken out."""
+    sc = load_scenario(DEMO)
+    sc.planned_blasts = []
+    free = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=14, drills=0), seed=1)
+    slow = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=14, drills=1, drill_m_per_shift=60), seed=1)
+    n_free = len([b for b in free.attrs["blasts"] if b["auto"]])
+    n_slow = len([b for b in slow.attrs["blasts"] if b["auto"]])
+    assert n_slow < n_free  # slow drilling -> fewer blasts
+    drilled = {d["strzal"]: d for d in slow.attrs["drilling"]}
+    for b in slow.attrs["blasts"]:
+        if b["strzal"] != "O1/1":  # the first strip is drilled already
+            assert b["strzal"] in drilled and drilled[b["strzal"]]["data"] <= b["data"]
+    # metres: 20 000 t / 50 t/mb = 400 m -> at 60 m per shift a strip takes ~7 shifts
+    assert (slow["wiercenie"] != "").sum() >= 6

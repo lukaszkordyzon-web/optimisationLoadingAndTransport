@@ -78,6 +78,14 @@ site["planned_piles"] = [
      "loose_density_t_m3": 1.75,
      "polygon": [[49.99640, 20.0064], [49.99640, 20.0076], [49.99595, 20.0076], [49.99595, 20.0064]]},
 ]
+# extraction area south of the bottom level: the week / month run blasts it strip by strip on its own
+site["areas"] = [{"id": "O1", "material": "wapień", "psd": PRESETS["średnie"], "loose_density_t_m3": 1.75,
+                  "reserves_t": 150000, "blast_max_t": 20000, "reblast_below_t": 8000, "min_gap_days": 2,
+                  "max_per_day": 1, "crew_arrive": "08:00", "fire_from": "10:00", "fire_to": "10:15",
+                  "evacuation_min": 15, "crew_leave": "10:40",
+                  "polygon": [[49.99365, 20.0228], [49.99365, 20.0262], [49.9929, 20.0262], [49.9929, 20.0228]]}]
+for p in site["planned_piles"]:
+    p.update({"crew_arrive": "08:30", "fire_from": "11:00", "fire_to": "11:20", "evacuation_min": 10, "crew_leave": "11:40"})
 site["blast"] = {"lat": 49.99405, "lon": 20.0262}  # next blast: on the bottom level, east of U-03
 # where excavators go for blasting / refuelling (K-1 has no marker: it backs off along its route)
 site["parking"] = [{"excavator": "K-2", "lat": 49.9953, "lon": 20.0195},

@@ -58,8 +58,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     sc.dispatch = dispatch
 
     t_cal, t_old, t_new, t_ex, t_goal = st.tabs(["🗓️ Kalendarz i cel", "🧨 Strzały na obecnych usypach",
-                                                 f"📍 Nowe strzały z mapy ({len(sc.planned_blasts)})",
-                                                 "⛏️ Koparki i wozidła", "🎯 Cel i dobór planu"])
+                                                 f"📍 Obszary i strzały z mapy ({len(sc.planned_blasts) + len(sc.areas)})",
+                                                 "⛏️ Koparki, wozidła, wiertnice", "🎯 Cel i dobór planu"])
     with t_cal:
         c = st.columns(5)
         start = c[0].date_input("Od dnia", _next_month(dt.date.today()), key="per_start", format="DD.MM.YYYY")
@@ -91,8 +91,39 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                            "udzial": st.column_config.NumberColumn("udział w nadawie [%]", min_value=0.0,
                                                                                    max_value=100.0, step=5.0)})
     with t_new:
-        st.caption("Przyszłe strzały w nowych miejscach – rysujesz je na mapie w kroku ① (grupa „📅 Plan strzałów”). "
-                   "W dniu strzału pojawia się nowy usyp. Dzień, tony i udział możesz tu zmienić bez rysowania.")
+        st.markdown("**🟧 Obszary wydobycia – strzały ustala program**")
+        if sc.areas:
+            akey = f"per_areas__{hashlib.md5(repr([(a['id'], a.get('reserves_t'), a.get('blast_max_t')) for a in sc.areas]).encode()).hexdigest()}"
+            if akey not in st.session_state:
+                st.session_state[akey] = pd.DataFrame([{
+                    "obszar": a["id"], "material": a.get("material", ""), "zasoby_t": float(a.get("reserves_t") or 0),
+                    "max_t": float(a.get("blast_max_t") or 20000), "ponizej_t": float(a.get("reblast_below_t") or 0),
+                    "odstep": int(a.get("min_gap_days") or 1), "dziennie": int(a.get("max_per_day") or 1),
+                    "udzial": a.get("target_share"), "tpm": float(a.get("t_per_m") or 50.0)} for a in sc.areas])
+            aed = st.data_editor(st.session_state[akey], key=akey + "_ed", hide_index=True, width="stretch",
+                                 disabled=["obszar", "material"],
+                                 column_config={"obszar": "obszar", "material": "materiał",
+                                                "zasoby_t": st.column_config.NumberColumn("zasoby [t]", min_value=0.0),
+                                                "max_t": st.column_config.NumberColumn("największy strzał [t]", min_value=1000.0),
+                                                "ponizej_t": st.column_config.NumberColumn("strzelaj poniżej [t]", min_value=0.0),
+                                                "odstep": st.column_config.NumberColumn("odstęp [dni rob.]", min_value=1, step=1),
+                                                "dziennie": st.column_config.NumberColumn("strzałów / dzień", min_value=1, step=1),
+                                                "udzial": st.column_config.NumberColumn("udział w nadawie [%]",
+                                                                                        min_value=0.0, max_value=100.0),
+                                                "tpm": st.column_config.NumberColumn("t/mb", min_value=5.0)})
+            for a, (_, r) in zip(sc.areas, aed.iterrows()):
+                a.update({"reserves_t": float(r["zasoby_t"] or 0), "blast_max_t": float(r["max_t"] or 20000),
+                          "reblast_below_t": float(r["ponizej_t"] or 0), "min_gap_days": int(r["odstep"] or 1),
+                          "max_per_day": int(r["dziennie"] or 1), "t_per_m": float(r["tpm"] or 50.0),
+                          "target_share": None if pd.isna(r["udzial"]) or not r["udzial"] else float(r["udzial"])})
+            st.caption("Program dzieli obszar na pasy (od strony drogi) wielkości największego strzału. Strzela, gdy "
+                       "urobku z obszaru zostaje mniej niż próg albo koparki nie mają co ładować – z zachowaniem "
+                       "odstępu i limitu dziennego. Godziny strzału – z obszaru (ustawiasz na mapie).")
+        else:
+            st.caption("Brak obszarów – narysuj je w kroku ① (grupa „📅 Plan strzałów” → „Obszar wydobycia”).")
+        st.markdown("**📅 Planowane strzały – konkretny dzień i miejsce**")
+        st.caption("Rysujesz je na mapie w kroku ①. W dniu strzału pojawia się nowy usyp. Dzień, tony i udział "
+                   "możesz tu zmienić bez rysowania.")
         if sc.planned_blasts:
             pkey = f"per_planned__{hashlib.md5(repr([(p['id'], p.get('blast_day'), p.get('target_share')) for p in sc.planned_blasts]).encode()).hexdigest()}"
             if pkey not in st.session_state:
@@ -110,8 +141,7 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                 p["blast_day"], p["tonnage_t"] = int(r["dzien"] or 1), float(r["ile_t"] or 0)
                 p["target_share"] = None if pd.isna(r["udzial"]) or not r["udzial"] else float(r["udzial"])
         else:
-            st.info("Na mapie nie ma planowanych strzałów – koparki pracują tylko na obecnych usypach. Narysuj je w "
-                    "kroku ①: „Co robisz?” → „📅 Plan strzałów”.")
+            st.caption("brak planowanych strzałów")
     with t_ex:
         st.session_state.setdefault("per_trucks", int(sc.truck_count))
         n_trucks = st.number_input("Liczba wozideł (wszystkie typy razem)", 1, 60, step=1,
@@ -123,13 +153,25 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                              help="na najbliższy odstrzelony usyp, na którym nikt nie pracuje")
         setup = c[1].number_input("Przygotowanie nowego frontu [min] (oprócz jazdy)", 0.0, 240.0, 15.0, 5.0,
                                   key="per_setup", disabled=not move)
+        st.markdown("**🔩 Wiertnice** – strzał w nowym miejscu trzeba najpierw nawiercić. Metry = tony strzału / t/mb "
+                    "(ustawiasz przy obszarze / strzale), czas = metry / wydajność. Następny pas obszaru można wiercić "
+                    "dopiero po odebraniu poprzedniego strzału.")
+        c = st.columns(5)
+        drills = c[0].number_input("Liczba wiertnic (0 = bez wiercenia)", 0, 10, 1, 1, key="per_drills")
+        d_m = c[1].number_input("Wydajność [m / zmianę]", 10.0, 2000.0, 250.0, 10.0, key="per_dm", disabled=drills == 0)
+        d_v = c[2].number_input("Przejazd [km/h]", 0.5, 20.0, 2.0, 0.5, key="per_dv", disabled=drills == 0)
+        clear = c[3].number_input("Odebrany, gdy zostało ≤ [%]", 0.0, 100.0, 10.0, 5.0, key="per_clear",
+                                  disabled=drills == 0, help="poprzedniego strzału w obszarze – wtedy wiertnica może wejść")
+        tpm = c[4].number_input("Domyślnie t/mb", 5.0, 500.0, 50.0, 5.0, key="per_tpm", disabled=drills == 0,
+                                help="gdy obszar / strzał nie ma własnej wartości")
     plan = PeriodPlan(start=start, days=int(days), shifts_per_day=int(shifts), saturdays=sat,
                       holidays=_holidays(hol, start.year), target_t=float(target),
                       blasts=[PileBlasts(r["usyp"], float(r["ile_t"] or 0), int(r["co_dni"] or 0),
                                          int(r["pierwszy_dzien"] or 1),
                                          None if pd.isna(r["udzial"]) or not r["udzial"] else float(r["udzial"]))
                               for _, r in ed.iterrows()],
-                      move_excavators=move, move_setup_min=float(setup))
+                      move_excavators=move, move_setup_min=float(setup), drills=int(drills),
+                      drill_m_per_shift=float(d_m), drill_speed_kmh=float(d_v), clear_pct=float(clear), t_per_m=float(tpm))
     with t_cal:
         _blast_calendar(plan, sc)
     n = len(plan.shifts())
@@ -149,6 +191,48 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     if res[0] != key:
         st.warning("Ustawienia zmieniły się od ostatniego liczenia – kliknij **Policz okres** ponownie.")
     _results(res[1], res[2], sc)
+
+
+def _blast_schedule(meta: dict, sc) -> None:
+    """Blasts fired in the period (planned + generated in extraction areas): table and map."""
+    blasts = meta.get("blasts", [])
+    if not blasts:
+        st.caption("W okresie nie było strzałów w nowych miejscach (obszary / planowane strzały).")
+        return
+    times = {p["id"]: p for p in sc.planned_blasts} | {a["id"]: a for a in sc.areas}
+    drilled = {d["strzal"]: d for d in meta.get("drilling", [])}
+    rows = []
+    for b in blasts:
+        src = times.get(b["obszar"] or b["strzal"], {})
+        rows.append({"data": b["data"].strftime("%d.%m"), "dzień": WEEKDAYS[b["data"].weekday()], "strzał": b["strzal"],
+                     "obszar": b["obszar"] or "–", "ile [t]": round(b["t"]),
+                     "skąd": "program (obszar)" if b["auto"] else "plan z mapy",
+                     "nawiercony": (f"{drilled[b['strzal']]['data'].strftime('%d.%m')} z{drilled[b['strzal']]['zmiana']} "
+                                    f"({drilled[b['strzal']]['wiertnica']})") if b["strzal"] in drilled else "wcześniej",
+                     "opóźnienie [dni rob.]": b.get("opoznienie_dni") or None,
+                     "przyjazd ekipy": src.get("crew_arrive") or sc.blasting.crew_arrive,
+                     "odpalenie": f"{src.get('fire_from') or sc.blasting.fire_from}–{src.get('fire_to') or sc.blasting.fire_to}",
+                     "wyjazd ekipy": src.get("crew_leave") or sc.blasting.crew_leave})
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    if sc.site:
+        import folium
+        from streamlit_folium import st_folium
+
+        from app_map import base_map, draw_site
+        from kruszyk.site import centroid
+
+        m = base_map(sc.site)
+        draw_site(m, sc.site)
+        for b in blasts:
+            if not b.get("polygon"):
+                continue
+            folium.Polygon([tuple(c) for c in b["polygon"]], color="#ff006e", weight=2, fill=True, fill_opacity=0.35,
+                           tooltip=f"{b['strzal']} · {b['data'].strftime('%d.%m')} · {b['t']:,.0f} t".replace(",", " ")
+                           ).add_to(m)
+            folium.Marker(centroid(b["polygon"]), icon=folium.DivIcon(
+                html=f"<div style='color:#fff;font-size:11px;font-weight:700;text-shadow:0 0 3px #000;white-space:nowrap'>"
+                     f"{b['data'].strftime('%d.%m')}</div>")).add_to(m)
+        st_folium(m, height=460, use_container_width=True, returned_objects=[], key="period_blast_map")
 
 
 def _goal_tab(sc, plan: PeriodPlan, seed: int, modes: list[str]) -> None:
@@ -282,10 +366,17 @@ def _results(df: pd.DataFrame, plan: PeriodPlan, sc) -> None:
     c[3].metric("Średnio na zmianę", f"{s['srednio_na_zmiane_t']:,.0f} t".replace(",", " "))
     c[4].metric("Zmiany z brakiem urobku", s["zmian_bez_urobku"])
 
-    piles = [b.id for b in sc.blasts] + [p["id"] for p in sc.planned_blasts if f"z_{p['id']}_t" in df]
+    piles = [c[2:-2] for c in df.columns if c.startswith("z_") and c.endswith("_t") and df[c].sum() > 0]
+    meta = dict(df.attrs)
     df = df.copy()
+    df.attrs = {}  # blasts / drilling log are shown separately (tables can't carry them)
     df["etykieta"] = df["data"].map(lambda d: d.strftime("%d.%m")) + " " + df["dzien"] + " z" + df["zmiana"].astype(str)
-    r_find, r_prod, r_mix, r_day = st.tabs(["💡 Wnioski", "📈 Produkcja i usypy", "🧪 Skład nadawy", "📋 Dzień po dniu"])
+    for w in meta.get("warnings", []):
+        st.warning(w)
+    r_find, r_blast, r_prod, r_mix, r_day = st.tabs(["💡 Wnioski", f"🧨 Harmonogram strzałów ({len(meta.get('blasts', []))})",
+                                                     "📈 Produkcja i usypy", "🧪 Skład nadawy", "📋 Dzień po dniu"])
+    with r_blast:
+        _blast_schedule(meta, sc)
     with r_find:
         st.markdown("  \n".join(_findings(df, plan, sc, s)))
         if len(sc.crushers) > 1 or any(c.target_t or c.product for c in sc.crushers):
@@ -331,6 +422,7 @@ def _results(df: pd.DataFrame, plan: PeriodPlan, sc) -> None:
         day = df.groupby(["data", "dzien"], as_index=False).agg(
             wywiezione_t=("wywiezione_t", "sum"), koszt_zl=("koszt_zl", "sum"), strzal=("strzal", lambda x: ", ".join(v for v in x if v)),
             przejazdy=("przejazdy_koparek", lambda x: ", ".join(v for v in x if v)),
+            wiercenie=("wiercenie", lambda x: "; ".join(v for v in x if v)),
             brak_urobku=("skonczyl_sie_urobek", lambda x: "; ".join(v for v in x if v)),
             kruszarka_bez_nadawy_h=("kruszarka_bez_nadawy_h", "sum"), deszcz=("deszcz", "any"))
         day["koszt_na_t"] = (day["koszt_zl"] / day["wywiezione_t"].where(day["wywiezione_t"] > 0)).round(2)
