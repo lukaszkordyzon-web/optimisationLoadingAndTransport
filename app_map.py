@@ -664,6 +664,137 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
     return [(k, v if isinstance(v, str) else _fmt(v)) for k, v in P]
 
 
+# what can be edited in the panel of a clicked object: (key, label, type, options)
+#   num: (min, step) · opt: optional number · text · bool · sel: options · multi: options · time · level · psd
+_TIMES = [("crew_arrive", "przyjazd ekipy", "time", None), ("fire_from", "odpalenie od", "time", None),
+          ("fire_to", "odpalenie do", "time", None), ("evacuation_min", "ewakuacja przed [min]", "opt", (0.0, 5.0)),
+          ("crew_leave", "wyjazd ekipy", "time", None)]
+SITE_LIST = {"road": "roads", "pile": "piles", "planned": "planned_piles", "excavator": "excavators",
+             "crusher2": "crushers", "area": "areas", "bay": "passing_bays", "parking": "parking"}
+
+
+def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
+    pile_ids = [p["id"] for p in site.get("piles", [])] + [p["id"] for p in site.get("planned_piles", [])]
+    crusher = [("id", "nazwa", "text", None), ("capacity_tph", "wydajność [t/h]", "num", (50.0, 50.0)),
+               ("hopper_t", "kosz [t]", "num", (10.0, 10.0)), ("product", "co produkuje", "sel", [""] + list(PRODUCTS)),
+               ("kwh_per_t", "energia [kWh/t]", "num", (0.1, 0.1)), ("target_t", "plan na zmianę [t]", "num", (0.0, 500.0)),
+               ("accepts", "przyjmuje z (puste = wszystkie)", "multi", _pile_ids(site))]
+    return {
+        "road": [("name", "nazwa", "text", None), ("kind", "rodzaj", "sel", ["droga", "rampa"]),
+                 ("grade_draw_pct", "nachylenie wzdłuż rysowania [%]", "num", (-30.0, 0.5)),
+                 ("speed_limit_kmh", "limit prędkości [km/h]", "num", (5.0, 5.0)),
+                 ("inlet_elev_m", "rzędna wlotu [m] (pochylnia)", "opt", (-2000.0, 1.0)),
+                 ("single_lane", "jeden pas (mijanki)", "bool", None), ("active", "w użyciu", "bool", None)],
+        "pile": [("id", "nazwa", "text", None), ("material", "materiał", "sel", MATERIALS),
+                 ("tonnage_t", "ilość [t]", "num", (0.0, 1000.0)), ("level", "poziom", "level", None),
+                 ("loose_density_t_m3", "gęstość spulchniona [t/m³]", "opt", (1.0, 0.05)),
+                 ("target_share", "udział w nadawie [%]", "opt", (0.0, 5.0)), ("psd", "uziarnienie", "psd", None)],
+        "planned": [("id", "nazwa", "text", None), ("material", "materiał", "sel", MATERIALS),
+                    ("tonnage_t", "ilość [t]", "num", (0.0, 1000.0)), ("level", "poziom", "level", None),
+                    ("blast_day", "dzień roboczy strzału", "num", (1.0, 1.0)),
+                    ("target_share", "udział w nadawie [%]", "opt", (0.0, 5.0)), ("t_per_m", "t/mb", "num", (5.0, 5.0)),
+                    ("drilled", "nawiercony", "bool", None), ("psd", "uziarnienie", "psd", None), *_TIMES],
+        "area": [("id", "nazwa", "text", None), ("material", "materiał", "sel", MATERIALS), ("level", "poziom", "level", None),
+                 ("reserves_t", "zasoby [t]", "num", (0.0, 5000.0)), ("blast_max_t", "największy strzał [t]", "num", (1000.0, 1000.0)),
+                 ("reblast_below_t", "strzelaj, gdy zostanie poniżej [t]", "num", (0.0, 1000.0)),
+                 ("min_gap_days", "odstęp między strzałami [dni rob.]", "num", (1.0, 1.0)),
+                 ("max_per_day", "strzałów na dzień", "num", (1.0, 1.0)),
+                 ("target_share", "udział w nadawie [%]", "opt", (0.0, 5.0)), ("t_per_m", "t/mb", "num", (5.0, 5.0)),
+                 ("first_drilled", "pierwszy pas nawiercony", "bool", None), *_TIMES],
+        "excavator": [("id", "nazwa", "text", None), ("pile", "ładuje z usypu", "sel", pile_ids),
+                      ("bucket_m3", "łyżka [m³]", "num", (0.5, 0.5)), ("swing_cycle_s", "cykl łyżki [s]", "num", (10.0, 1.0)),
+                      ("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
+                      ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0))],
+        "crusher": crusher, "crusher2": crusher,
+        "parking": [("excavator", "koparka", "sel", [e["id"] for e in site.get("excavators", [])])],
+        "bay": [("id", "nazwa", "text", None)],
+        "dig": [("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
+                ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0))],
+    }.get(kind, [])
+
+
+def object_editor(site: dict, sel: str, raw: dict) -> None:
+    """Edit every parameter of the clicked object; position and shape stay on the map (✏️ Edytuj / przesuń)."""
+    kind = sel.split(":", 1)[0]
+    o = find_obj(site, sel)
+    if kind == "dig":
+        o = o["_ex"]
+    fields = _form_fields(site, kind, o)
+    if not fields:
+        return
+    cr = raw.setdefault("crusher", {})
+    defaults = {"relocate_every_t": 600.0, "relocate_min": 4.0, "active": True, "kind": "droga", "speed_limit_kmh": 40.0,
+                "blast_day": 1, "t_per_m": 50.0, "min_gap_days": 1, "max_per_day": 1, "blast_max_t": 20000.0,
+                "first_drilled": True, "capacity_tph": 800.0, "hopper_t": 150.0, "kwh_per_t": 1.1}
+
+    def cur(key):
+        if kind == "crusher" and key in ("capacity_tph", "hopper_t", "kwh_per_t"):
+            return cr.get(key, defaults[key])  # the main crusher's machine data live in the scenario
+        if kind == "crusher" and key == "id":
+            return o.get("id", "C-1")
+        return o.get(key, defaults.get(key))
+
+    with st.form(f"objform_{sel}_{st.session_state.obj_ver}", border=False):
+        cols = st.columns(3)
+        new = {}
+        for n, (key, label, typ, opt) in enumerate(fields):
+            c, v, wk = cols[n % 3], cur(key), f"of_{sel}_{key}"
+            if typ == "num":
+                new[key] = c.number_input(label, float(opt[0]), None, float(v if v is not None else opt[0]), float(opt[1]),
+                                          key=wk)
+            elif typ == "opt":
+                new[key] = c.number_input(label, float(opt[0]), None, None if v is None else float(v), float(opt[1]), key=wk,
+                                          placeholder="—")
+            elif typ == "text":
+                new[key] = c.text_input(label, str(v or ""), key=wk)
+            elif typ == "bool":
+                new[key] = c.checkbox(label, bool(v), key=wk)
+            elif typ == "sel":
+                options = list(opt) if v in opt or v is None else [v] + list(opt)
+                new[key] = c.selectbox(label, options, index=options.index(v) if v in options else 0, key=wk,
+                                       format_func=lambda x: x or "—")
+            elif typ == "multi":
+                new[key] = c.multiselect(label, opt, [x for x in (v or []) if x in opt], key=wk)
+            elif typ == "time":
+                new[key] = c.text_input(f"{label} (GG:MM)", str(v or ""), key=wk, placeholder="jak w planie zmiany")
+            elif typ == "level":
+                with c:
+                    new[key] = level_select(label, site, wk, v)
+            elif typ == "psd":
+                names = list(PRESETS) + (["własna"] if v and preset_of(v) not in PRESETS else [])
+                now = preset_of(v) if v else DEFAULT_PRESET
+                new[key] = c.selectbox(label, names, index=names.index(now) if now in names else 0, key=wk,
+                                       help="własną krzywą wpiszesz w tabeli uziarnienia (sekcja 3)")
+        ok = st.form_submit_button("💾 Zastosuj zmiany", type="primary")
+    if not ok:
+        return
+    if "product" in new and new["product"] != (o.get("product") or "") and new["product"] in PRODUCTS:
+        new["kwh_per_t"] = PRODUCTS[new["product"]]  # another product -> its typical energy
+    for key, val in new.items():
+        if isinstance(val, str):
+            val = val.strip()
+        if key == "psd":
+            if val in PRESETS:
+                o["psd"] = PRESETS[val]
+        elif key == "level":
+            if val != o.get("level"):
+                o["level"] = val
+                o.pop("level_auto", None)
+        elif key == "id":
+            if val and val != cur("id"):
+                rename_refs(site, SITE_LIST.get(kind, ""), o.get("id"), val)
+                o["id"] = val
+        elif kind == "crusher" and key in ("capacity_tph", "hopper_t", "kwh_per_t"):
+            cr[key] = val  # the main crusher's machine data live in the scenario
+        elif val is None or val == "":
+            o.pop(key, None)  # empty = not set (e.g. crew times from the shift plan)
+        else:
+            o[key] = val
+    st.session_state.obj_ver += 1
+    st.session_state.map_flash = "✅ Zmieniono parametry – zapisz kopalnię, żeby weszły do obliczeń."
+    st.rerun()
+
+
 def highlight(m, site: dict, sel: str | None) -> None:
     """Yellow halo around the selected object (drawn under it)."""
     o = find_obj(site, sel)
@@ -1344,18 +1475,20 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         with st.container(border=True):
             c1, c2, c3 = st.columns([6, 1.3, 0.7])
             c1.markdown(f"**ℹ️ {props[0][1]}** – kliknięty obiekt")
-            if c2.button("✏️ Edytuj / przesuń", key="info_edit"):
+            if c2.button("📍 Przesuń / przerysuj", key="info_edit"):
                 st.session_state.group_next, st.session_state.sel_next = "✏️ Edycja", info_sel
                 st.rerun()
             if c3.button("✖", key="info_close", help="zamknij"):
                 st.session_state.pop("info_sel", None)
                 st.rerun()
-            half = (len(props) + 1) // 2
-            cols = st.columns(2)
-            for col, part in zip(cols, (props[1:half + 1], props[half + 1:])):
-                if part:
-                    col.dataframe(pd.DataFrame(part, columns=["właściwość", "wartość"]).astype(str),
-                                  hide_index=True, width="stretch")
+            object_editor(site, info_sel, raw_for_build)
+            with st.expander("Wszystkie właściwości (także wyliczone: długości, rzędne, czasy)"):
+                half = (len(props) + 1) // 2
+                cols = st.columns(2)
+                for col, part in zip(cols, (props[1:half + 1], props[half + 1:])):
+                    if part:
+                        col.dataframe(pd.DataFrame(part, columns=["właściwość", "wartość"]).astype(str),
+                                      hide_index=True, width="stretch")
 
     st.subheader("3. Obiekty na mapie")
     st.caption("Parametry poprawiasz w tabelach (wiersz można też usunąć). Położenie i kształt – na mapie, w trybie "

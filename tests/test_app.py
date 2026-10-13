@@ -246,3 +246,43 @@ def test_chance_of_the_plan():
     next(b for b in at.button if "Policz szansę" in b.label).click().run()
     assert not at.exception, at.exception
     assert any(m.label.startswith("Szansa:") for m in at.metric)
+
+
+def test_clicked_object_can_be_edited():
+    at = AppTest.from_file(APP, default_timeout=300).run()  # the default mine, map in step ①
+    site = at.session_state["site"]
+    pile = site["piles"][0]
+    old_id = pile["id"]
+    at.session_state["info_sel"] = f"pile:{pile['uid']}"
+    at.run()
+    assert not at.exception, at.exception
+    at.number_input(key=f"of_pile:{pile['uid']}_tonnage_t").set_value(12345.0)
+    at.text_input(key=f"of_pile:{pile['uid']}_id").set_value("U-99")
+    next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
+    assert not at.exception, at.exception
+    edited = next(p for p in at.session_state["site"]["piles"] if p["uid"] == pile["uid"])
+    assert edited["tonnage_t"] == 12345.0 and edited["id"] == "U-99"
+    exs = at.session_state["site"]["excavators"]
+    assert all(e.get("pile") != old_id for e in exs) and any(e.get("pile") == "U-99" for e in exs)  # references renamed
+    road = at.session_state["site"]["roads"][0]
+    one_lane = bool(road.get("single_lane", False))
+    at.session_state["info_sel"] = f"road:{road['uid']}"
+    at.run()
+    at.checkbox(key=f"of_road:{road['uid']}_single_lane").set_value(not one_lane)
+    next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert next(r for r in at.session_state["site"]["roads"] if r["uid"] == road["uid"])["single_lane"] != one_lane
+
+
+def test_every_kind_of_object_opens_its_form():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    site = at.session_state["site"]
+    sels = [f"road:{site['roads'][0]['uid']}", f"pile:{site['piles'][0]['uid']}",
+            f"excavator:{site['excavators'][0]['uid']}", f"area:{site['areas'][0]['uid']}", "crusher:main",
+            f"crusher2:{site['crushers'][0]['uid']}", f"bay:{site['passing_bays'][0]['uid']}",
+            f"parking:{site['parking'][0]['excavator']}"]
+    for sel in sels:
+        at.session_state["info_sel"] = sel
+        at.run()
+        assert not at.exception, (sel, at.exception)
+        assert any("Zastosuj zmiany" in b.label for b in at.button), sel
