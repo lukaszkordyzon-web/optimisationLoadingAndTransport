@@ -1,6 +1,7 @@
 """Scenario configuration: everything that describes the mine is set here (YAML)."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -256,6 +257,39 @@ class Spotting:
 DISPATCH_MODES = ("natural", "fixed", "dynamic", "rl")
 
 
+# breakdowns when nothing is known about a machine: failures per month and their total hours (assumptions)
+RELIABILITY_DEFAULTS = {"truck": (4.0, 6.0), "excavator": (3.0, 8.0), "crusher": (4.0, 12.0), "drill": (3.0, 8.0)}
+RELIABILITY_KINDS = {"truck": "wozidło (każde)", "excavator": "koparka", "crusher": "kruszarka", "drill": "wiertnica (każda)"}
+REPAIR_SIGMA = 1.0  # spread of repair times (lognormal): most are short, a few last longer than a shift
+
+
+@dataclass
+class Reliability:
+    """Breakdowns per machine: failures per month and their total hours – averages of the last 3–6 months,
+    only stops longer than ~15 min, planned maintenance excluded. The month is the reference period below
+    (shifts per day × working days): a machine that works more fails more often.
+    Keys: machine id (excavators, crushers), "truck:<model>" (per truck of that type), "drill" (per rig)."""
+    enabled: bool = True
+    ref_shifts_per_day: float = 2.0
+    ref_days_per_month: float = 22.0
+    machines: dict = field(default_factory=dict)  # key -> {"count": failures / month, "hours": total h / month}
+
+    def values(self, key: str, kind: str) -> tuple[float, float, bool]:
+        """(failures / month, hours / month, is it an assumption)"""
+        m = self.machines.get(key)
+        if m and m.get("count") is not None and m.get("hours") is not None:
+            return float(m["count"]), float(m["hours"]), False
+        count, hours = RELIABILITY_DEFAULTS[kind]
+        return count, hours, True
+
+    def rates(self, key: str, kind: str, shift_hours: float) -> tuple[float, float]:
+        """(mean operating hours between failures, mean repair hours); (inf, 0) = never fails."""
+        count, hours, _ = self.values(key, kind)
+        if not self.enabled or count <= 0 or hours <= 0:
+            return math.inf, 0.0
+        return self.ref_shifts_per_day * shift_hours * self.ref_days_per_month / count, hours / count
+
+
 @dataclass
 class Calibration:
     """Model tuned to a real shift (see calibrate.py). Factors = real / model; 1.0 = assumptions only."""
@@ -300,6 +334,9 @@ class Scenario:
     excavator_policy: ExcavatorPolicy = field(default_factory=ExcavatorPolicy)
     pacing: Pacing = field(default_factory=Pacing)
     calibration: Calibration = field(default_factory=Calibration)
+    reliability: Reliability = field(default_factory=Reliability)
+    # repairs still going on at the start of the shift: machine id / truck id -> seconds (set by the period run)
+    carry_down: dict = field(default_factory=dict)
     spotting: Spotting = field(default_factory=Spotting)
     site: dict | None = None  # map geometry (see site.py)
     links: dict = field(default_factory=dict)  # "K-1>K-2" -> Route between two excavators
@@ -444,6 +481,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         traffic=_build(Traffic, raw.get("traffic", {})),
         advisor=_build(Advisor, raw.get("advisor", {})),
         calibration=_build(Calibration, raw.get("calibration", {})),
+        reliability=_build(Reliability, raw.get("reliability", {})),
         excavator_policy=_build(ExcavatorPolicy, raw.get("excavator_policy", {})),
         site=raw.get("site"),
         links=_routes(raw.get("links")),

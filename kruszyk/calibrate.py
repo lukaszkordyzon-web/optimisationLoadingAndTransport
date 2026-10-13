@@ -63,6 +63,8 @@ def calibrate(sc: Scenario, measured: dict, progress=None) -> tuple[Scenario, di
     base = copy.deepcopy(sc)
     base.dispatch = "natural"
     base.calibration = Calibration()
+    # calibrated on a shift without breakdowns: they are drawn separately (reliability), not hidden in the delays
+    base.reliability.enabled = False
     m = {k: float(v) for k, v in measured.items() if v}
     if m.get("trucks"):
         base = base.with_truck_count(int(m["trucks"]))
@@ -132,6 +134,7 @@ def calibrate(sc: Scenario, measured: dict, progress=None) -> tuple[Scenario, di
                          "wpisaną wydajność (kruszarki, łyżki koparek, liczba wozideł) – rzeczywista musi być wyższa."
                          ).replace(",", " ")
     fitted.dispatch = sc.dispatch
+    fitted.reliability = copy.deepcopy(sc.reliability)
     return fitted, before, after
 
 

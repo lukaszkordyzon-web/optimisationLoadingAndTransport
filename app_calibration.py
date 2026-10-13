@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from kruszyk.calibrate import apply_to_raw, calibrate
+from kruszyk.config import RELIABILITY_KINDS, Reliability
 
 FIELDS = [  # key, label, unit, help
     ("tonnes_t", "Produkcja na zmianę", "t", "waga przy kruszarce albo raport dyspozytora – **wymagane**"),
@@ -108,3 +109,56 @@ def _explain(cal, payload_after=None, payload_before=None) -> None:
         lines.append(f"🏭 Energia kruszenia **×{cal.kwh_factor:.2f}** względem założeń.")
     if lines:
         st.markdown("**Co zmieniła kalibracja:**  \n" + "  \n".join(lines))
+
+
+def reliability_editor(raw: dict, sc, key: str) -> None:
+    """Breakdowns per machine: failures per month and their total hours (from the maintenance records)."""
+    st.markdown("#### 🔧 Awaryjność urządzeń")
+    st.caption("Dla każdego urządzenia: **ile awarii w miesiącu** i **ile godzin łącznie** trwały – średnio z ostatnich "
+               "3–6 miesięcy, z dziennika napraw. Tylko postoje dłuższe niż ok. 15 min, **bez przeglądów planowych** "
+               "(krótsze postoje są w kalibracji). Czas jednej naprawy jest losowany – zwykle krótki, czasem dłuższy "
+               "niż zmiana; wtedy awaria przechodzi na kolejne zmiany.")
+    rel = sc.reliability
+    stored = (raw.get("reliability") or {}).get("machines") or {}
+    rows = [(c.id, "crusher", f"Kruszarka {c.id}") for c in sc.crushers]
+    rows += [(e.id, "excavator", f"Koparka {e.id}") for e in sc.excavators]
+    rows += [(f"truck:{f.model}", "truck", f"Wozidło {f.model} (każde)") for f in sc.trucks]
+    rows += [("drill", "drill", "Wiertnica (każda)")]
+    c = st.columns([1, 1, 2])
+    enabled = c[0].toggle("Uwzględniaj awarie", rel.enabled, key=f"{key}_on")
+    ref = c[1].number_input("Zmian na dobę w tym okresie", 1.0, 3.0, float(rel.ref_shifts_per_day), 1.0,
+                            key=f"{key}_ref", format="%.0f",
+                            help="przy ilu zmianach na dobę pracowały maszyny w miesiącach, z których są dane – "
+                                 "program przelicza awarie na godziny pracy, więc więcej zmian = więcej awarii")
+    sig = repr(sorted(stored.items())) + repr([r[0] for r in rows]) + str(st.session_state.get("ver", 0))
+    ed_key = f"{key}_tab_{abs(hash(sig)) % 10**8}"
+    if f"{ed_key}__base" not in st.session_state:
+        st.session_state[f"{ed_key}__base"] = pd.DataFrame([
+            {"klucz": k_, "urzadzenie": name, "awarii": rel.values(k_, kind)[0], "godzin": rel.values(k_, kind)[1]}
+            for k_, kind, name in rows])
+    df = st.data_editor(st.session_state[f"{ed_key}__base"], key=ed_key, hide_index=True, width="stretch",
+                        disabled=["klucz", "urzadzenie"], column_order=["urzadzenie", "awarii", "godzin"],
+                        column_config={"urzadzenie": "urządzenie",
+                                       "awarii": st.column_config.NumberColumn("awarii / miesiąc", min_value=0.0, step=1.0),
+                                       "godzin": st.column_config.NumberColumn("łącznie [h / miesiąc]", min_value=0.0,
+                                                                               step=1.0)})
+    machines, assumed, lines = {}, [], []
+    probe = Reliability(enabled=True, ref_shifts_per_day=ref, ref_days_per_month=rel.ref_days_per_month)
+    for (k_, kind, name), (_, r) in zip(rows, df.iterrows()):
+        n, h = float(r["awarii"] or 0), float(r["godzin"] or 0)
+        d_n, d_h = Reliability().values(k_, kind)[:2]
+        if k_ in stored or (n, h) != (d_n, d_h):
+            machines[k_] = {"count": n, "hours": h}
+        else:
+            assumed.append(name)
+        probe.machines[k_] = {"count": n, "hours": h}
+        mtbf, mttr = probe.rates(k_, kind, sc.shift_hours)
+        if mtbf < float("inf"):
+            lines.append(f"{name}: naprawa średnio **{mttr:.1f} h**, awaria co ok. **{mtbf / sc.shift_hours:.0f} zmian** "
+                         "pracy")
+    raw["reliability"] = {"enabled": bool(enabled), "ref_shifts_per_day": float(ref),
+                          "ref_days_per_month": float(rel.ref_days_per_month), "machines": machines}
+    with st.expander("Co to znaczy dla modelu"):
+        st.markdown("  \n".join(lines) or "brak awarii")
+    if assumed:
+        st.caption("Założenia (wartości domyślne, do poprawienia): " + ", ".join(assumed) + ".")

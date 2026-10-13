@@ -116,6 +116,7 @@ def chance(runs: list[pd.DataFrame], plan: PeriodPlan, target_t: float = 0.0, de
                "do_terminu_t": to_deadline, "cel_osiagniety": hit,
                "ok": bool(target_t) and to_deadline >= target_t,
                "deszcz_zmian": int(df["deszcz"].sum()), "awarie_h": float(df["awarie_h"].sum()),
+               **{c: float(df[c].sum()) for c in df.columns if c.startswith("awari") and c != "awarie_h"},
                "zmian_bez_urobku": int((df["skonczyl_sie_urobek"] != "").sum()),
                "kruszarka_bez_nadawy_h": float(df["kruszarka_bez_nadawy_h"].sum())}
         if goal is not None:
@@ -153,13 +154,19 @@ def chance(runs: list[pd.DataFrame], plan: PeriodPlan, target_t: float = 0.0, de
     drivers = []
     if target_t and 0 < res["ok"].sum() < n:
         bad, good = res[~res["ok"]], res[res["ok"]]
-        for col, label, unit in (("deszcz_zmian", "zmian z deszczem", ""), ("awarie_h", "godzin awarii wozideł", " h"),
-                                 ("zmian_bez_urobku", "zmian z koparką bez urobku", ""),
-                                 ("kruszarka_bez_nadawy_h", "godzin kruszarki bez nadawy", " h")):
+        checks = [("deszcz_zmian", "zmian z deszczem", ""), ("awarie_wozidel_h", "godzin awarii wozideł", " h"),
+                  ("awarie_koparek_h", "godzin awarii koparek", " h"), ("awarie_wiertnic_h", "godzin awarii wiertnic", " h"),
+                  ("zmian_bez_urobku", "zmian z koparką bez urobku", ""),
+                  ("kruszarka_bez_nadawy_h", "godzin kruszarki bez nadawy", " h")]
+        checks += [(c, f"godzin awarii kruszarki {c[len('awaria_'):-2]}", " h") for c in res.columns
+                   if c.startswith("awaria_") and c.endswith("_h")]
+        for col, label, unit in checks:
+            if col not in res:
+                continue
             b, g = float(bad[col].mean()), float(good[col].mean())
             if b > g * 1.15 and b - g >= 0.5:
-                drivers.append((b - g) / max(g, 1.0), f"{label}: średnio **{b:.1f}{unit}** w nieudanych przebiegach "
-                                                      f"vs {g:.1f}{unit} w udanych")
+                drivers.append(((b - g) / max(g, 1.0), f"{label}: średnio **{b:.1f}{unit}** w nieudanych przebiegach "
+                                                       f"vs {g:.1f}{unit} w udanych"))
         drivers = [text for _, text in sorted(drivers, reverse=True)]
     out["drivers"] = drivers
     return out

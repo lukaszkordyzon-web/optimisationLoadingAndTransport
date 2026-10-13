@@ -39,6 +39,7 @@ def test_parallel_runs_equal_sequential_ones():
 
 def test_model_uncertainty_widens_the_spread():
     sc, plan = setup()
+    sc.reliability.enabled = False  # only the calibration varies between the two sets of runs
     sc.calibration.delay_min_per_trip = 5.0
     plain = chance(run_many(sc, plan, n=6, seed=7, workers=1), plan)
     unsure = chance(run_many(sc, plan, n=6, seed=7, model_sd=0.15, workers=1), plan)

@@ -15,6 +15,7 @@ import datetime as dt
 import math
 from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 
 from .config import Scenario, _routes
@@ -130,7 +131,12 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
     # drilling jobs: blast id -> metres to drill / drilled; rigs move between them
     drilling = plan.drills > 0
     jobs: dict[str, dict] = {}
-    rigs = [{"id": f"W{i + 1}", "pos": None, "job": None, "travel_h": 0.0} for i in range(plan.drills)]
+    rigs = [{"id": f"W{i + 1}", "pos": None, "job": None, "travel_h": 0.0, "down_h": 0.0, "lost_h": 0.0}
+            for i in range(plan.drills)]
+    frng = np.random.default_rng(seed + 424_243)  # drill rig breakdowns
+    rig_mtbf, rig_mttr = sc.reliability.rates("drill", "drill", sc.shift_hours)
+    carry: dict = {}  # repairs going on from one shift into the next: machine / truck id -> seconds
+    prev_end: dt.datetime | None = None
     drill_log: list[dict] = []
     fired: set[str] = set()
 
@@ -196,12 +202,23 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                     if r["pos"] is not None and poly:
                         r["travel_h"] = haversine_m(r["pos"], centroid(poly)) / 1000 / max(plan.drill_speed_kmh, 0.1)
         for r in rigs:
+            # breakdowns: a repair from before eats into this shift; a new one may stop the rig for the rest of it
+            avail = sc.shift_hours - min(sc.shift_hours, r["down_h"])
+            r["lost_h"] = sc.shift_hours - avail
+            r["down_h"] = max(0.0, r["down_h"] - sc.shift_hours)
+            if avail > 0 and rig_mtbf < math.inf and frng.random() < 1 - math.exp(-avail / rig_mtbf):
+                at = frng.uniform(0, avail)
+                repair = float(frng.lognormal(math.log(rig_mttr) - 0.5, 1.0))
+                lost = min(avail - at, repair)
+                r["down_h"] += repair - lost
+                r["lost_h"] += lost
+                avail -= lost
             if r["job"] is None:
                 continue
             j = jobs[r["job"]]
-            move = min(sc.shift_hours, r["travel_h"])
+            move = min(avail, r["travel_h"])
             r["travel_h"] -= move
-            j["done"] = min(j["m"], j["done"] + plan.drill_m_per_shift * (sc.shift_hours - move) / sc.shift_hours)
+            j["done"] = min(j["m"], j["done"] + plan.drill_m_per_shift * (avail - move) / sc.shift_hours)
             if ready(r["job"]):
                 drill_log.append({"strzal": r["job"], "wiertnica": r["id"], "data": day, "zmiana": shift_no})
                 if j["poly"]:
@@ -328,6 +345,17 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 c_ = centroid(timed["polygon"])
                 v.site["blast"] = {"lat": c_[0], "lon": c_[1]}
         v.shift_plan.start_time = _shift_start(first_start, shift_no, sc.shift_hours)
+        # repairs go on between shifts (nights, weekends) – what is left at this shift's start
+        hh, mm = (int(x) for x in v.shift_plan.start_time.split(":"))
+        start_dt = dt.datetime.combine(day, dt.time(hh, mm))
+        if shift_no > 1 and start_dt.time() < dt.datetime.strptime(first_start, "%H:%M").time():
+            start_dt += dt.timedelta(days=1)  # a night shift starts after midnight
+        gap = (start_dt - prev_end).total_seconds() if prev_end else 0.0
+        v.carry_down = {k_: s_ - gap for k_, s_ in carry.items() if s_ - gap > 0}
+        gap_h = gap / 3600
+        for r in rigs:
+            r["down_h"] = max(0.0, r["down_h"] - gap_h)
+        prev_end = start_dt + dt.timedelta(hours=sc.shift_hours)
         for e in v.excavators:
             moved = ex_pile[e.id] != e.blast
             e.blast, e.route, e.crusher_routes = ex_pile[e.id], ex_route[e.id], ex_croutes[e.id]
@@ -339,6 +367,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 e.route, e.dig_routes = e.dig_routes[k], e.dig_routes[k:]
         res = simulate(v, seed=seed + 7919 * i)
         k = res.kpi
+        carry = dict(k.get("carry_down") or {})
         loaded = res.loads.groupby("blast")["tonnes"].sum() if len(res.loads) else pd.Series(dtype=float)
         for pid in left:
             left[pid] = max(0.0, left[pid] - float(loaded.get(pid, 0.0)))
@@ -361,7 +390,13 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             "wywiezione_t": k["hauled_t"], "koszt_zl": k["cost_total"], "koszt_na_t": k["cost_per_t"],
             "paliwo_l": k["fuel_l"], "kolejki_h": round(k["truck_queue_excavator_h"] + k["truck_queue_crusher_h"], 2),
             "koparki_czekaly_h": round(sum(e["waiting_for_trucks_h"] for e in k["excavators"]), 2),
-            "kruszarka_bez_nadawy_h": k["crusher_starved_h"], "awarie_h": k["truck_breakdown_h"],
+            "kruszarka_bez_nadawy_h": k["crusher_starved_h"],
+            "awarie_h": round(k["truck_breakdown_h"] + k["excavator_down_h"]["awaria"] + k["crusher_breakdown_h"]
+                              + sum(r["lost_h"] for r in rigs), 2),
+            "awarie_wozidel_h": k["truck_breakdown_h"], "awarie_koparek_h": k["excavator_down_h"]["awaria"],
+            "awarie_kruszarek_h": k["crusher_breakdown_h"],
+            "awarie_wiertnic_h": round(sum(r["lost_h"] for r in rigs), 2),
+            **{f"awaria_{c['crusher']}_h": c["down_h"] for c in k.get("crushers", [])},
             "strzal": ", ".join(f"{p} +{t:,.0f} t".replace(",", " ") for p, t in blasted.items()),
             "przejazdy_koparek": ", ".join(moves),
             "wiercenie": ", ".join(f"{r['id']}: {r['job']} {jobs[r['job']]['done']:.0f}/{jobs[r['job']]['m']:.0f} m"

@@ -198,6 +198,9 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                   disabled=drills == 0, help="poprzedniego strzału w obszarze – wtedy wiertnica może wejść")
         tpm = c[4].number_input("Domyślnie t/mb", 5.0, 500.0, 50.0, 5.0, key="per_tpm", disabled=drills == 0,
                                 help="gdy obszar / strzał nie ma własnej wartości")
+        from app_calibration import reliability_editor
+
+        reliability_editor(base_raw, sc, "rel_per")
     plan = PeriodPlan(start=start, days=int(days), shifts_per_day=int(shifts), saturdays=sat,
                       holidays=_holidays(hol, start.year), target_t=float(target),
                       blasts=[PileBlasts(r["usyp"], float(r["ile_t"] or 0), int(r["co_dni"] or 0),

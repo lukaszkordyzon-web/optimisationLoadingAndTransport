@@ -51,7 +51,8 @@ def test_calibration_is_saved_in_the_mine():
     fitted, _, after = calibrate(scenario_from_dict(r), {"tonnes_t": 4000, "trips": 110})
     apply_to_raw(r, fitted)
     again = scenario_from_dict(r)
-    again.dispatch = "natural"  # calibrated on today's way of dispatching
+    again.dispatch = "natural"  # calibrated on today's way of dispatching…
+    again.reliability.enabled = False  # …on a shift without breakdowns
     assert again.calibration.measured["tonnes_t"] == 4000
     assert "calibration" in dump_scenario(again)
     assert model_shift(again)["tonnes_t"] == pytest.approx(after["tonnes_t"], rel=0.01)

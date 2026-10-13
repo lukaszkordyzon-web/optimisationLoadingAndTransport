@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import simpy
 
-from .config import Excavator, Scenario, TruckFleet, clock_to_s
+from .config import REPAIR_SIGMA, Excavator, Scenario, TruckFleet, clock_to_s
 from .site import blast_point, haversine_m
 from .physics import (crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_t, load_time_s, passes_per_truck,
                       route_time_s, segment_time_s)
@@ -37,6 +37,7 @@ class TruckState:
     speeder: bool = False  # drives above the limit (site practice)
     at: str = ""  # crusher where the truck is (dumped last); trucks start at the main crusher
     fuel_left_l: float = 0.0
+    down_end: float = 0.0  # end of the current / last repair
 
 
 @dataclass
@@ -52,6 +53,8 @@ class CrusherUnit:
     busy_s: float = 0.0
     starved_s: float = 0.0
     kwh: float = 0.0
+    down_until: float = 0.0  # broken down until
+    down_s: float = 0.0
 
 
 @dataclass
@@ -78,6 +81,7 @@ class ExcavatorState:
     route_id: str = ""          # current route to the crusher (changes as the excavator advances along the face)
     initial_t: float = 0.0
     loaded_t: float = 0.0
+    down_end: float = 0.0  # end of the current / last breakdown
     next_reloc_t: float = math.inf
     dig_step: int = 0
     relocations: int = 0
@@ -106,6 +110,8 @@ class Simulation:
         sc.validate()
         self.sc = sc
         self.rng = np.random.default_rng(sc.seed if seed is None else seed)
+        # breakdowns draw from their own stream: the rest of the shift stays comparable with / without them
+        self.frng = np.random.default_rng((sc.seed if seed is None else seed) + 99_991)
         self.env = simpy.Environment()
         self.shift_s = sc.shift_hours * 3600
         v = sc.variability
@@ -128,6 +134,9 @@ class Simulation:
             ex.bays = simpy.Resource(self.env, 2 if double else 1)
             if ex.cfg.start_delay_min > 0:  # drives to a new pile first
                 ex.down.append((0.0, ex.cfg.start_delay_min * 60, "przejazd"))
+            if sc.carry_down.get(ex.cfg.id):  # repair from the previous shift still going on
+                ex.down_end = float(sc.carry_down[ex.cfg.id])
+                ex.down.append((0.0, ex.down_end, "awaria"))
         # several excavators on the same blast share its tonnage
         by_blast: dict[str, list[ExcavatorState]] = {}
         for ex in self.excavators.values():
@@ -323,7 +332,8 @@ class Simulation:
         missing = max(0.0, backlog + tonnes - u.cfg.hopper_t)
         hopper_wait = missing / rate * 3600
         queue_wait = (len(u.dump_point.queue) + len(u.dump_point.users)) * u.cfg.dump_time_s
-        return max(hopper_wait, queue_wait if extra_t == 0 else 0.0)
+        down = max(0.0, u.down_until - self.env.now - ahead_s)  # a broken crusher: the operator knows (radio)
+        return max(hopper_wait, queue_wait if extra_t == 0 else 0.0) + (down if missing > 0 else 0.0)
 
     # ------------------------------------------------------------ light vehicles
     def _light_trip(self, name: str, route, forward: bool, t0: float, frames: list, record: bool = True) -> float:
@@ -964,11 +974,16 @@ class Simulation:
                 truck.fuel_left_l = fleet.tank_l
                 self.truck_refuels += 1
 
-            # random breakdown, probability proportional to cycle length
+            # random breakdown, probability proportional to the time worked (cycle length)
             cycle = env.now - cycle_start
-            if self.rng.random() < 1 - math.exp(-cycle / (v.truck_mtbf_h * 3600)):
+            mtbf, mttr = sc.reliability.rates(f"truck:{fleet.model}", "truck", sc.shift_hours)
+            if mtbf < math.inf and self.frng.random() < 1 - math.exp(-cycle / (mtbf * 3600)):
                 t0 = env.now
-                yield env.timeout(self.rng.exponential(v.truck_mttr_min * 60))
+                truck.down_end = t0 + self._repair_s(mttr)
+                if truck.down_end >= self.shift_s:  # the rest of the repair goes on to the next shift
+                    self._log_state(truck, "awaria", t0, end=self.shift_s)
+                    return
+                yield env.timeout(truck.down_end - t0)
                 self._log_state(truck, "awaria", t0)
 
     def _mix_into_hopper(self, tonnes: float, frag: float, unit: CrusherUnit | None = None):
@@ -985,9 +1000,36 @@ class Simulation:
             elif load["truck"] == truck.id:
                 return
 
+    def _repair_s(self, mttr_h: float) -> float:
+        """Repair time with the given mean: lognormal – mostly short, sometimes longer than a shift."""
+        return float(self.frng.lognormal(math.log(mttr_h * 3600) - REPAIR_SIGMA ** 2 / 2, REPAIR_SIGMA))
+
+    def breakdown_process(self, kind: str, obj):
+        """Random breakdowns of an excavator or a crusher while the shift runs."""
+        key = obj.cfg.id
+        mtbf, mttr = self.sc.reliability.rates(key, kind, self.sc.shift_hours)
+        if mtbf == math.inf:
+            return
+        env = self.env
+        while True:
+            yield env.timeout(self.frng.exponential(mtbf * 3600))
+            if env.now >= self.shift_s:
+                return
+            end = env.now + self._repair_s(mttr)
+            if kind == "excavator":
+                obj.down.append((env.now, end, "awaria"))
+                obj.down_end = end
+            else:
+                obj.down_until = end
+            yield env.timeout(end - env.now)
+
     def crusher_process(self, u: CrusherUnit):
         env = self.env
         while True:
+            if env.now < u.down_until:  # broken down: the hopper fills up, trucks queue or go elsewhere
+                u.down_s += CRUSHER_TICK_S
+                yield env.timeout(CRUSHER_TICK_S)
+                continue
             rate = self._crusher_rate(u)
             capacity = rate * CRUSHER_TICK_S / 3600
             amount = min(u.hopper.level, capacity)
@@ -1057,7 +1099,11 @@ class Simulation:
 
     def run(self) -> "SimResult":
         for u in self.units.values():
+            u.down_until = float(self.sc.carry_down.get(u.cfg.id, 0.0))
             self.env.process(self.crusher_process(u))
+            self.env.process(self.breakdown_process("crusher", u))
+        for ex in self.excavators.values():
+            self.env.process(self.breakdown_process("excavator", ex))
         if self.sc.dispatch == "rl" and self.sc.excavator_policy.min_trucks_per_excavator > 0.05:
             self.env.process(self.excavator_review())
         if self.sc.stockpile.enabled:
@@ -1068,6 +1114,13 @@ class Simulation:
         return SimResult(self)
 
     def _delayed_start(self, truck: TruckState, delay: float):
+        carry = float(self.sc.carry_down.get(truck.id, 0.0))
+        if carry > 0:  # still in repair from the previous shift
+            truck.down_end = carry
+            self._log_state(truck, "awaria", 0.0, end=min(carry, self.shift_s))
+            if carry >= self.shift_s:
+                return
+            delay = max(delay, carry)
         yield self.env.timeout(delay)
         yield from self.truck_process(truck)
 
@@ -1219,7 +1272,7 @@ class SimResult:
             "truck_excavator_down_h": round(float(st.get("postoj_koparki", 0.0)), 2),
             "excavator_down_h": {r: round(sum(max(0.0, min(b, shift_s) - a) for e in sim.excavators.values()
                                               for a, b, rr in e.down if rr == r) / 3600, 2)
-                                 for r in ("przerwa", "strzelanie", "tankowanie", "przestawienie", "przejazd")},
+                                 for r in ("przerwa", "strzelanie", "tankowanie", "przestawienie", "przejazd", "awaria")},
             "truck_queue_excavator_h": round(float(st.get("kolejka_koparka", 0.0)), 2),
             "truck_queue_crusher_h": round(float(st.get("kolejka_kruszarka", 0.0)), 2),
             "truck_breakdown_h": round(float(st.get("awaria", 0.0)), 2),
@@ -1231,8 +1284,15 @@ class SimResult:
                           "accepts": list(u.cfg.accepts), "product": u.cfg.product, "target_t": u.cfg.target_t,
                           "plan_pct": round(100 * u.crushed_t / u.cfg.target_t, 1) if u.cfg.target_t else None,
                           "capacity_tph": u.cfg.capacity_tph, "kwh": round(u.kwh),
-                          "kwh_per_t": round(u.kwh / u.crushed_t, 2) if u.crushed_t else None}
+                          "kwh_per_t": round(u.kwh / u.crushed_t, 2) if u.crushed_t else None,
+                          "down_h": round(u.down_s / 3600, 2)}
                          for u in sim.units.values()],
+            "crusher_breakdown_h": round(sum(u.down_s for u in sim.units.values()) / 3600, 2),
+            # repairs that go on into the next shift: id -> seconds left at the end of this one
+            "carry_down": {k_: round(t_ - shift_s, 1) for k_, t_ in
+                           [(u.cfg.id, u.down_until) for u in sim.units.values()]
+                           + [(e.cfg.id, e.down_end) for e in sim.excavators.values()]
+                           + [(t.id, t.down_end) for t in sim.trucks] if t_ > shift_s},
             "crusher_starved_h": round(sim.crusher_starved_s / 3600, 2),
             "stockpile_in_t": round(sim.stockpile_in_t, 1),
             "stockpile_end_t": round(sim.stockpile_t, 1),

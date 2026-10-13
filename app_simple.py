@@ -482,9 +482,12 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
     with tabs[0]:
         render_map_tab(raw, set_raw, simple=True, schedule=False)
     with tabs[1]:
-        from app_calibration import step_calibration
+        from app_calibration import reliability_editor, step_calibration
 
         step_calibration(raw, sc, set_raw)
+        if sc is not None:
+            st.divider()
+            reliability_editor(raw, sc, "rel_day")
     with tabs[2]:
         if sc is None:
             st.info(f"Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia** ({msg}) – albo wczytaj przykład.")
