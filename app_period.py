@@ -14,8 +14,7 @@ from plotly.subplots import make_subplots
 from kruszyk.config import scenario_from_dict
 from kruszyk.period import GOALS, WEEKDAYS, PeriodPlan, PileBlasts, optimize_period, run_period, summary
 
-DISPATCH_LABELS = {"natural": "jak dziś (kierowcy wracają do „swojej” koparki)",
-                   "dynamic": "system przydziela (heurystyka)", "rl": "polityka RL (wyuczona w kroku ④)"}
+RL_LABEL = "📱 z systemem RL"
 
 
 def _next_month(today: dt.date) -> dt.date:
@@ -50,12 +49,23 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     st.session_state.setdefault("per_shifts", 2)
     variant = st.session_state.get("variant_yaml")
     c1, c2 = st.columns(2)
-    which = c1.radio("Kopalnia", ["stan obecny"] + (["wariant z kroku ③"] if variant else []), horizontal=True,
+    which = c1.radio("Kopalnia", ["stan obecny"] + (["wariant z kroku ②"] if variant else []), horizontal=True,
                      key="per_which")
     sc = scenario_from_dict(yaml_load(variant if which.startswith("wariant") else base_yaml))
-    modes = ["natural", "dynamic"] + (["rl"] if sc.rl_weights else [])
-    dispatch = c2.radio("Przydział wozideł", modes, format_func=DISPATCH_LABELS.get, key="per_dispatch")
-    sc.dispatch = dispatch
+    if not sc.rl_weights and base_raw.get("rl_weights"):  # a variant made before learning: use the mine's policy
+        sc.rl_weights = list(base_raw["rl_weights"])
+    sc.dispatch = "natural"  # the schedule is planned on how trucks run today
+    with c2:
+        if sc.rl_weights:
+            compare_rl = st.toggle("📱 Porównaj z systemem przydziału na żywo (RL)", True, key="per_rl",
+                                   help="Ten sam plan policzony drugi raz z przydziałem i zaleceniami nauczonymi w "
+                                        "module „🚚 Zmiana” – widać, ile ton i złotych na okres daje wdrożenie.")
+        else:
+            compare_rl = False
+            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **🚚 Zmiana → ③ Optymalizacja RL**, "
+                       "a tu zobaczysz, ile daje na cały okres.")
+    st.caption("Harmonogram liczony jest tak, jak jeździcie dziś (kierowca wraca do „swojej” koparki)"
+               + (" – obok to samo z systemem RL." if compare_rl else "."))
 
     t_cal, t_old, t_new, t_ex, t_goal = st.tabs(["🗓️ Kalendarz i cel", "🧨 Strzały na obecnych usypach",
                                                  f"📍 Obszary i strzały z mapy ({len(sc.planned_blasts) + len(sc.areas)})",
@@ -184,20 +194,60 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     n = len(plan.shifts())
     st.caption(f"{len(plan.working_days())} dni roboczych × {shifts} = **{n} zmian** · liczy się ok. {max(1, n // 3)} s")
     with t_goal:
-        _goal_tab(sc, plan, seed, modes)
+        _goal_tab(sc, plan, seed, compare_rl)
 
-    key = hashlib.md5(repr((dump_key(sc), plan, seed)).encode()).hexdigest()
+    key = hashlib.md5(repr((dump_key(sc), plan, seed, compare_rl)).encode()).hexdigest()
     if st.button("▶️ Policz okres", type="primary", disabled=n == 0):
+        runs = 2 if compare_rl else 1
         bar = st.progress(0.0, "liczę zmiany…")
-        df = run_period(sc, plan, seed=seed, progress=lambda i, k: bar.progress(i / k, f"zmiana {i} z {k}"))
+        df = run_period(sc, plan, seed=seed, progress=lambda i, k: bar.progress(i / k / runs, f"zmiana {i} z {k}"))
+        df_rl = None
+        if compare_rl:
+            sc_rl = copy.deepcopy(sc)
+            sc_rl.dispatch = "rl"
+            df_rl = run_period(sc_rl, plan, seed=seed,
+                               progress=lambda i, k: bar.progress(0.5 + i / k / 2, f"z systemem RL: zmiana {i} z {k}"))
         bar.empty()
-        st.session_state.period = (key, df, plan)
+        st.session_state.period = (key, df, plan, df_rl)
     res = st.session_state.get("period")
     if not res:
         return
     if res[0] != key:
         st.warning("Ustawienia zmieniły się od ostatniego liczenia – kliknij **Policz okres** ponownie.")
+    if len(res) > 3 and res[3] is not None:
+        _rl_compare(res[1], res[3], res[2], sc)
     _results(res[1], res[2], sc)
+
+
+def _rl_compare(df: pd.DataFrame, df_rl: pd.DataFrame, plan: PeriodPlan, sc) -> None:
+    """The same period with the live dispatch system (RL): what the rollout gives management."""
+    a, b = summary(df, plan, sc.crushers), summary(df_rl, plan, sc.crushers)
+    if not a or not b:
+        return
+    st.markdown("#### 📱 Co daje system przydziału na żywo (RL) w tym okresie")
+    c = st.columns(4)
+    c[0].metric("Wywiezione z RL", f"{b['wywiezione_t']:,.0f} t".replace(",", " "),
+                f"{b['wywiezione_t'] - a['wywiezione_t']:+,.0f} t vs dziś".replace(",", " "))
+    if a["koszt_na_t"] and b["koszt_na_t"]:
+        c[1].metric("Koszt na tonę z RL", f"{b['koszt_na_t']:.2f} zł/t",
+                    f"{b['koszt_na_t'] - a['koszt_na_t']:+.2f} zł/t", delta_color="inverse")
+        saving = (a["koszt_na_t"] - b["koszt_na_t"]) * b["wywiezione_t"]
+        c[2].metric("Oszczędność w okresie", f"{saving / 1000:,.0f} tys. zł".replace(",", " "),
+                    help="różnica zł/t × tony wywiezione z RL")
+    if plan.target_t and b["realizacja_celu_pct"] is not None:
+        c[3].metric("Realizacja celu z RL", f"{b['realizacja_celu_pct']:.0f} %",
+                    f"{b['realizacja_celu_pct'] - (a['realizacja_celu_pct'] or 0):+.0f} pp")
+    fig = go.Figure()
+    for name, d, color in (("jak dziś", df, "#9aa0a6"), ("z systemem RL", df_rl, "#d62828")):
+        cum = d.groupby("data")["wywiezione_t"].sum().cumsum()
+        fig.add_scatter(x=list(cum.index), y=cum.values, mode="lines", name=name, line=dict(color=color, width=3))
+    if plan.target_t:
+        fig.add_hline(y=plan.target_t, line_dash="dash", line_color="#e63946", annotation_text="cel")
+    fig.update_layout(height=280, margin=dict(t=30, b=10), title="Tony narastająco: jak dziś vs z systemem RL",
+                      legend=dict(orientation="h"))
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Ta sama pogoda, awarie i strzały w obu wersjach. Szczegóły poniżej – dla wersji „jak dziś”.")
+    st.divider()
 
 
 def _blast_schedule(meta: dict, sc) -> None:
@@ -244,8 +294,8 @@ def _blast_schedule(meta: dict, sc) -> None:
         st_folium(m, height=460, use_container_width=True, returned_objects=[], key="period_blast_map")
 
 
-def _goal_tab(sc, plan: PeriodPlan, seed: int, modes: list[str]) -> None:
-    """Main goal of the period and automatic choice of the plan (fleet, shifts, Saturdays, dispatch)."""
+def _goal_tab(sc, plan: PeriodPlan, seed: int, compare_rl: bool) -> None:
+    """Main goal of the period and automatic choice of the plan (fleet, shifts, Saturdays); RL shown alongside."""
     st.caption("Wybierz, **na czym Ci najbardziej zależy**, i co program może zmieniać. Policzy okres dla każdej "
                "kombinacji (ta sama pogoda i awarie dla wszystkich – uczciwe porównanie) i ułoży ranking planów. "
                "Strzały, kruszarki i koparki są takie, jak w zakładkach obok.")
@@ -258,17 +308,17 @@ def _goal_tab(sc, plan: PeriodPlan, seed: int, modes: list[str]) -> None:
         deadline = c[1].date_input("Do kiedy", last, min_value=plan.start, max_value=last, key="goal_date",
                                    format="DD.MM.YYYY")
     st.markdown("**Co program może zmieniać:**")
-    c = st.columns(4)
+    c = st.columns(3)
     n0 = int(sc.truck_count)
     trucks = c[0].multiselect("Liczba wozideł", list(range(max(1, n0 - 4), n0 + 5)),
                               [x for x in (n0 - 2, n0, n0 + 2) if x >= 1], key="goal_trucks")
     shifts = c[1].multiselect("Zmian na dobę", [1, 2, 3], [plan.shifts_per_day], key="goal_shifts")
     sats = c[2].multiselect("Soboty", ["bez sobót", "z sobotami"], ["z sobotami" if plan.saturdays else "bez sobót"],
                             key="goal_sats")
-    disp = c[3].multiselect("Przydział wozideł", modes, [m for m in ("natural", "dynamic") if m in modes],
-                            format_func=lambda m: {"natural": "jak dziś", "dynamic": "system", "rl": "RL"}[m],
-                            key="goal_disp")
+    disp = ["natural"] + (["rl"] if compare_rl else [])
     combos = len(trucks) * len(shifts) * len(sats) * len(disp)
+    if compare_rl:
+        st.caption("Każdy plan liczony dwa razy: jak dziś i z systemem RL – ranking według wersji „jak dziś”.")
     per = max(1, plan.days * max(shifts or [1]) // 18)
     st.caption(f"**{combos}** planów do policzenia · ok. {combos * per // 60} min {combos * per % 60} s")
     if st.button("🎯 Dobierz plan", type="primary", disabled=combos == 0 or combos > 60, key="goal_run"):
@@ -284,11 +334,11 @@ def _goal_tab(sc, plan: PeriodPlan, seed: int, modes: list[str]) -> None:
 
 
 def _goal_results(res: pd.DataFrame, goal: str, target_t: float, deadline) -> None:
-    labels = {"natural": "jak dziś", "dynamic": "system", "rl": "RL"}
-
     def name(r) -> str:
-        return (f"{r['wozidla']} wozideł · {r['zmian_na_dobe']} zm./dobę · {'z sobotami' if r['soboty'] else 'bez sobót'}"
-                f" · przydział: {labels.get(r['przydzial'], r['przydzial'])}")
+        return f"{r['wozidla']} wozideł · {r['zmian_na_dobe']} zm./dobę · {'z sobotami' if r['soboty'] else 'bez sobót'}"
+    with_rl = res[res["przydzial"] == "rl"]
+    res = res[res["przydzial"] != "rl"].reset_index(drop=True)
+    res["miejsce"] = range(1, len(res) + 1)
     best = res.iloc[0]
     ok = goal != "deadline" or (best["cel_osiagniety"] is not None and best["cel_osiagniety"] <= deadline)
     def t(x) -> str:
@@ -299,6 +349,15 @@ def _goal_results(res: pd.DataFrame, goal: str, target_t: float, deadline) -> No
                 f" – **celu nie da się zrobić do {deadline.strftime('%d.%m')}** w żadnym planie "
                 f"(najbliżej: {t(best['do_terminu_t'])} t)")
     (st.success if ok else st.warning)(msg)
+    same = with_rl[(with_rl["wozidla"] == best["wozidla"]) & (with_rl["zmian_na_dobe"] == best["zmian_na_dobe"])
+                   & (with_rl["soboty"] == best["soboty"])]
+    if len(same):
+        r = same.iloc[0]
+        line = (f"📱 **Ten sam plan z systemem RL:** {t(r['wywiezione_t'])} t ({r['wywiezione_t'] - best['wywiezione_t']:+,.0f} t), "
+                f"{r['koszt_na_t']:.2f} zł/t ({r['koszt_na_t'] - best['koszt_na_t']:+.2f} zł/t)").replace(",", " ")
+        if goal == "deadline" and r["cel_osiagniety"] is not None:
+            line += f", cel osiągnięty {r['cel_osiagniety'].strftime('%d.%m')}"
+        st.info(line)
     # what limits production: if very different fleets give (almost) the same tonnes, it's the material
     top = res[(res["zmian_na_dobe"] == best["zmian_na_dobe"]) & (res["soboty"] == best["soboty"])]
     if top["wozidla"].nunique() > 1 and top["wywiezione_t"].max() < 1.03 * top["wywiezione_t"].min():
@@ -328,7 +387,7 @@ def _goal_results(res: pd.DataFrame, goal: str, target_t: float, deadline) -> No
     st.plotly_chart(fig, width="stretch")
     if st.button("✅ Ustaw najlepszy plan w kalendarzu", key="goal_apply"):
         st.session_state.per_apply = {"per_trucks": int(best["wozidla"]), "per_shifts": int(best["zmian_na_dobe"]),
-                                      "per_sat": bool(best["soboty"]), "per_dispatch": best["przydzial"]}
+                                      "per_sat": bool(best["soboty"])}
         st.rerun()
 
 

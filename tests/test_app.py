@@ -78,7 +78,7 @@ def test_simple_mode_every_preset():
     at = AppTest.from_file(APP, default_timeout=180).run()
     assert not at.exception, at.exception
     labels = [t.label for t in at.tabs]
-    for step in ["① Kopalnia – stan obecny", "② Jak jest dziś", "③ Wariant – co jeśli", "④ Optymalizacja",
+    for step in ["① Kopalnia dziś", "② Jak było dziś", "③ Optymalizacja RL",
                  "🧨 Strzelanie", "👷 Objazd sztygara", "⛽ Tankowanie"]:
         assert step in labels
     for name in at.sidebar.selectbox[0].options:
@@ -103,6 +103,7 @@ def test_simple_mode_variant_compares_with_today():
     name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
     at.sidebar.selectbox[0].select(name).run()
     at.sidebar.button[0].click().run()
+    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
     next(b for b in at.button if "Utwórz wariant" in b.label).click().run()
     assert not at.exception, at.exception
     assert at.session_state["variant_yaml"]
@@ -156,7 +157,7 @@ def test_planning_only_in_schedule_mode():
     assert not at.exception, at.exception
     assert not [r for r in at.radio if r.key == "pile_status"]  # one shift: piles only as they lie today
     assert "📅 Plan strzałów" not in at.radio(key="draw_group").options
-    at.radio(key="work_kind").set_value("🗓️ Harmonogram (tydzień / miesiąc)").run()
+    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
     at.radio(key="draw_group").set_value("⛏️ Urobek i koparki").run()
     assert not at.exception, at.exception
     assert [r for r in at.radio if r.key == "pile_status"]  # schedule: a pile can be a planned blast
@@ -182,3 +183,23 @@ def test_advanced_editor_keeps_routes_to_second_crusher():
     at.toggle(key="advanced").set_value(True).run()
     assert not at.exception, at.exception
     assert all(isinstance(e.get("crusher_routes", {}), dict) for e in at.session_state["raw"]["excavators"])
+
+
+def test_schedule_compares_with_rl_when_learned():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
+    at.sidebar.selectbox[0].select(name).run()
+    at.sidebar.button[0].click().run()
+    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
+    assert not at.exception, at.exception
+    assert not [t for t in at.toggle if t.key == "per_rl"]  # nothing learned yet: only a hint where to learn
+    raw = dict(at.session_state["raw"])
+    raw["rl_weights"] = [3.0, 2.0, 0.5, 1.0, 0.0, 0.5, 0.2]  # what step ③ of the shift module stores in the mine
+    at.session_state["raw"] = raw
+    at.run()
+    assert at.toggle(key="per_rl").value
+    at.number_input(key="per_days").set_value(2).run()
+    next(b for b in at.button if "Policz okres" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["period"][3] is not None
+    assert any("Wywiezione z RL" in m.label for m in at.metric)
