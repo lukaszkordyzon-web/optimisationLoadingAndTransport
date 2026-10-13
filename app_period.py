@@ -12,7 +12,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from kruszyk.config import scenario_from_dict
-from kruszyk.period import WEEKDAYS, PeriodPlan, PileBlasts, run_period, summary
+from kruszyk.period import GOALS, WEEKDAYS, PeriodPlan, PileBlasts, optimize_period, run_period, summary
 
 DISPATCH_LABELS = {"natural": "jak dziś (kierowcy wracają do „swojej” koparki)",
                    "dynamic": "system przydziela (heurystyka)", "rl": "polityka RL (wyuczona w kroku ④)"}
@@ -45,6 +45,9 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     if base_yaml is None:
         st.info("Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia**.")
         return
+    for k_, v_ in st.session_state.pop("per_apply", {}).items():  # "apply this plan" from the goal tab
+        st.session_state[k_] = v_
+    st.session_state.setdefault("per_shifts", 2)
     variant = st.session_state.get("variant_yaml")
     c1, c2 = st.columns(2)
     which = c1.radio("Kopalnia", ["stan obecny"] + (["wariant z kroku ③"] if variant else []), horizontal=True,
@@ -54,14 +57,15 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     dispatch = c2.radio("Przydział wozideł", modes, format_func=DISPATCH_LABELS.get, key="per_dispatch")
     sc.dispatch = dispatch
 
-    t_cal, t_old, t_new, t_ex = st.tabs(["🗓️ Kalendarz i cel", "🧨 Strzały na obecnych usypach",
-                                         f"📍 Nowe strzały z mapy ({len(sc.planned_blasts)})", "⛏️ Koparki"])
+    t_cal, t_old, t_new, t_ex, t_goal = st.tabs(["🗓️ Kalendarz i cel", "🧨 Strzały na obecnych usypach",
+                                                 f"📍 Nowe strzały z mapy ({len(sc.planned_blasts)})",
+                                                 "⛏️ Koparki i wozidła", "🎯 Cel i dobór planu"])
     with t_cal:
         c = st.columns(5)
         start = c[0].date_input("Od dnia", _next_month(dt.date.today()), key="per_start", format="DD.MM.YYYY")
         days = c[1].number_input("Liczba dni (kalendarzowych)", 1, 92,
                                  calendar.monthrange(start.year, start.month)[1] if start.day == 1 else 30, key="per_days")
-        shifts = c[2].selectbox("Zmian na dobę", [1, 2, 3], index=1, key="per_shifts",
+        shifts = c[2].selectbox("Zmian na dobę", [1, 2, 3], key="per_shifts",
                                 help=f"każda po {sc.shift_hours:g} h – pierwsza od {sc.shift_plan.start_time}")
         sat = c[3].checkbox("Soboty robocze", key="per_sat")
         target = c[4].number_input("Cel na okres [t] (0 = bez celu)", 0.0, 10_000_000.0, 0.0, 5000.0, key="per_target")
@@ -109,6 +113,11 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
             st.info("Na mapie nie ma planowanych strzałów – koparki pracują tylko na obecnych usypach. Narysuj je w "
                     "kroku ①: „Co robisz?” → „📅 Plan strzałów”.")
     with t_ex:
+        st.session_state.setdefault("per_trucks", int(sc.truck_count))
+        n_trucks = st.number_input("Liczba wozideł (wszystkie typy razem)", 1, 60, step=1,
+                                   key="per_trucks", help="zmiana dotyczy pierwszego typu wozideł z listy")
+        if n_trucks != sc.truck_count:
+            sc = sc.with_truck_count(int(n_trucks))
         c = st.columns(2)
         move = c[0].checkbox("Koparka bez urobku przejeżdża na inny usyp", True, key="per_move",
                              help="na najbliższy odstrzelony usyp, na którym nikt nie pracuje")
@@ -125,6 +134,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         _blast_calendar(plan, sc)
     n = len(plan.shifts())
     st.caption(f"{len(plan.working_days())} dni roboczych × {shifts} = **{n} zmian** · liczy się ok. {max(1, n // 3)} s")
+    with t_goal:
+        _goal_tab(sc, plan, seed, modes)
 
     key = hashlib.md5(repr((dump_key(sc), plan, seed)).encode()).hexdigest()
     if st.button("▶️ Policz okres", type="primary", disabled=n == 0):
@@ -138,6 +149,94 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     if res[0] != key:
         st.warning("Ustawienia zmieniły się od ostatniego liczenia – kliknij **Policz okres** ponownie.")
     _results(res[1], res[2], sc)
+
+
+def _goal_tab(sc, plan: PeriodPlan, seed: int, modes: list[str]) -> None:
+    """Main goal of the period and automatic choice of the plan (fleet, shifts, Saturdays, dispatch)."""
+    st.caption("Wybierz, **na czym Ci najbardziej zależy**, i co program może zmieniać. Policzy okres dla każdej "
+               "kombinacji (ta sama pogoda i awarie dla wszystkich – uczciwe porównanie) i ułoży ranking planów. "
+               "Strzały, kruszarki i koparki są takie, jak w zakładkach obok.")
+    goal = st.radio("Cel główny", list(GOALS), format_func=GOALS.get, key="goal_kind")
+    target_t, deadline = 0.0, None
+    if goal == "deadline":
+        c = st.columns(2)
+        target_t = c[0].number_input("Ile ton trzeba zrobić", 1000.0, 10_000_000.0, 100_000.0, 5000.0, key="goal_t")
+        last = plan.start + dt.timedelta(days=plan.days - 1)
+        deadline = c[1].date_input("Do kiedy", last, min_value=plan.start, max_value=last, key="goal_date",
+                                   format="DD.MM.YYYY")
+    st.markdown("**Co program może zmieniać:**")
+    c = st.columns(4)
+    n0 = int(sc.truck_count)
+    trucks = c[0].multiselect("Liczba wozideł", list(range(max(1, n0 - 4), n0 + 5)),
+                              [x for x in (n0 - 2, n0, n0 + 2) if x >= 1], key="goal_trucks")
+    shifts = c[1].multiselect("Zmian na dobę", [1, 2, 3], [plan.shifts_per_day], key="goal_shifts")
+    sats = c[2].multiselect("Soboty", ["bez sobót", "z sobotami"], ["z sobotami" if plan.saturdays else "bez sobót"],
+                            key="goal_sats")
+    disp = c[3].multiselect("Przydział wozideł", modes, [m for m in ("natural", "dynamic") if m in modes],
+                            format_func=lambda m: {"natural": "jak dziś", "dynamic": "system", "rl": "RL"}[m],
+                            key="goal_disp")
+    combos = len(trucks) * len(shifts) * len(sats) * len(disp)
+    per = max(1, plan.days * max(shifts or [1]) // 18)
+    st.caption(f"**{combos}** planów do policzenia · ok. {combos * per // 60} min {combos * per % 60} s")
+    if st.button("🎯 Dobierz plan", type="primary", disabled=combos == 0 or combos > 60, key="goal_run"):
+        bar = st.progress(0.0, "liczę plany…")
+        res = optimize_period(sc, plan, goal, trucks, shifts, [x == "z sobotami" for x in sats], disp,
+                              target_t, deadline, seed, progress=lambda i, k: bar.progress(i / k, f"plan {i} z {k}"))
+        bar.empty()
+        st.session_state.goal_res = (res, goal, target_t, deadline)
+    if combos > 60:
+        st.warning("Za dużo kombinacji (max 60) – zawęź wybór.")
+    if st.session_state.get("goal_res"):
+        _goal_results(*st.session_state.goal_res)
+
+
+def _goal_results(res: pd.DataFrame, goal: str, target_t: float, deadline) -> None:
+    labels = {"natural": "jak dziś", "dynamic": "system", "rl": "RL"}
+
+    def name(r) -> str:
+        return (f"{r['wozidla']} wozideł · {r['zmian_na_dobe']} zm./dobę · {'z sobotami' if r['soboty'] else 'bez sobót'}"
+                f" · przydział: {labels.get(r['przydzial'], r['przydzial'])}")
+    best = res.iloc[0]
+    ok = goal != "deadline" or (best["cel_osiagniety"] is not None and best["cel_osiagniety"] <= deadline)
+    def t(x) -> str:
+        return f"{x:,.0f}".replace(",", " ")
+    msg = f"**Najlepszy plan:** {name(best)} → **{t(best['wywiezione_t'])} t**, **{best['koszt_na_t']:.2f} zł/t**"
+    if goal == "deadline":
+        msg += (f", cel {t(target_t)} t osiągnięty **{best['cel_osiagniety'].strftime('%d.%m')}**" if ok else
+                f" – **celu nie da się zrobić do {deadline.strftime('%d.%m')}** w żadnym planie "
+                f"(najbliżej: {t(best['do_terminu_t'])} t)")
+    (st.success if ok else st.warning)(msg)
+    # what limits production: if very different fleets give (almost) the same tonnes, it's the material
+    top = res[(res["zmian_na_dobe"] == best["zmian_na_dobe"]) & (res["soboty"] == best["soboty"])]
+    if top["wozidla"].nunique() > 1 and top["wywiezione_t"].max() < 1.03 * top["wywiezione_t"].min():
+        st.info("💡 Przy tych samych zmianach różna liczba wozideł daje prawie tyle samo ton – **ograniczeniem jest "
+                "urobek (strzały), nie flota**. Więcej ton da częstszy / większy strzał albo nowe miejsce strzału, "
+                "a mniej wozideł obniży koszt.")
+    show = res.drop(columns=["_df", "_score"]).copy()
+    show["plan"] = [name(r) for _, r in res.iterrows()]
+    show["cel_osiagniety"] = show["cel_osiagniety"].map(lambda d: d.strftime("%d.%m") if d is not None else "–")
+    cols = ["miejsce", "plan", "wywiezione_t", "koszt_na_t", "koszt_zl", "zmian"] + \
+        (["do_terminu_t", "cel_osiagniety"] if goal == "deadline" else [])
+    st.dataframe(show[cols], hide_index=True, width="stretch",
+                 column_config={"wywiezione_t": st.column_config.NumberColumn("wywiezione [t]", format="%.0f"),
+                                "koszt_na_t": "zł/t", "koszt_zl": st.column_config.NumberColumn("koszt [zł]", format="%.0f"),
+                                "do_terminu_t": st.column_config.NumberColumn("do terminu [t]", format="%.0f"),
+                                "cel_osiagniety": "cel osiągnięty"})
+    fig = go.Figure()
+    for _, r in res.head(4).iterrows():
+        cum = r["_df"].groupby("data")["wywiezione_t"].sum().cumsum()
+        fig.add_scatter(x=list(cum.index), y=cum.values, mode="lines", name=f"#{r['miejsce']} {name(r)}")
+    if target_t:
+        fig.add_hline(y=target_t, line_dash="dash", line_color="#e63946", annotation_text="cel")
+    if deadline:
+        fig.add_vline(x=deadline, line_dash="dot", line_color="#e63946")
+    fig.update_layout(height=360, margin=dict(t=30, b=10), title="Tony narastająco – 4 najlepsze plany",
+                      legend=dict(orientation="h"))
+    st.plotly_chart(fig, width="stretch")
+    if st.button("✅ Ustaw najlepszy plan w kalendarzu", key="goal_apply"):
+        st.session_state.per_apply = {"per_trucks": int(best["wozidla"]), "per_shifts": int(best["zmian_na_dobe"]),
+                                      "per_sat": bool(best["soboty"]), "per_dispatch": best["przydzial"]}
+        st.rerun()
 
 
 def _blast_calendar(plan: PeriodPlan, sc) -> None:

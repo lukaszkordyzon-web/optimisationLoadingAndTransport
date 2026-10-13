@@ -67,3 +67,20 @@ def test_feed_shares_only_from_piles_that_can_be_loaded():
     assert later.str.contains("S-01").any()  # once blasted and worked, it gets its share
     s = summary(df, plan)
     assert abs(sum(s["udzialy_pct"].values()) - 100) < 0.5
+
+
+def test_goal_ranks_plans():
+    from kruszyk.period import optimize_period
+
+    sc = load_scenario(DEMO)
+    plan = PeriodPlan(start=dt.date(2026, 11, 2), days=4, blasts=[PileBlasts(b.id, b.tonnage_t, 2, 2) for b in sc.blasts])
+    cheap = optimize_period(sc, plan, "cheapest", [5, 9], [1, 2], [False], ["dynamic"], seed=1)
+    assert len(cheap) == 4 and list(cheap["koszt_na_t"]) == sorted(cheap["koszt_na_t"])
+    most = optimize_period(sc, plan, "max", [5, 9], [1, 2], [False], ["dynamic"], seed=1)
+    assert most["wywiezione_t"].iloc[0] == most["wywiezione_t"].max()
+    dl = optimize_period(sc, plan, "deadline", [5, 9], [1, 2], [False], ["dynamic"], target_t=20_000,
+                         deadline=dt.date(2026, 11, 5), seed=1)
+    best = dl.iloc[0]
+    assert best["cel_osiagniety"] is not None and best["cel_osiagniety"] <= dt.date(2026, 11, 5)
+    ok = dl[dl["cel_osiagniety"].notna()]
+    assert best["koszt_na_t"] == ok["koszt_na_t"].min()  # the cheapest of the plans that make it in time

@@ -229,3 +229,64 @@ def summary(df: pd.DataFrame, plan: PeriodPlan, crushers: list | None = None) ->
         "srednia_odchylka_skladu_pp": round(float((df["sklad_odchylka_pp"] * df["wywiezione_t"]).sum() / t), 1) if t else 0.0,
         "kruszarka_bez_nadawy_h": round(float(df["kruszarka_bez_nadawy_h"].sum()), 1),
     }
+
+
+# ---------------------------------------------------------------- main goal of the period: choose the plan
+GOALS = {
+    "cheapest": "💰 Najtańsza tona (najniższy koszt zł/t)",
+    "max": "🏭 Największa produkcja (najwięcej ton)",
+    "deadline": "🎯 X ton do dnia – najtaniej",
+}
+
+
+def plan_metrics(df: pd.DataFrame, target_t: float = 0.0, deadline: dt.date | None = None) -> dict:
+    """What a calculated period gives: tonnes, cost, and when the cumulative target is reached."""
+    t = float(df["wywiezione_t"].sum())
+    cost = float(df["koszt_zl"].sum())
+    out = {"wywiezione_t": round(t), "koszt_zl": round(cost), "koszt_na_t": round(cost / t, 2) if t else None,
+           "do_terminu_t": None, "cel_osiagniety": None}
+    if target_t:
+        cum = df.groupby("data")["wywiezione_t"].sum().cumsum()
+        hit = cum[cum >= target_t]
+        out["cel_osiagniety"] = hit.index[0] if len(hit) else None
+        if deadline:
+            out["do_terminu_t"] = round(float(cum[cum.index <= deadline].iloc[-1])) if (cum.index <= deadline).any() else 0
+    return out
+
+
+def score(m: dict, goal: str, target_t: float = 0.0, deadline: dt.date | None = None) -> tuple:
+    """Sort key: smaller = better."""
+    cpt = m["koszt_na_t"] if m["koszt_na_t"] is not None else 1e9
+    if goal == "cheapest":
+        return (cpt,)
+    if goal == "max":
+        return (-m["wywiezione_t"], cpt)
+    ok = m["cel_osiagniety"] is not None and (deadline is None or m["cel_osiagniety"] <= deadline)
+    # plans that make it in time first (cheapest of them), then the ones closest to the target
+    return (0, cpt) if ok else (1, -(m["do_terminu_t"] or m["wywiezione_t"]))
+
+
+def optimize_period(sc: Scenario, plan: PeriodPlan, goal: str, trucks: list[int], shifts: list[int],
+                    saturdays: list[bool], dispatches: list[str], target_t: float = 0.0,
+                    deadline: dt.date | None = None, seed: int = 0, progress=None) -> pd.DataFrame:
+    """Calculate the period for every combination of the levers (same weather and breakdowns for all –
+    common random numbers) and rank them by the main goal."""
+    import itertools
+
+    combos = list(itertools.product(trucks, shifts, saturdays, dispatches))
+    rows = []
+    for i, (n, sh, sat, disp) in enumerate(combos):
+        v = sc.with_truck_count(int(n))
+        v.dispatch = disp
+        p = copy.deepcopy(plan)
+        p.shifts_per_day, p.saturdays = int(sh), bool(sat)
+        df = run_period(v, p, seed=seed)
+        m = plan_metrics(df, target_t, deadline)
+        rows.append({"wozidla": int(n), "zmian_na_dobe": int(sh), "soboty": bool(sat), "przydzial": disp,
+                     "zmian": len(df), **m, "_df": df, "_score": score(m, goal, target_t, deadline)})
+        if progress:
+            progress(i + 1, len(combos))
+    rows.sort(key=lambda r: r["_score"])
+    out = pd.DataFrame(rows)
+    out.insert(0, "miejsce", range(1, len(out) + 1))
+    return out

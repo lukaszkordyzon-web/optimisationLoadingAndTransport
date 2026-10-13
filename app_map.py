@@ -1219,9 +1219,12 @@ def crushers_table(site: dict, raw: dict) -> None:
         if tgt is None:
             continue
         acc = [a for a in (r["accepts"] if isinstance(r["accepts"], list) else []) if a]
-        tgt.update({"product": str(r["product"] or ""), "target_t": float(r["target_t"] or 0.0), "accepts": acc})
-        if str(r["id"] or "").strip():
-            tgt["id"] = str(r["id"]).strip()
+        new = {"product": str(r["product"] or ""), "target_t": float(r["target_t"] or 0.0), "accepts": acc,
+               "id": str(r["id"] or "").strip() or tgt.get("id", "C-1")}
+        defaults = {"product": "", "target_t": 0.0, "accepts": [], "id": "C-1"}
+        for k_, v_ in new.items():  # only real changes (so a fresh mine doesn't look edited)
+            if tgt.get(k_, defaults[k_]) != v_:
+                tgt[k_] = v_
         if i == 0:  # the main crusher's parameters live in the scenario
             cr["capacity_tph"], cr["hopper_t"] = float(r["capacity_tph"]), float(r["hopper_t"])
         else:
