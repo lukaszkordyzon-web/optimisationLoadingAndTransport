@@ -200,6 +200,7 @@ class Blasting:
     evacuation_min: float = 10.0   # trucks must leave the pit this long before firing
     crew_leave: str = "11:40"
     retreat_m: float = 200.0       # without a parking marker the excavator backs off this far along its route
+    place: str = ""                # where today's blast is: id of a pile / area / planned blast on the map
 
 
 @dataclass

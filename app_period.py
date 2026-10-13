@@ -66,7 +66,7 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                         "module „Analiza zmiany” – widać, ile ton i złotych na okres daje wdrożenie.")
         else:
             compare_rl = False
-            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **Analiza zmiany → ④ Optymalizacja RL**, "
+            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **Analiza zmiany → ⑤ Optymalizacja RL**, "
                        "a tu zobaczysz, ile daje na cały okres.")
     st.caption("Baza harmonogramu: obecny sposób przydziału (wozidło wraca do przypisanej koparki)"
                + (" – obok to samo z systemem RL." if compare_rl else "."))
@@ -98,6 +98,10 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         target = c[4].number_input("Cel nadawy na okres [t] (0 = bez celu)", 0.0, 10_000_000.0, 0.0, 5000.0,
                                    key="per_target", help="ustawia się sam po zastosowaniu celu produkcyjnego")
         hol = st.text_input("Dni wolne (dd.mm, po przecinku)", "", key="per_hol", placeholder="np. 11.11, 24.12, 25.12")
+        with st.expander("🕐 Organizacja zmiany – godziny, przerwy, objazd, tankowanie, prędkości"):
+            from app_events import events_editor
+
+            events_editor(base_raw, "evp", [e.id for e in sc.excavators], sc.site, plan=True)
 
     with t_old:
         st.caption("Urobek, który leży dziś po wcześniejszych odstrzałach – wybiera się go do końca. Nowy urobek "

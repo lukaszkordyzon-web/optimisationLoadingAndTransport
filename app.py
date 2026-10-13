@@ -364,6 +364,13 @@ with tabs[2]:
             hide_index=True, width="stretch")
         st.download_button("💾 Pobierz scenariusz (YAML)", yaml_text, file_name="scenariusz.yaml")
 
+with tabs[2]:
+    from app_events import events_editor
+
+    with st.expander("🕐 Organizacja zmiany – godziny, przerwy, strzelanie, objazd, tankowanie, prędkości"):
+        # edits the scenario kept in the session: the next run's editor copy carries it
+        events_editor(st.session_state.raw, "eva", [e["id"] for e in raw.get("excavators", [])], raw.get("site"))
+
 with tabs[0]:
     render_map_tab(st.session_state.get("raw_edited", raw) if ok else raw, set_raw)
 

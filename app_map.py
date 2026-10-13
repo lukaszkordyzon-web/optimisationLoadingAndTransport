@@ -955,7 +955,7 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
     """Every truck as its own row with its own parameters; changes go straight to the scenario."""
     from kruszyk.config import expand_trucks
 
-    st.subheader("6. Wozidła")
+    st.subheader("5. Wozidła")
     st.caption("Każde wozidło osobno – z własną ładownością, masą, mocą, zużyciem paliwa i zbiornikiem. **W pracy** "
                "odznacz, gdy wozidło stoi (np. w remoncie). **Koparki**: do których może jeździć, np. `K-1, K-2` "
                "(puste = do wszystkich). Nowy wiersz = kopia ostatniego wozidła. Awaryjność każdego wozidła – w tabeli "
@@ -1542,14 +1542,10 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                 rows.append(row)
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
-    from app_events import events_editor
-
-    # always edits the scenario kept in the session (in the advanced mode raw_for_build is a per-run copy)
-    events_editor(st.session_state.raw, "ev", [e["id"] for e in site.get("excavators", [])], site, number="5")
     if simple:
         quick_fleet_crusher(raw_for_build, site)
 
-    st.subheader("7. Zapisz kopalnię" if simple else "6. Trasy z mapy → scenariusz")
+    st.subheader("6. Zapisz kopalnię" if simple else "5. Trasy z mapy → scenariusz")
     st.caption("Program wyznacza najkrótszą trasę od każdej koparki do kruszarki po narysowanych drogach, "
                "liczy długości i nachylenia odcinków. Po każdej zmianie na mapie kliknij przycisk ponownie.")
     if _plain(site) != _plain(raw_for_build.get("site") or {}) and (site.get("roads") or site.get("piles") or site.get("excavators")):
@@ -1567,7 +1563,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         except ValueError as e:
             c2.error(str(e))
     if st.session_state.pop("map_msg", None):
-        st.success("✅ Kopalnia zapisana. Przejdź do kroku **② Jak jest dziś**." if simple else
+        st.success("✅ Kopalnia zapisana. Dalej: **② Organizacja zmiany** i **③ Kalibracja**." if simple else
                    "Scenariusz zaktualizowany z mapy – zobacz zakładki „Scenariusz” i „Wyniki zmiany”.")
     if raw_for_build.get("site") and any("path" in r for r in raw_for_build["routes"].values()):
         rows = [{"trasa": rid, "odcinek": s["name"], "długość [m]": s["length_m"],

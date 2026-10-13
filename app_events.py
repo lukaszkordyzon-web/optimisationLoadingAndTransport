@@ -13,14 +13,66 @@ def _time(label: str, value: str, key: str, **kw) -> str:
     return t.strftime("%H:%M")
 
 
-def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict | None, number: str = "5") -> None:
-    """Edits raw['shift_plan'], ['blasting'], ['inspection'], ['refueling'], ['traffic'], ['variability'] in place."""
+def _blasting(raw: dict, site: dict | None, k) -> None:
+    """Today's blast: place, crew times, evacuation; how excavators get out of the way."""
+    bl = raw.setdefault("blasting", {})
+    c = st.columns([1, 2])
+    bl["enabled"] = c[0].toggle("Strzelanie na tej zmianie", bool(bl.get("enabled", False)), key=k("bl_en"))
+    places = {"": "– wybierz –"}
+    for group, label in (("piles", "usyp"), ("areas", "obszar"), ("planned_piles", "planowany strzał")):
+        for o in (site or {}).get(group, []):
+            if o.get("id") and len(o.get("polygon") or []) >= 3:
+                places[o["id"]] = f"{o['id']} ({label})"
+    cur = bl.get("place", "") if bl.get("place", "") in places else ""
+    bl["place"] = c[1].selectbox("Miejsce strzału", list(places), index=list(places).index(cur),
+                                 format_func=places.get, key=k("bl_pl"), disabled=not bl["enabled"],
+                                 help="tu jedzie ekipa strzałowa (po drogach); wozidła i koparki zjeżdżają")
+    if bl["enabled"] and not bl["place"]:
+        st.info("Wybierz miejsce strzału – bez niego ekipa nie jeździ po mapie, ale zamknięcie wyrobiska w podanych "
+                "godzinach i tak obowiązuje.")
+    c = st.columns(5)
+    with c[0]:
+        bl["crew_arrive"] = _time("Przyjazd ekipy", bl.get("crew_arrive", "09:00"), k("bl_a"))
+    with c[1]:
+        bl["fire_from"] = _time("Odpalenie od", bl.get("fire_from", "11:00"), k("bl_f"))
+    with c[2]:
+        bl["fire_to"] = _time("Odpalenie do (otwarcie)", bl.get("fire_to", "11:20"), k("bl_t"))
+    with c[3]:
+        bl["evacuation_min"] = st.number_input("Ewakuacja przed [min]", 0.0, 120.0, float(bl.get("evacuation_min", 10)),
+                                               5.0, key=k("bl_e"), help="tyle wcześniej wozidła i koparki muszą zjechać")
+    with c[4]:
+        bl["crew_leave"] = _time("Wyjazd ekipy", bl.get("crew_leave", "11:40"), k("bl_l"))
+    c = st.columns(2)
+    bl["retreat_m"] = c[0].number_input("Bez miejsca postoju koparka cofa się o [m]", 0.0, 2000.0,
+                                        float(bl.get("retreat_m", 200)), 50.0, key=k("bl_r"))
+    tr0 = raw.setdefault("traffic", {})
+    tr0["excavator_move_kmh"] = c[1].number_input("Prędkość przejazdu koparki [km/h]", 0.5, 15.0,
+                                                  float(tr0.get("excavator_move_kmh", 2.5)), 0.5, key=k("bl_v"))
+    st.caption("Koparka zjeżdża przed ewakuacją na **miejsce postoju** (znacznik 🅿️ na mapie, najkrótszą drogą) "
+               "i wraca po otwarciu – ten czas wydłuża jej postój. Ekipa, sztygar i cysterna jeżdżą po "
+               "narysowanych drogach (najkrótszą trasą).")
+    st.caption("Ekipa jedzie samochodem po drogach do miejsca strzelania. **Mijanie:** jadący w dół ustępuje "
+               "jadącemu w górę – gdy ekipa wyjeżdża pod górę, wozidło zjeżdżające w dół musi jej ustąpić. "
+               "Od „ewakuacji” do „otwarcia” żadne wozidło nie wjeżdża do wyrobiska, koparki stoją.")
+
+
+def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict | None, title: str | None = None,
+                  plan: bool = False) -> None:
+    """Edits raw['shift_plan'], ['blasting'], ['inspection'], ['refueling'], ['traffic'], ['variability'] in place.
+    `plan` – for the period: blasting comes from the blast plan (each blast its own times and place)."""
     ver = st.session_state.get("ver", 0)
     k = lambda name: f"{prefix}_{ver}_{name}"  # noqa: E731
-    st.subheader(f"{number}. Zmiana i zdarzenia")
+    if title:
+        st.markdown(f"### {title}")
     st.caption("Zmiana to nie 8 godzin wożenia: rozruch maszyn, przerwy, strzelanie, objazd sztygara, cysterna. "
-               "Wszystko to zabiera czas i zaburza ruch wozideł – tu to ustawiasz.")
-    tabs = st.tabs(["🕐 Zmiana", "🧨 Strzelanie", "👷 Objazd sztygara", "⛽ Tankowanie", "🚦 Prędkości i mijanie"])
+               "Wszystko to zabiera czas i zaburza ruch wozideł." + (" Dotyczy każdej zmiany okresu; godziny i miejsca "
+                                                                     "strzałów wynikają z planu strzałów." if plan else ""))
+    names = ["🕐 Godziny i przerwy", "🧨 Strzelanie", "👷 Objazd sztygara", "⛽ Tankowanie", "🚦 Prędkości i mijanie"]
+    if plan:
+        names.remove("🧨 Strzelanie")
+    tabs = dict(zip(names, st.tabs(names)))
+    tabs = [tabs.get(n) for n in ["🕐 Godziny i przerwy", "🧨 Strzelanie", "👷 Objazd sztygara", "⛽ Tankowanie",
+                                  "🚦 Prędkości i mijanie"]]
 
     with tabs[0]:
         sp = raw.setdefault("shift_plan", {})
@@ -44,39 +96,9 @@ def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict |
         sp["breaks"] = [{"start": str(r["start"]), "min": float(r["min"])} for _, r in ed.dropna().iterrows()
                         if ":" in str(r["start"])]
 
-    with tabs[1]:
-        bl = raw.setdefault("blasting", {})
-        bl["enabled"] = st.toggle("Strzelanie na tej zmianie", bool(bl.get("enabled", False)), key=k("bl_en"))
-        from kruszyk.site import blast_point
-
-        if not blast_point(site or {}):
-            st.info("Ekipa jedzie do najbliższego **planowanego odstrzału** (planuje się go w module „Planowanie produkcji”). "
-                    "Bez niego ekipa nie jeździ po mapie, ale zamknięcie wyrobiska w podanych godzinach i tak "
-                    "obowiązuje.")
-        c = st.columns(5)
-        with c[0]:
-            bl["crew_arrive"] = _time("Przyjazd ekipy", bl.get("crew_arrive", "09:00"), k("bl_a"))
-        with c[1]:
-            bl["fire_from"] = _time("Odpalenie od", bl.get("fire_from", "11:00"), k("bl_f"))
-        with c[2]:
-            bl["fire_to"] = _time("Odpalenie do (otwarcie)", bl.get("fire_to", "11:20"), k("bl_t"))
-        with c[3]:
-            bl["evacuation_min"] = st.number_input("Ewakuacja przed [min]", 0.0, 120.0, float(bl.get("evacuation_min", 10)),
-                                                   5.0, key=k("bl_e"), help="tyle wcześniej wozidła i koparki muszą zjechać")
-        with c[4]:
-            bl["crew_leave"] = _time("Wyjazd ekipy", bl.get("crew_leave", "11:40"), k("bl_l"))
-        c = st.columns(2)
-        bl["retreat_m"] = c[0].number_input("Bez miejsca postoju koparka cofa się o [m]", 0.0, 2000.0,
-                                            float(bl.get("retreat_m", 200)), 50.0, key=k("bl_r"))
-        tr0 = raw.setdefault("traffic", {})
-        tr0["excavator_move_kmh"] = c[1].number_input("Prędkość przejazdu koparki [km/h]", 0.5, 15.0,
-                                                      float(tr0.get("excavator_move_kmh", 2.5)), 0.5, key=k("bl_v"))
-        st.caption("Koparka zjeżdża przed ewakuacją na **miejsce postoju** (znacznik 🅿️ na mapie, najkrótszą drogą) "
-                   "i wraca po otwarciu – ten czas wydłuża jej postój. Ekipa, sztygar i cysterna jeżdżą po "
-                   "narysowanych drogach (najkrótszą trasą).")
-        st.caption("Ekipa jedzie samochodem po drogach do miejsca strzelania. **Mijanie:** jadący w dół ustępuje "
-                   "jadącemu w górę – gdy ekipa wyjeżdża pod górę, wozidło zjeżdżające w dół musi jej ustąpić. "
-                   "Od „ewakuacji” do „otwarcia” żadne wozidło nie wjeżdża do wyrobiska, koparki stoją.")
+    if tabs[1] is not None:  # one shift only; the period takes blasts from the plan
+        with tabs[1]:
+            _blasting(raw, site, k)
 
     with tabs[2]:
         ins = raw.setdefault("inspection", {})
@@ -95,11 +117,7 @@ def events_editor(raw: dict, prefix: str, excavator_ids: list[str], site: dict |
         st.markdown("**Wozidła** – zatankowane przed zmianą; w trakcie zjeżdżają na stację przy kruszarce, gdy "
                     "spadną do rezerwy (zużycie liczone z jazdy i postojów).")
         c = st.columns(3)
-        tank = c[0].number_input("Zbiornik wozidła [l]", 50.0, 5000.0,
-                                 float(next((f.get("tank_l") for f in raw.get("trucks", []) if f.get("tank_l")), 700)),
-                                 50.0, key=k("rf_tank"))
-        for f in raw.get("trucks", []):
-            f["tank_l"] = tank
+        c[0].caption("Pojemność zbiornika – przy każdym wozidle (tabela „Wozidła”).")
         rf["truck_reserve_pct"] = c[1].number_input("Rezerwa [%]", 0.0, 80.0, float(rf.get("truck_reserve_pct", 15)), 5.0,
                                                     key=k("rf_res"))
         rf["truck_refuel_min"] = c[2].number_input("Tankowanie wozidła [min]", 1.0, 60.0, float(rf.get("truck_refuel_min", 12)),

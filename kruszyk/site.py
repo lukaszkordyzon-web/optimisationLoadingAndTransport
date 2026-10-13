@@ -757,6 +757,10 @@ def blast_point(site: dict) -> tuple[float, float] | None:
     earliest day, otherwise the first extraction area."""
     if site.get("blast"):
         return (site["blast"]["lat"], site["blast"]["lon"])
+    if site.get("blast_place"):  # chosen for today's shift
+        for src in site.get("piles", []) + site.get("planned_piles", []) + site.get("areas", []):
+            if src.get("id") == site["blast_place"] and len(src.get("polygon") or []) >= 3:
+                return centroid(src["polygon"])
     planned = sorted(site.get("planned_piles", []), key=lambda p: int(p.get("blast_day") or 1))
     for src in planned + list(site.get("areas", [])):
         if len(src.get("polygon") or []) >= 3:

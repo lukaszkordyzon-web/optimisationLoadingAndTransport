@@ -28,11 +28,11 @@ def status_line(sc) -> None:
                    .replace(",", " "))
     else:
         st.warning("⚠️ Model nieskalibrowany – czasy, prędkości i przestoje to założenia, więc tony i koszty są "
-                   "poglądowe. Wpisz dane z prawdziwej zmiany: moduł **Analiza zmiany → ② Kalibracja**.")
+                   "poglądowe. Wpisz dane z prawdziwej zmiany: moduł **Analiza zmiany → ③ Kalibracja**.")
 
 
 def step_calibration(raw: dict, sc, set_raw) -> None:
-    st.markdown("### ② Kalibracja – model dopasowany do prawdziwej zmiany")
+    st.markdown("### ③ Kalibracja – model dopasowany do prawdziwej zmiany")
     st.markdown("Dziś model opiera się na **założeniach**. Wpisz, co zmierzyliście na jednej typowej zmianie. Program "
                 "dopasuje model tak, żeby „jak było dziś” dawało **te same tony i kursy**. Wtedy optymalizacja RL i "
                 "harmonogram liczą na **Waszej** kopalni, a nie na przykładzie. Wymagana jest tylko produkcja na "
@@ -85,7 +85,7 @@ def step_calibration(raw: dict, sc, set_raw) -> None:
         set_raw(raw)
         st.rerun()
     if raw.get("rl_weights"):
-        st.caption("Po zapisaniu warto ponownie nauczyć politykę RL (krok ④) – uczyła się na modelu z założeń.")
+        st.caption("Po zapisaniu warto ponownie nauczyć politykę RL (krok ⑤) – uczyła się na modelu z założeń.")
 
 
 def _explain(cal, payload_after=None, payload_before=None) -> None:

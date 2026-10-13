@@ -397,6 +397,8 @@ class Simulation:
         start = sc.shift_plan.start_time
         bl = sc.blasting
         site = sc.site or {}
+        if bl.place and site.get("blast_place") != bl.place:
+            site = dict(site, blast_place=bl.place)
         if bl.enabled and blast_point(site) and site.get("roads") and site.get("crusher"):
             from .config import _routes
             from .site import crew_route

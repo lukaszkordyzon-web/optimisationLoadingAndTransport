@@ -149,7 +149,7 @@ def _tiles(k: dict, ref: dict | None = None):
 
 # ---------------------------------------------------------------- the three steps
 def step_today(sc, yaml_text: str, seed: int, set_raw):
-    st.markdown("### ③ Jak było dziś")
+    st.markdown("### ④ Jak było dziś")
     st.markdown("Odtworzenie **jednej zmiany tak, jak pracujecie obecnie**: kierowca po wyładunku wraca do „swojej” "
                 "koparki, czasem jedzie gdzie indziej, nikt nie wie, gdzie jest kolejka. Do tego losowość: deszcz, "
                 "różni kierowcy, awarie, różne czasy załadunku.")
@@ -310,7 +310,7 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
         from app_events import events_editor
 
         events_editor(var, f"v{vv}", [e["id"] for e in (site or {}).get("excavators", [])] or
-                      [e["id"] for e in var.get("excavators", [])], site, number="•")
+                      [e["id"] for e in var.get("excavators", [])], site)
     c1, c2, _ = st.columns([1, 1, 2])
     cr = var.setdefault("crusher", {})
     cr["capacity_tph"] = c1.number_input("🏭 Kruszarka – wydajność [t/h]", 50.0, 10000.0, float(cr.get("capacity_tph", 1000)),
@@ -336,7 +336,7 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
 
 
 def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
-    st.markdown("### ④ Optymalizacja RL – zalecenia na żywo")
+    st.markdown("### ⑤ Optymalizacja RL – zalecenia na żywo")
     st.markdown(
         "Program **uczy się sam**, do której koparki wysyłać każde wozidło po wyładunku, żeby **koszt na tonę był jak "
         "najniższy**. Przy każdej decyzji patrzy na to, co system wie w tej chwili: gdzie jest kolejka, ile jest jazdy, "
@@ -477,24 +477,30 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
 
             step_period(raw, yaml_text, seed)
         return
-    st.markdown("**① Kopalnia dziś → ② Kalibracja** (model dopasowany do rzeczywistej zmiany) **→ ③ Jak było "
-                "dziś** (odtworzenie zmiany – docelowo z danych telemetrycznych) **→ ④ Optymalizacja RL** – nauczona "
-                "polityka przydziału i komunikaty dla operatorów. Pełne parametry: **Tryb zaawansowany** (panel boczny).")
-    tabs = st.tabs(["① Kopalnia dziś", "② Kalibracja", "③ Jak było dziś", "④ Optymalizacja RL"])
+    st.markdown("**① Kopalnia dziś → ② Organizacja zmiany** (godziny, przerwy, strzelanie, objazd, tankowanie) **→ ③ "
+                "Kalibracja** (model dopasowany do rzeczywistej zmiany) **→ ④ Jak było dziś** (odtworzenie zmiany – "
+                "docelowo z danych telemetrycznych) **→ ⑤ Optymalizacja RL** – nauczona polityka przydziału i komunikaty "
+                "dla operatorów. Pełne parametry: **Tryb zaawansowany** (panel boczny).")
+    tabs = st.tabs(["① Kopalnia dziś", "② Organizacja zmiany", "③ Kalibracja", "④ Jak było dziś", "⑤ Optymalizacja RL"])
     with tabs[0]:
         render_map_tab(raw, set_raw, simple=True, schedule=False)
     with tabs[1]:
+        from app_events import events_editor
+
+        events_editor(raw, "ev", [e["id"] for e in (raw.get("site") or {}).get("excavators", [])]
+                      or [e["id"] for e in raw.get("excavators", [])], raw.get("site"), "② Organizacja zmiany")
+    with tabs[2]:
         from app_calibration import reliability_editor, step_calibration
 
         step_calibration(raw, sc, set_raw)
         if sc is not None:
             st.divider()
             reliability_editor(raw, sc, "rel_day")
-    with tabs[2]:
+    with tabs[3]:
         if sc is None:
             st.info(f"Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia** ({msg}) – albo wczytaj przykład.")
             _demo_button(set_raw, "demo_today")
         else:
             step_today(sc, yaml_text, seed, set_raw)
-    with tabs[3]:
+    with tabs[4]:
         step_optimize(raw, yaml_text, seed)
