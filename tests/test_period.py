@@ -128,3 +128,21 @@ def test_drilling_limits_blasts():
             assert b["strzal"] in drilled and drilled[b["strzal"]]["data"] <= b["data"]
     # metres: 20 000 t / 50 t/mb = 400 m -> at 60 m per shift a strip takes ~7 shifts
     assert (slow["wiercenie"] != "").sum() >= 6
+
+
+def test_lower_bench_waits_for_the_upper_bench():
+    sc = load_scenario(DEMO)
+    sc.planned_blasts = []
+    up = sc.areas[0]
+    up["level_m"] = -50.0
+    low = dict(up, id="O2", level_m=-65.0, reserves_t=40000,
+               polygon=[[c[0] - 0.0002, c[1]] for c in up["polygon"]])  # right below the upper area
+    far = dict(up, id="O3", level_m=-65.0, reserves_t=40000,
+               polygon=[[c[0] - 0.003, c[1]] for c in up["polygon"]])  # 300 m away: no constraint
+    sc.areas += [low, far]
+    df = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=7, lead_m=30), seed=1)
+    fired = [b["strzal"] for b in df.attrs["blasts"]]
+    assert "O3/1" in fired and "O2/1" not in fired
+    assert any("O2/1" in w for w in df.attrs["waits"])
+    free = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=7, lead_m=0), seed=1)
+    assert "O2/1" in [b["strzal"] for b in free.attrs["blasts"]] or len(free.attrs["waits"]) < len(df.attrs["waits"])

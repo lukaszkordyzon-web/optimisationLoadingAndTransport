@@ -571,6 +571,13 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
         new["planned_blasts"].append(pb)
     new["areas"] = [{k: v for k, v in a.items() if k != "uid"} for a in site.get("areas", [])
                     if len(a.get("polygon") or []) >= 3 and a.get("active", True)]
+    if any(a.get("level_m") is None for a in new["areas"]):
+        info = analyze_site(site)  # level not given: elevation of the nearest road node (crusher + road grades)
+        g, elev = info.get("graph"), info.get("elev") or {}
+        for a in new["areas"]:
+            if a.get("level_m") is None and g is not None and elev:
+                c = centroid(a["polygon"])
+                a["level_m"] = round(float(elev[min(elev, key=lambda i: haversine_m(g.nodes[i], c))]), 1)
     # crushers: the main one keeps its parameters from the scenario; more crushers come from the map
     main = site.get("crusher") or {}
     new["crusher"] = {**raw.get("crusher", {}), "id": main.get("id") or raw.get("crusher", {}).get("id") or "C-1",
@@ -807,3 +814,36 @@ def area_strips(site: dict, polygon: list, n: int) -> list[list]:
         if d(strips[-1]) < d(strips[0]):
             strips.reverse()
     return strips
+
+
+def poly_distance_m(a: list, b: list) -> float:
+    """Shortest distance between two polygons [m]; 0 when they touch or overlap."""
+    lat0, lon0 = centroid(a)
+    k = math.cos(math.radians(lat0))
+    xy = lambda c: (math.radians(c[1] - lon0) * R_EARTH * k, math.radians(c[0] - lat0) * R_EARTH)  # noqa: E731
+    pa, pb = [xy(c) for c in a], [xy(c) for c in b]
+
+    def inside(p, poly):
+        x, y, hit = p[0], p[1], False
+        for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+            if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+                hit = not hit
+        return hit
+
+    def seg_dist(p, a_, b_):
+        dx, dy = b_[0] - a_[0], b_[1] - a_[1]
+        L2 = dx * dx + dy * dy
+        t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((p[0] - a_[0]) * dx + (p[1] - a_[1]) * dy) / L2))
+        return math.hypot(p[0] - a_[0] - t * dx, p[1] - a_[1] - t * dy)
+
+    def cross(p1, p2, q1, q2):
+        def o(a_, b_, c_):
+            return (b_[0] - a_[0]) * (c_[1] - a_[1]) - (b_[1] - a_[1]) * (c_[0] - a_[0])
+        return o(p1, p2, q1) * o(p1, p2, q2) < 0 and o(q1, q2, p1) * o(q1, q2, p2) < 0
+
+    if any(inside(p, pb) for p in pa) or any(inside(p, pa) for p in pb):
+        return 0.0
+    ea, eb = list(zip(pa, pa[1:] + pa[:1])), list(zip(pb, pb[1:] + pb[:1]))
+    if any(cross(*e1, *e2) for e1 in ea for e2 in eb):
+        return 0.0
+    return min(min(seg_dist(p, *e) for p in pa for e in eb), min(seg_dist(p, *e) for p in pb for e in ea))

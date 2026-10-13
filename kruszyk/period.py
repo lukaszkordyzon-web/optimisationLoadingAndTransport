@@ -19,7 +19,7 @@ import pandas as pd
 
 from .config import Scenario, _routes
 from .sim import simulate
-from .site import BLAST_TIMES, _crusher_routes, area_strips, build_route, centroid, loading_point
+from .site import BLAST_TIMES, _crusher_routes, area_strips, build_route, centroid, loading_point, poly_distance_m
 
 WEEKDAYS = ["pon", "wt", "śr", "czw", "pt", "sob", "nd"]
 
@@ -52,6 +52,7 @@ class PeriodPlan:
     drill_m_per_shift: float = 250.0  # drilling output of one rig per shift [m]
     clear_pct: float = 10.0           # the next strip of an area can be drilled when ≤ this % of the previous blast is left
     t_per_m: float = 50.0             # default tonnes per metre drilled (when a blast / area has none)
+    lead_m: float = 30.0              # a lower bench is blasted only this far behind the upper bench face
 
     def working_days(self) -> list[dt.date]:
         out = []
@@ -125,6 +126,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
         areas.append({"cfg": a, "reserve": reserve, "strips": strips, "next": 0, "last_day": -10_000})
     blast_log: list[dict] = []
     warnings: list[str] = []
+    waits: dict[str, str] = {}  # blast -> why it is held back by the bench order (latest reason)
     # drilling jobs: blast id -> metres to drill / drilled; rigs move between them
     drilling = plan.drills > 0
     jobs: dict[str, dict] = {}
@@ -157,6 +159,24 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
         jobs[pid] = {"m": m, "done": m if not drilling or first_ready else 0.0, "poly": ar["strips"][ar["next"]],
                      "prio": (1, ar["next"])}
         return pid
+
+    def taken_out(pid: str) -> bool:
+        return pid in planned and left.get(pid, 0.0) <= plan.clear_pct / 100 * float(planned[pid]["tonnage_t"])
+
+    def front_ok(ar) -> str | None:
+        """Benches: the next strip of a lower area may be blasted only when every part of a HIGHER area closer
+        than the minimum lead is already blasted and taken out. Returns the blocking area, or None."""
+        level = float(ar["cfg"].get("level_m") or 0.0)
+        strip = ar["strips"][ar["next"]]
+        for up in areas:
+            if up is ar or float(up["cfg"].get("level_m") or 0.0) <= level + 0.5:
+                continue
+            uid = up["cfg"]["id"]
+            for k, poly in enumerate(up["strips"]):
+                done = k < up["next"] and taken_out(f"{uid}/{k + 1}")
+                if not done and poly_distance_m(strip, poly) < plan.lead_m:
+                    return f"{uid}/{k + 1}"
+        return None
 
     def ready(pid: str) -> bool:
         return pid in jobs and jobs[pid]["done"] >= jobs[pid]["m"] - 1e-6
@@ -253,6 +273,13 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                     pid = area_job(ar)
                     if pid is None or not ready(pid):
                         break  # the strip is not drilled yet (or the previous blast is not taken out)
+                    blocker = front_ok(ar)
+                    if not blocker:
+                        waits.pop(pid, None)
+                    if blocker:
+                        waits[pid] = (f"{day.strftime('%d.%m')}: strzał {pid} czeka na wyprzedzenie frontu – najpierw "
+                                      f"{blocker} na wyższym poziomie (min. {plan.lead_m:.0f} m)")
+                        break
                     need = max(0, need - 1)
                     fired.add(pid)
                     self_blast(ar, a)
@@ -357,6 +384,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
     df.attrs["blasts"] = blast_log
     df.attrs["drilling"] = drill_log
     df.attrs["warnings"] = sorted(set(warnings))
+    df.attrs["waits"] = [waits[k] for k in sorted(waits)]
     return df
 
 

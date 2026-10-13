@@ -252,6 +252,8 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
         if not a.get("id") or a["id"] in ids:
             a["id"] = next(f"O{i}" for i in range(1, 1000) if f"O{i}" not in ids)
         poly = _latlon(g["coordinates"][0][:-1])
+        if a.get("level_m") is None:
+            a["level_m"] = level_at(site, centroid(poly))
         if not a.get("reserves_t"):
             a["reserves_t"] = round(polygon_area_m2(poly) * float(a.get("bench_m", 15)) * float(a.get("solid_density_t_m3", 2.6)), -2)
         site["areas"].append({**a, "polygon": poly})
@@ -645,6 +647,16 @@ def edit_panel(site: dict) -> None:
             st.rerun()
 
 
+def level_at(site: dict, point) -> float:
+    """Elevation of the road network next to a point (from the grades of the drawn roads)."""
+    info = analyze_site(site)
+    g, elev = info.get("graph"), info.get("elev") or {}
+    if g is None or not elev:
+        return 0.0
+    n = min(elev, key=lambda i: haversine_m(g.nodes[i], point))
+    return round(float(elev[n]), 1)
+
+
 def set_dig_path(ex: dict, coords: list, attrs: dict | None = None) -> None:
     """Digging line of an excavator: starts at the end nearer to the excavator, which is moved there."""
     pos = (ex["lat"], ex["lon"])
@@ -944,6 +956,10 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             attrs["psd"], attrs["loose_density_t_m3"] = PRESETS[preset], 1.75
             attrs["reserves_t"] = st.number_input("Zasoby w obszarze [t] (0 = policz z powierzchni)", 0.0, 50_000_000.0,
                                                   0.0, 10_000.0, key="ar_res")
+            attrs["level_m"] = st.number_input("Poziom – rzędna [m] (puste = odczytaj z dróg)", -2000.0, 3000.0,
+                                               value=None, step=1.0, key="ar_lvl",
+                                               help="piętro obszaru; strzały na niższym poziomie czekają na wyprzedzenie "
+                                                    "frontu wyższego poziomu")
             c = st.columns(2)
             attrs["bench_m"] = c[0].number_input("Wysokość piętra [m]", 1.0, 50.0, 15.0, 1.0, key="ar_h")
             attrs["solid_density_t_m3"] = c[1].number_input("Gęstość w caliźnie [t/m³]", 1.5, 3.5, 2.6, 0.05, key="ar_d")
@@ -1163,14 +1179,16 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             st.markdown("**🟧 Obszary wydobycia** – program sam ustala terminy strzałów (krok „🗓️ Harmonogram”).")
             if site.get("areas"):
                 object_table(site, "areas", lambda: pd.DataFrame(
-                    [{"id": a["id"], "material": a.get("material", ""), "reserves_t": a.get("reserves_t", 0.0),
+                    [{"id": a["id"], "level_m": a.get("level_m"), "material": a.get("material", ""),
+                  "reserves_t": a.get("reserves_t", 0.0),
                       "blast_max_t": a.get("blast_max_t", 20000.0), "reblast_below_t": a.get("reblast_below_t", 0.0),
                       "min_gap_days": int(a.get("min_gap_days", 1)), "max_per_day": int(a.get("max_per_day", 1)),
                       "target_share": a.get("target_share"), "t_per_m": a.get("t_per_m", 50.0),
                       "first_drilled": bool(a.get("first_drilled", True)), **{k: a.get(k) for k in TIME_COLS},
                       "pow. [m²]": round(polygon_area_m2(a["polygon"]))} for a in site["areas"]]),
-                    extra=("target_share", "t_per_m", "first_drilled"), disabled=["pow. [m²]"],
+                    extra=("target_share", "t_per_m", "first_drilled", "level_m"), disabled=["pow. [m²]"],
                     column_config={"id": "obszar", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
+                                   "level_m": st.column_config.NumberColumn("poziom [m]", help="rzędna piętra"),
                                    "reserves_t": st.column_config.NumberColumn("zasoby [t]", min_value=0.0),
                                    "blast_max_t": st.column_config.NumberColumn("największy strzał [t]", min_value=1000.0),
                                    "reblast_below_t": st.column_config.NumberColumn("strzelaj poniżej [t]", min_value=0.0),

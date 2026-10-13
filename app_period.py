@@ -96,13 +96,15 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
             akey = f"per_areas__{hashlib.md5(repr([(a['id'], a.get('reserves_t'), a.get('blast_max_t')) for a in sc.areas]).encode()).hexdigest()}"
             if akey not in st.session_state:
                 st.session_state[akey] = pd.DataFrame([{
-                    "obszar": a["id"], "material": a.get("material", ""), "zasoby_t": float(a.get("reserves_t") or 0),
+                    "obszar": a["id"], "poziom": a.get("level_m"), "material": a.get("material", ""),
+                    "zasoby_t": float(a.get("reserves_t") or 0),
                     "max_t": float(a.get("blast_max_t") or 20000), "ponizej_t": float(a.get("reblast_below_t") or 0),
                     "odstep": int(a.get("min_gap_days") or 1), "dziennie": int(a.get("max_per_day") or 1),
                     "udzial": a.get("target_share"), "tpm": float(a.get("t_per_m") or 50.0)} for a in sc.areas])
             aed = st.data_editor(st.session_state[akey], key=akey + "_ed", hide_index=True, width="stretch",
                                  disabled=["obszar", "material"],
                                  column_config={"obszar": "obszar", "material": "materiał",
+                                                "poziom": st.column_config.NumberColumn("poziom [m]"),
                                                 "zasoby_t": st.column_config.NumberColumn("zasoby [t]", min_value=0.0),
                                                 "max_t": st.column_config.NumberColumn("największy strzał [t]", min_value=1000.0),
                                                 "ponizej_t": st.column_config.NumberColumn("strzelaj poniżej [t]", min_value=0.0),
@@ -115,7 +117,11 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                 a.update({"reserves_t": float(r["zasoby_t"] or 0), "blast_max_t": float(r["max_t"] or 20000),
                           "reblast_below_t": float(r["ponizej_t"] or 0), "min_gap_days": int(r["odstep"] or 1),
                           "max_per_day": int(r["dziennie"] or 1), "t_per_m": float(r["tpm"] or 50.0),
+                          "level_m": None if pd.isna(r["poziom"]) else float(r["poziom"]),
                           "target_share": None if pd.isna(r["udzial"]) or not r["udzial"] else float(r["udzial"])})
+            lead = st.number_input("Minimalne wyprzedzenie frontu piętra wyższego [m]", 0.0, 500.0, 30.0, 5.0, key="per_lead",
+                                   help="strzał na niższym poziomie dopiero, gdy wszystko z wyższego poziomu bliżej niż "
+                                        "ta odległość jest już odstrzelone i odebrane")
             st.caption("Program dzieli obszar na pasy (od strony drogi) wielkości największego strzału. Strzela, gdy "
                        "urobku z obszaru zostaje mniej niż próg albo koparki nie mają co ładować – z zachowaniem "
                        "odstępu i limitu dziennego. Godziny strzału – z obszaru (ustawiasz na mapie).")
@@ -171,7 +177,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                          None if pd.isna(r["udzial"]) or not r["udzial"] else float(r["udzial"]))
                               for _, r in ed.iterrows()],
                       move_excavators=move, move_setup_min=float(setup), drills=int(drills),
-                      drill_m_per_shift=float(d_m), drill_speed_kmh=float(d_v), clear_pct=float(clear), t_per_m=float(tpm))
+                      drill_m_per_shift=float(d_m), drill_speed_kmh=float(d_v), clear_pct=float(clear), t_per_m=float(tpm),
+                      lead_m=float(st.session_state.get("per_lead", 30.0)))
     with t_cal:
         _blast_calendar(plan, sc)
     n = len(plan.shifts())
@@ -196,6 +203,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
 def _blast_schedule(meta: dict, sc) -> None:
     """Blasts fired in the period (planned + generated in extraction areas): table and map."""
     blasts = meta.get("blasts", [])
+    for w in meta.get("waits", []):
+        st.info("⛰️ " + w)
     if not blasts:
         st.caption("W okresie nie było strzałów w nowych miejscach (obszary / planowane strzały).")
         return
