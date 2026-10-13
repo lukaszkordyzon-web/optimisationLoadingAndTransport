@@ -258,10 +258,10 @@ def _chance_section(sc, plan: PeriodPlan, seed: int, key: str) -> None:
                             help="model z jednej zmiany też nie jest pewny – każdy przebieg dostaje trochę inne czasy "
                                  "i przestoje (±5 %, przestoje ±10 %)")
     per = max(1, len(plan.shifts()) // 4)
-    import os
+    from kruszyk.montecarlo import safe_workers
 
-    c[2].caption(f"ok. {max(1, n * per // max(1, os.cpu_count() or 1) // 60)} min "
-                 f"{n * per // max(1, os.cpu_count() or 1) % 60} s · cel nadawy: "
+    w = safe_workers()
+    c[2].caption(f"ok. {n * per // w // 60} min {n * per // w % 60} s ({w} równolegle) · cel nadawy: "
                  + (f"**{target:,.0f} t**".replace(",", " ") if target else "brak – ustaw w kalendarzu lub z celu produkcyjnego"))
     mc_key = repr((key, n, model_unc, gp.total_t if gp else None))
     if st.button("🎲 Policz szansę realizacji", key="mc_go", disabled=not plan.shifts()):

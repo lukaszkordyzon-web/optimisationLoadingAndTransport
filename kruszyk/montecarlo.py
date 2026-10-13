@@ -31,11 +31,50 @@ def _one(args) -> pd.DataFrame:
     return run_period(sc, plan, seed=seed)
 
 
+WORKER_MB = 450   # one worker process: Python + numpy/pandas/simpy + a period run
+MAX_WORKERS = 4
+
+
+def _read(path: str) -> str | None:
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def safe_workers() -> int:
+    """Worker processes this container can afford – CPUs it may use and the memory it has left.
+    Hosted servers (e.g. Streamlit Community Cloud) report the host's cores but give the app ~1–3 GB: too many
+    processes and the whole app is killed. Override with KRUSZYK_WORKERS."""
+    if os.environ.get("KRUSZYK_WORKERS"):
+        return max(1, int(os.environ["KRUSZYK_WORKERS"]))
+    try:
+        cpus = len(os.sched_getaffinity(0))
+    except AttributeError:
+        cpus = os.cpu_count() or 1
+    quota = _read("/sys/fs/cgroup/cpu.max")  # "max 100000" or "200000 100000"
+    if quota and not quota.startswith("max"):
+        q, per = quota.split()[:2]
+        cpus = min(cpus, max(1, int(int(q) / int(per))))
+    free_mb = None
+    limit = _read("/sys/fs/cgroup/memory.max") or _read("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+    used = _read("/sys/fs/cgroup/memory.current") or _read("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+    if limit and limit != "max" and used and int(limit) < 1 << 50:
+        free_mb = (int(limit) - int(used)) / 2**20
+    if free_mb is None:
+        info = _read("/proc/meminfo") or ""
+        avail = next((line.split()[1] for line in info.splitlines() if line.startswith("MemAvailable")), None)
+        free_mb = int(avail) / 1024 if avail else 0.0
+    by_memory = int(free_mb // WORKER_MB) - 1  # keep one share for the app itself
+    return max(1, min(cpus, by_memory, MAX_WORKERS))
+
+
 def run_many(sc: Scenario, plan: PeriodPlan, n: int = 20, seed: int = 0, model_sd: float = 0.0,
              progress=None, workers: int | None = None) -> list[pd.DataFrame]:
     """`n` independent runs of the period. Uses the CPU cores when it can, one after another otherwise."""
     jobs = [(sc, plan, seed + SEED_STEP * (k + 1), model_sd) for k in range(n)]
-    workers = workers if workers is not None else min(n, os.cpu_count() or 1)
+    workers = workers if workers is not None else min(n, safe_workers())
     out: list[pd.DataFrame] = []
     if workers > 1:
         try:
