@@ -545,7 +545,7 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
         pb = {"id": p["id"], "tonnage_t": float(p.get("tonnage_t", 0)), "material": p.get("material", ""),
               "blast_day": int(p.get("blast_day") or 1), "route": rid,
               "fragmentation": float(p.get("fragmentation", 0.3))}
-        for key in ("psd", "loose_density_t_m3"):
+        for key in ("psd", "loose_density_t_m3", "target_share"):
             if p.get(key):
                 pb[key] = p[key]
         new["planned_blasts"].append(pb)

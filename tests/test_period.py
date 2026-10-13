@@ -52,3 +52,18 @@ def test_planned_blasts_appear_and_idle_excavators_move_there():
     still = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=7, shifts_per_day=2, move_excavators=False), seed=1)
     assert (still["przejazdy_koparek"] == "").all() and still["z_S-01_t"].sum() == 0
     assert df["wywiezione_t"].sum() > still["wywiezione_t"].sum()
+
+
+def test_feed_shares_only_from_piles_that_can_be_loaded():
+    sc = load_scenario(DEMO)
+    for p in sc.planned_blasts:
+        p["target_share"] = 25.0
+    plan = PeriodPlan(start=dt.date(2026, 11, 2), days=7, shifts_per_day=2,
+                      blasts=[PileBlasts("U-01", 9000, every_days=3, first_day=2, share=50.0)])
+    df = run_period(sc, plan, seed=1)
+    first = df["sklad_cel"].iloc[0]
+    assert "U-01 46%" in first and "S-01" not in first  # S-01 not blasted yet -> not in the target mix
+    later = df.loc[df["koparki_na"].str.contains("S-01"), "sklad_cel"]
+    assert later.str.contains("S-01").any()  # once blasted and worked, it gets its share
+    s = summary(df, plan)
+    assert abs(sum(s["udzialy_pct"].values()) - 100) < 0.5

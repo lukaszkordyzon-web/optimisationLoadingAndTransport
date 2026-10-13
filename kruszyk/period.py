@@ -29,6 +29,7 @@ class PileBlasts:
     tonnage_t: float
     every_days: int = 0  # 0 = no blasts in the period (only what is in the pile now)
     first_day: int = 1
+    share: float | None = None  # desired share of the crusher feed from this pile [%] (None = no target)
 
 
 @dataclass
@@ -88,6 +89,10 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
     blasts = {b.pile: b for b in plan.blasts}
     first_start = sc.shift_plan.start_time
     move_kmh = sc.traffic.excavator_move_kmh
+    # feed mix targets: the period plan overrides the shares of the existing piles, planned blasts bring their own
+    share = {b.id: b.target_share for b in sc.blasts}
+    share |= {b.pile: b.share for b in plan.blasts if b.pile in share}
+    share |= {pid: p.get("target_share") for pid, p in planned.items()}
     rows = []
     for i, (day, wd, shift_no) in enumerate(shifts):
         blasted = {}
@@ -126,6 +131,10 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             v.blasts.append(Blast(id=pid, tonnage_t=max(left[pid], 0.0), fragmentation=float(p.get("fragmentation", 0.3)),
                                   material=p.get("material", ""), loose_density_t_m3=p.get("loose_density_t_m3"),
                                   psd=p.get("psd")))
+        # only piles that can be loaded this shift take part in the feed mix (shares are renormalised)
+        worked = {ex_pile[x] for x in ex_pile if left[ex_pile[x]] >= MIN_PILE_T}
+        for b in v.blasts:
+            b.target_share = share.get(b.id) if b.id in worked and share.get(b.id) else None
         v.stockpile.initial_t = stock
         v.blasting.enabled = bool(sc.blasting.enabled and blasted)
         v.shift_plan.start_time = _shift_start(first_start, shift_no, sc.shift_hours)
@@ -164,6 +173,9 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             "przejazdy_koparek": ", ".join(moves),
             "koparki_na": ", ".join(f"{x}:{ex_pile[x]}" for x in ex_pile),
             "skonczyl_sie_urobek": ", ".join(idle_empty),
+            "sklad_cel": ", ".join(f"{b} {t:.0f}%" for b, t in (k.get("feed_target") or {}).items() if t > 0),
+            "sklad": ", ".join(f"{b} {t:.0f}%" for b, t in (k.get("feed_share") or {}).items() if t > 0),
+            "sklad_odchylka_pp": k.get("feed_dev_pp", 0.0),
             **{f"zostalo_{p}_t": round(left[p]) for p in left},
             **{f"z_{p}_t": round(float(loaded.get(p, 0.0))) for p in left},
             "halda_t": round(stock),
@@ -171,6 +183,13 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
         if progress:
             progress(i + 1, len(shifts))
     return pd.DataFrame(rows)
+
+
+def _shares(df: pd.DataFrame) -> dict:
+    """Share of every pile in the material loaded over the period [%]."""
+    cols = [c for c in df.columns if c.startswith("z_") and c.endswith("_t") and df[c].sum() > 0]
+    total = float(sum(df[c].sum() for c in cols))
+    return {c[2:-2]: round(100 * float(df[c].sum()) / total, 1) for c in cols} if total else {}
 
 
 def summary(df: pd.DataFrame, plan: PeriodPlan) -> dict:
@@ -184,5 +203,7 @@ def summary(df: pd.DataFrame, plan: PeriodPlan) -> dict:
         "srednio_na_zmiane_t": round(t / len(df)),
         "cel_t": plan.target_t, "realizacja_celu_pct": round(100 * t / plan.target_t, 1) if plan.target_t else None,
         "zmian_bez_urobku": int((df["skonczyl_sie_urobek"] != "").sum()),
+        "udzialy_pct": _shares(df),
+        "srednia_odchylka_skladu_pp": round(float((df["sklad_odchylka_pp"] * df["wywiezione_t"]).sum() / t), 1) if t else 0.0,
         "kruszarka_bez_nadawy_h": round(float(df["kruszarka_bez_nadawy_h"].sum()), 1),
     }

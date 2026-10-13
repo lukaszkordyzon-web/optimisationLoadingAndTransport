@@ -71,10 +71,10 @@ site["passing_bays"] = [{"id": "M1", "lat": MID[0], "lon": MID[1]},
                         {"id": "M2", "lat": MID[0] + 0.5 * (B[0] - MID[0]), "lon": MID[1] + 0.5 * (B[1] - MID[1])}]
 # next blasts in new places (used by the week / month run): next to U-01 and west of U-03
 site["planned_piles"] = [
-    {"id": "S-01", "material": "wapień", "tonnage_t": 15000, "blast_day": 2, "psd": PRESETS["średnie"],
+    {"id": "S-01", "material": "wapień", "tonnage_t": 15000, "blast_day": 2, "target_share": 35, "psd": PRESETS["średnie"],
      "loose_density_t_m3": 1.75,
      "polygon": [[49.99420, 20.0250], [49.99420, 20.0261], [49.99372, 20.0261], [49.99372, 20.0250]]},
-    {"id": "S-02", "material": "wapień", "tonnage_t": 12000, "blast_day": 4, "psd": PRESETS["średnie"],
+    {"id": "S-02", "material": "wapień", "tonnage_t": 12000, "blast_day": 4, "target_share": 30, "psd": PRESETS["średnie"],
      "loose_density_t_m3": 1.75,
      "polygon": [[49.99640, 20.0064], [49.99640, 20.0076], [49.99595, 20.0076], [49.99595, 20.0064]]},
 ]

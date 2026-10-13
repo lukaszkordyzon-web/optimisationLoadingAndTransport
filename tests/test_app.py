@@ -32,8 +32,13 @@ def test_every_preset_loads():
 def test_switching_draw_mode_keeps_map():
     at = advanced_app()
     key_before = at.session_state["map_key"]
-    for mode in ["Usyp (materiał)", "Koparka", "Kruszarka", "Droga / rampa"]:
-        at.radio(key="draw_mode").set_value(mode).run()
+    for group, mode in [("⛏️ Urobek i koparki", "Usyp (materiał)"), ("⛏️ Urobek i koparki", "Koparka"),
+                        ("🛣️ Drogi", "Kruszarka"), ("🛣️ Drogi", "Droga / rampa"), ("📅 Plan strzałów", None),
+                        ("🧨 Strzelanie i objazdy", "Trasa dedykowana")]:
+        at.radio(key="draw_group").set_value(group).run()
+        if mode:
+            gi = ["🛣️ Drogi", "⛏️ Urobek i koparki", "🧨 Strzelanie i objazdy"].index(group)
+            at.radio(key=f"draw_mode_{gi}").set_value(mode).run()
         assert not at.exception, (mode, at.exception)
         assert at.session_state["map_key"] == key_before  # map not rebuilt
 
@@ -124,7 +129,7 @@ def test_map_edit_mode_select_and_delete():
     name = next(o for o in at.sidebar.selectbox[0].options if "mapa demo" in o)
     at.sidebar.selectbox[0].select(name).run()
     at.sidebar.button[0].click().run()
-    at.radio(key="draw_mode").set_value("✏️ Edytuj / przesuń / usuń").run()
+    at.radio(key="draw_group").set_value("✏️ Edycja").run()
     assert not at.exception, at.exception
     site = at.session_state["site"]
     ex = site["excavators"][0]

@@ -1799,6 +1799,7 @@ planned_blasts:
   - - 1200.0
     - 100.0
   loose_density_t_m3: 1.75
+  target_share: 35
 - id: S-02
   tonnage_t: 12000.0
   material: wapień
@@ -1827,6 +1828,7 @@ planned_blasts:
   - - 1200.0
     - 100.0
   loose_density_t_m3: 1.75
+  target_share: 30
 site:
   center:
   - 49.9975
@@ -2051,6 +2053,7 @@ site:
     material: wapień
     tonnage_t: 15000
     blast_day: 2
+    target_share: 35
     psd:
     - - 10.0
       - 2.7
@@ -2086,6 +2089,7 @@ site:
     material: wapień
     tonnage_t: 12000
     blast_day: 4
+    target_share: 30
     psd:
     - - 10.0
       - 2.7

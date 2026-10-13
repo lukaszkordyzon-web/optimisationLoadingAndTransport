@@ -35,6 +35,14 @@ MODES = {
     "✏️ Edytuj / przesuń / usuń": None,
 }
 EDIT = "✏️ Edytuj / przesuń / usuń"
+# the drawing modes grouped by topic (first choose the group, then what to draw)
+MODE_GROUPS = {
+    "🛣️ Drogi": ["Droga / rampa", "Mijanka", "Kruszarka"],
+    "⛏️ Urobek i koparki": ["Usyp (materiał)", "Koparka", "Kierunek urabiania koparki", "Miejsce postoju koparki"],
+    "🧨 Strzelanie i objazdy": ["Miejsce strzelania", "Trasa dedykowana"],
+    "📅 Plan strzałów": ["Planowany strzał (nowy usyp)"],
+    "✏️ Edycja": [EDIT],
+}
 DEDICATED_FOR = {"ekipa": "🧨 ekipa strzałowa", "sztygar": "👷 sztygar", "cysterna": "⛽ cysterna"}
 DIRECTIONS = {"⬇ w dół": -1, "⬆ pod górę": 1, "➡ płasko": 0}
 
@@ -699,7 +707,7 @@ def psd_editor(site: dict, max_feed_mm: float, penalty: float) -> None:
     """Grading curve of every pile: pick a typical curve, set it from P80, or type sieve results."""
     import plotly.graph_objects as go
 
-    st.subheader("3b. Krzywe uziarnienia usypów")
+    st.markdown("#### Krzywe uziarnienia usypów")
     st.caption("Krzywa mówi, ile procent materiału przechodzi przez sito danej wielkości. Im grubszy urobek "
                "(P80 = rozmiar, poniżej którego jest 80 % materiału), tym **dłuższy załadunek** i **wolniejsza kruszarka**; "
                f"bryły większe niż wlot kruszarki ({max_feed_mm:.0f} mm) to nadziarno.")
@@ -772,9 +780,17 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
             st.error("Nie rozpoznano współrzędnych. W Google Maps: prawy klik na mapie → kliknij współrzędne (kopiują się).")
 
     st.subheader("2. Rysowanie obiektów")
+    group = st.radio("Co robisz?", list(MODE_GROUPS), horizontal=True, key="draw_group",
+                     help="Najpierw grupa, potem po lewej – co dokładnie rysujesz.")
     c1, c2 = st.columns([1, 3])
     with c1:
-        mode = st.radio("Co dodajesz?", list(MODES), key="draw_mode")
+        options = MODE_GROUPS[group]
+        if len(options) > 1:
+            mode = st.radio("Co dodajesz?", options, key=f"draw_mode_{list(MODE_GROUPS).index(group)}")
+        else:
+            mode = options[0]
+            if mode != EDIT:
+                st.markdown(f"**{mode}**")
         attrs: dict = {}
         if mode == "Droga / rampa":
             attrs["kind"] = st.selectbox("Rodzaj", ["droga", "rampa"])
@@ -821,6 +837,10 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                                   key="pl_psd")
             attrs["psd"] = PRESETS[preset]
             attrs["loose_density_t_m3"] = 1.75
+            share = st.number_input("Udział w nadawie [%] (0 = bez celu)", 0.0, 100.0, 0.0, 5.0, key="pl_share",
+                                    help="ile procent nadawy ma iść z tego usypu, gdy już będzie odstrzelony")
+            if share > 0:
+                attrs["target_share"] = share
             attrs["blast_day"] = int(st.number_input("Strzał w dniu roboczym nr", 1, 300, 3, 1, key="pl_day",
                                                      help="licząc od pierwszego dnia okresu w kroku „📅 Tydzień / "
                                                           "miesiąc” (1 = pierwszy dzień roboczy)"))
@@ -920,10 +940,16 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
     if flash:
         (st.success if flash.startswith("✅") else st.warning)(flash)
 
-    st.subheader("3. Obiekty na mapie (można poprawiać parametry i usuwać wiersze)")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**Drogi i rampy**")
+    st.subheader("3. Obiekty na mapie")
+    st.caption("Parametry poprawiasz w tabelach (wiersz można też usunąć). Położenie i kształt – na mapie, w trybie "
+               "„✏️ Edytuj / przesuń / usuń”.")
+    n_pl = len(site.get("planned_piles", []))
+    t_road, t_pile, t_ex, t_ev, t_plan = st.tabs([
+        f"🛣️ Drogi i mijanki ({len(site['roads'])})", f"⛰️ Usypy i uziarnienie ({len(site['piles'])})",
+        f"⛏️ Koparki i podstawianie ({len(site['excavators'])})", "🧨 Strzelanie, objazdy, postoje",
+        f"📅 Plan strzałów ({n_pl})"])
+    with t_road:
+        st.markdown(f"**Kruszarka:** {'✅ ustawiona' if site.get('crusher') else '❌ brak – postaw ją na mapie'}")
         if site["roads"]:
             object_table(site, "roads", lambda: pd.DataFrame(
                 [{k: v for k, v in r.items() if k not in ("coords", "uid")} | {"active": r.get("active", True),
@@ -931,36 +957,10 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                  | {"długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]]),
                 extra=("active", "single_lane"), disabled=["id", "długość [m]"], column_config=ROAD_COLS)
         else:
-            st.caption("brak")
-        st.markdown("**Koparki**")
-        if site["excavators"]:
-            object_table(site, "excavators", lambda: pd.DataFrame(
-                [{k: v for k, v in e.items() if k not in ("uid", "spotting", "dig_path")}
-                 | {"relocate_every_t": e.get("relocate_every_t") if e.get("dig_path") else None,
-                    "relocate_min": e.get("relocate_min") if e.get("dig_path") else None}
-                 for e in site["excavators"]]),
-                extra=("relocate_every_t", "relocate_min"),
-                disabled=["lat", "lon"],
-                column_config={**EX_COLS, "pile": st.column_config.SelectboxColumn(
-                    "ładuje z usypu", options=[p["id"] for p in site["piles"]] + ["(najbliższy)"])})
-        else:
-            st.caption("brak")
-        st.markdown(f"**Kruszarka:** {'✅ ustawiona' if site.get('crusher') else '❌ brak'} · "
-                    f"**Miejsce strzelania:** {'✅' if site.get('blast') else '—'}")
-        items = ([f"trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}"
-                  for d in site.get("dedicated", [])] +
-                 [f"miejsce postoju: {p['excavator']}" for p in site.get("parking", [])])
-        if items:
-            st.markdown("**Trasy dedykowane i miejsca postoju koparek**  \n" + "  \n".join(f"• {x}" for x in items))
-            rm = st.multiselect("Usuń", items, key=f"rm_{st.session_state.obj_ver}")
-            if rm and st.button("🗑️ Usuń zaznaczone", key=f"rmb_{st.session_state.obj_ver}"):
-                site["dedicated"] = [d for d in site.get("dedicated", [])
-                                     if f"trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}" not in rm]
-                site["parking"] = [p for p in site.get("parking", []) if f"miejsce postoju: {p['excavator']}" not in rm]
-                st.session_state.obj_ver += 1
-                st.rerun()
-    with c2:
-        st.markdown("**Usypy**")
+            st.caption("brak dróg")
+        bays = site.get("passing_bays", [])
+        st.markdown(f"**Mijanki:** {', '.join(b['id'] for b in bays) if bays else 'brak'}")
+    with t_pile:
         if site["piles"]:
             max_feed = float(raw_for_build.get("crusher", {}).get("max_feed_mm", 800))
             rows = []
@@ -974,24 +974,60 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                 rows.append(row)
             object_table(site, "piles", lambda: pd.DataFrame(rows), extra=("target_share",),
                          disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]"], column_config=PILE_COLS)
+            psd_editor(site, max_feed, float(raw_for_build.get("crusher", {}).get("fragmentation_penalty", 0.4)))
         else:
-            st.caption("brak")
+            st.caption("brak usypów")
+    with t_ex:
+        if site["excavators"]:
+            object_table(site, "excavators", lambda: pd.DataFrame(
+                [{k: v for k, v in e.items() if k not in ("uid", "spotting", "dig_path")}
+                 | {"relocate_every_t": e.get("relocate_every_t") if e.get("dig_path") else None,
+                    "relocate_min": e.get("relocate_min") if e.get("dig_path") else None}
+                 for e in site["excavators"]]),
+                extra=("relocate_every_t", "relocate_min"),
+                disabled=["lat", "lon"],
+                column_config={**EX_COLS, "pile": st.column_config.SelectboxColumn(
+                    "ładuje z usypu", options=[p["id"] for p in site["piles"]] + ["(najbliższy)"])})
+            st.caption("Kolumny „przestawienie” działają, gdy koparka ma narysowany kierunek urabiania.")
+        else:
+            st.caption("brak koparek")
+        spotting_editor(site, st.session_state.raw)
+    with t_ev:
+        st.markdown(f"**Miejsce strzelania:** {'✅ ustawione' if site.get('blast') else '— brak'} "
+                    "(godziny strzelania, objazd sztygara i tankowanie – w sekcji 5 „Zmiana i zdarzenia”)")
+        items = ([f"trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}"
+                  for d in site.get("dedicated", [])] +
+                 [f"miejsce postoju: {p['excavator']}" for p in site.get("parking", [])])
+        if items:
+            st.markdown("**Trasy dedykowane i miejsca postoju koparek**  \n" + "  \n".join(f"• {x}" for x in items))
+            rm = st.multiselect("Usuń", items, key=f"rm_{st.session_state.obj_ver}")
+            if rm and st.button("🗑️ Usuń zaznaczone", key=f"rmb_{st.session_state.obj_ver}"):
+                site["dedicated"] = [d for d in site.get("dedicated", [])
+                                     if f"trasa dedykowana: {DEDICATED_FOR.get(d['for'], 'przejazd koparki ' + str(d['for']))}" not in rm]
+                site["parking"] = [p for p in site.get("parking", []) if f"miejsce postoju: {p['excavator']}" not in rm]
+                st.session_state.obj_ver += 1
+                st.rerun()
+        else:
+            st.caption("brak tras dedykowanych i miejsc postoju")
+    with t_plan:
+        st.caption("Przyszłe strzały w nowych miejscach. Liczą się w kroku „📅 Tydzień / miesiąc”: w dniu strzału "
+                   "pojawia się nowy usyp, a koparka bez urobku sama na niego przejeżdża. Rysujesz je trybem "
+                   "„Planowany strzał (nowy usyp)”.")
         if site.get("planned_piles"):
-            st.markdown("**Planowane strzały** (wchodzą w kroku „📅 Tydzień / miesiąc”)")
             object_table(site, "planned_piles", lambda: pd.DataFrame(
                 [{"id": p["id"], "material": p.get("material", ""), "tonnage_t": p.get("tonnage_t", 0.0),
-                  "blast_day": int(p.get("blast_day", 1)), "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "–"}
+                  "blast_day": int(p.get("blast_day", 1)), "target_share": p.get("target_share"),
+                  "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "–"}
                  for p in site["planned_piles"]]),
-                disabled=["uziarnienie"],
+                extra=("target_share",), disabled=["uziarnienie"],
                 column_config={"id": "strzał", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
                                "tonnage_t": st.column_config.NumberColumn("ilość [t]", min_value=0.0),
-                               "blast_day": st.column_config.NumberColumn("dzień roboczy strzału", min_value=1, step=1)})
-
-    spotting_editor(site, st.session_state.raw)
-
-    if site["piles"]:
-        psd_editor(site, float(raw_for_build.get("crusher", {}).get("max_feed_mm", 800)),
-                   float(raw_for_build.get("crusher", {}).get("fragmentation_penalty", 0.4)))
+                               "blast_day": st.column_config.NumberColumn("dzień roboczy strzału", min_value=1, step=1),
+                               "target_share": st.column_config.NumberColumn(
+                                   "udział w nadawie [%]", min_value=0.0, max_value=100.0,
+                                   help="ile procent nadawy ma iść z tego usypu, gdy już jest odstrzelony")})
+        else:
+            st.caption("brak planowanych strzałów")
 
     st.subheader("4. Sieć dróg, poziomy i nachylenia")
     st.caption("Rzędne liczone od kruszarki wzdłuż nachyleń dróg – także dla odgałęzień ze środka rampy. "
