@@ -149,7 +149,7 @@ def _tiles(k: dict, ref: dict | None = None):
 
 # ---------------------------------------------------------------- the three steps
 def step_today(sc, yaml_text: str, seed: int, set_raw):
-    st.markdown("### ② Jak było dziś")
+    st.markdown("### ③ Jak było dziś")
     st.markdown("Odtworzenie **jednej zmiany tak, jak pracujecie obecnie**: kierowca po wyładunku wraca do „swojej” "
                 "koparki, czasem jedzie gdzie indziej, nikt nie wie, gdzie jest kolejka. Do tego losowość: deszcz, "
                 "różni kierowcy, awarie, różne czasy załadunku.")
@@ -159,6 +159,9 @@ def step_today(sc, yaml_text: str, seed: int, set_raw):
         st.info("Najpierw zbuduj kopalnię w kroku **① Kopalnia** (i kliknij „Zapisz kopalnię”) – albo wczytaj przykład.")
         _demo_button(set_raw, "demo_today")
         return
+    from app_calibration import status_line
+
+    status_line(sc)
     k = run_policy(yaml_text, seed, "natural").kpi
     _tiles(k)
     _crushers_summary(k)
@@ -331,7 +334,7 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
 
 
 def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
-    st.markdown("### ③ Optymalizacja RL – zalecenia na żywo")
+    st.markdown("### ④ Optymalizacja RL – zalecenia na żywo")
     st.markdown(
         "Program **uczy się sam**, do której koparki wysyłać każde wozidło po wyładunku, żeby **koszt na tonę był jak "
         "najniższy**. Przy każdej decyzji patrzy na to, co system wie w tej chwili: gdzie jest kolejka, ile jest jazdy, "
@@ -472,17 +475,22 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
 
             step_period(raw, yaml_text, seed)
         return
-    st.markdown("**Dla dyspozytora, kierowców i operatorów:** **① kopalnia dziś → ② jak było dziś** (odtworzenie "
-                "zmiany – docelowo z telefonów) **→ ③ optymalizacja RL** – czego nauczył się system i co dostają "
-                "ludzie w kabinach. Szczegóły są w **Trybie zaawansowanym** (przełącznik w panelu bocznym).")
-    tabs = st.tabs(["① Kopalnia dziś", "② Jak było dziś", "③ Optymalizacja RL"])
+    st.markdown("**Dla dyspozytora, kierowców i operatorów:** **① kopalnia dziś → ② kalibracja** (model dopasowany "
+                "do prawdziwej zmiany) **→ ③ jak było dziś** (odtworzenie zmiany – docelowo z telefonów) **→ ④ "
+                "optymalizacja RL** – czego nauczył się system i co dostają ludzie w kabinach. Szczegóły są w "
+                "**Trybie zaawansowanym** (przełącznik w panelu bocznym).")
+    tabs = st.tabs(["① Kopalnia dziś", "② Kalibracja", "③ Jak było dziś", "④ Optymalizacja RL"])
     with tabs[0]:
         render_map_tab(raw, set_raw, simple=True, schedule=False)
     with tabs[1]:
+        from app_calibration import step_calibration
+
+        step_calibration(raw, sc, set_raw)
+    with tabs[2]:
         if sc is None:
             st.info(f"Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia** ({msg}) – albo wczytaj przykład.")
             _demo_button(set_raw, "demo_today")
         else:
             step_today(sc, yaml_text, seed, set_raw)
-    with tabs[2]:
+    with tabs[3]:
         step_optimize(raw, yaml_text, seed)

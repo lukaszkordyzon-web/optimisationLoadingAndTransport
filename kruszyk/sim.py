@@ -22,7 +22,7 @@ CRUSHER_TICK_S = 10.0
 LOADER_TICK_S = 30.0
 DRIVE_STATES = {"jazda_pusty", "przejazd_miedzy_usypami", "jazda_pelny"}
 IDLE_STATES = {"kolejka_koparka", "podstawienie", "zaladunek", "kolejka_kruszarka", "wyladunek",
-               "wyladunek_halda", "postoj_koparki", "wyjazd_z_frontu", "mijanka"}
+               "wyladunek_halda", "postoj_koparki", "wyjazd_z_frontu", "mijanka", "inne_przestoje"}
 CONNECTORS = {"front", "plac_kruszarki", "dojazd"}  # short links to the network, not real roads
 PREFILL_NATURAL_P = 0.3  # without information the operator sometimes guesses and fills the bucket in time
 
@@ -236,7 +236,7 @@ class Simulation:
                                 "end_s": end, "duration_s": end - start,
                                 "excavator": ex, "trip": truck.trip, "crusher": truck.at})
             if state in IDLE_STATES:
-                used = truck.fleet.fuel_lph_idle * (end - start) / 3600
+                used = truck.fleet.fuel_lph_idle * (end - start) / 3600 * self.sc.calibration.fuel_factor
                 self.fuel_l += used
                 truck.fuel_left_l -= used
 
@@ -671,7 +671,7 @@ class Simulation:
         idx = list(range(len(route.segments)) if forward else reversed(range(len(route.segments))))
         f = truck.fleet
         share = load_t / f.payload_t if f.payload_t else 0.0
-        fuel_rate = f.fuel_lph_empty + (f.fuel_lph_loaded - f.fuel_lph_empty) * share
+        fuel_rate = (f.fuel_lph_empty + (f.fuel_lph_loaded - f.fuel_lph_empty) * share) * self.sc.calibration.fuel_factor
         start_state = self.env.now
         v = self.sc.variability
         for pos, k in enumerate(idx):
@@ -694,6 +694,7 @@ class Simulation:
                 mean_drv = mean
             natural = mean_drv * truck.driver_factor * self.weather_factor * self._noise(v.trip_sd)
             natural = max(natural, seg.length_m / (seg.speed_limit_kmh * over / 3.6))
+            natural *= self.sc.calibration.travel_factor  # measured on site: real roads, real drivers
             dur = natural * pace
             start = self.env.now
             grade = seg.grade_pct if forward else -seg.grade_pct
@@ -790,7 +791,7 @@ class Simulation:
                 blast = sc.blast(ex.cfg.blast)
                 full_load = load_time_s(ex.cfg, fleet, blast, sc.loose_density_t_m3)
                 one_pass = ex.cfg.swing_cycle_s * (1.0 + 0.5 * blast.fragmentation)
-                load = full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd)
+                load = full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd) * sc.calibration.load_factor
                 # a bucket filled while the truck was still coming saves one pass – if the operator knew it was coming
                 p_prefill = 1.0 if sc.advisor.enabled else PREFILL_NATURAL_P
                 if idle_before >= one_pass and load > 1.5 * one_pass and self.rng.random() < p_prefill:
@@ -950,6 +951,10 @@ class Simulation:
                     self._log_state(truck, "wyladunek", t0)
                 self._mark_dumped(truck, env.now, "kosz", unit.cfg.id)
             self.dumped_t += tonnes
+            if sc.calibration.delay_min_per_trip > 0:  # losses measured on site that the model has no cause for
+                t0 = env.now
+                yield env.timeout(sc.calibration.delay_min_per_trip * 60 * self._noise(0.5))
+                self._log_state(truck, "inne_przestoje", t0)
 
             # fuel: trucks start full; below the reserve they go to the fuel station next to the crusher
             if truck.fuel_left_l < fleet.tank_l * sc.refueling.truck_reserve_pct / 100:
@@ -988,7 +993,7 @@ class Simulation:
             amount = min(u.hopper.level, capacity)
             if amount > 1e-9:
                 yield u.hopper.get(amount)
-                kwh = amount * crusher_kwh_per_t(u.cfg, u.frag)
+                kwh = amount * crusher_kwh_per_t(u.cfg, u.frag) * self.sc.calibration.kwh_factor
                 u.crushed_t += amount
                 u.kwh += kwh
                 u.busy_s += CRUSHER_TICK_S * amount / capacity
@@ -1203,6 +1208,7 @@ class SimResult:
             "bay_stops": sim.bay_stops,
             "relocations": sum(e.relocations for e in sim.excavators.values()),
             "bay_wait_h": round(float(st.get("mijanka", 0.0)), 2),
+            "other_delay_h": round(float(st.get("inne_przestoje", 0.0)), 2),
             "spot_exit_h": round(float(st.get("podstawienie", 0.0)) + float(st.get("wyjazd_z_frontu", 0.0)), 2),
             "over_limit_pct": round(100 * sim.over_limit_segments / max(sim.drive_segments, 1), 1),
             "speeders": sum(t.speeder for t in sim.trucks),
@@ -1233,6 +1239,7 @@ class SimResult:
             "fuel_l": round(sim.fuel_l, 0),
             "fuel_l_per_t": round(sim.fuel_l / dumped, 3) if dumped else None,
             "crusher_kwh_per_t": round(sim.crusher_kwh / sim.crushed_t, 3) if sim.crushed_t else None,
+            "crusher_kwh": round(sim.crusher_kwh, 1),
             "cost_total": round(total, 0),
             "cost_per_t": round(total / dumped, 2) if dumped else None,
             "cost_breakdown": {k: round(v, 0) for k, v in cost.items()},

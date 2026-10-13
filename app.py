@@ -31,7 +31,7 @@ STATE_COLORS = {
     "jazda_pusty": "#8ecae6", "jazda_pelny": "#219ebc", "kolejka_koparka": "#e63946",
     "podstawienie": "#f4a261", "zaladunek": "#2a9d8f", "kolejka_kruszarka": "#d62828",
     "wyladunek": "#264653", "wyladunek_halda": "#6c757d", "awaria": "#000000",
-    "postoj_brak_urobku": "#adb5bd", "wyjazd_z_frontu": "#e9c46a", "mijanka": "#ff4d6d",
+    "postoj_brak_urobku": "#adb5bd", "wyjazd_z_frontu": "#e9c46a", "mijanka": "#ff4d6d", "inne_przestoje": "#7f5539",
 }
 BASE_TS = pd.Timestamp("2026-01-01 06:00")
 

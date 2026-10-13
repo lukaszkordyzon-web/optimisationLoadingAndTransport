@@ -56,6 +56,9 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     if not sc.rl_weights and base_raw.get("rl_weights"):  # a variant made before learning: use the mine's policy
         sc.rl_weights = list(base_raw["rl_weights"])
     sc.dispatch = "natural"  # the schedule is planned on how trucks run today
+    from app_calibration import status_line
+
+    status_line(sc)
     with c2:
         if sc.rl_weights:
             compare_rl = st.toggle("📱 Porównaj z systemem przydziału na żywo (RL)", True, key="per_rl",
@@ -63,7 +66,7 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                         "module „🚚 Zmiana” – widać, ile ton i złotych na okres daje wdrożenie.")
         else:
             compare_rl = False
-            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **🚚 Zmiana → ③ Optymalizacja RL**, "
+            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **🚚 Zmiana → ④ Optymalizacja RL**, "
                        "a tu zobaczysz, ile daje na cały okres.")
     st.caption("Harmonogram liczony jest tak, jak jeździcie dziś (kierowca wraca do „swojej” koparki)"
                + (" – obok to samo z systemem RL." if compare_rl else "."))

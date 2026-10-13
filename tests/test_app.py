@@ -78,7 +78,7 @@ def test_simple_mode_every_preset():
     at = AppTest.from_file(APP, default_timeout=180).run()
     assert not at.exception, at.exception
     labels = [t.label for t in at.tabs]
-    for step in ["① Kopalnia dziś", "② Jak było dziś", "③ Optymalizacja RL",
+    for step in ["① Kopalnia dziś", "② Kalibracja", "③ Jak było dziś", "④ Optymalizacja RL",
                  "🧨 Strzelanie", "👷 Objazd sztygara", "⛽ Tankowanie"]:
         assert step in labels
     for name in at.sidebar.selectbox[0].options:
@@ -221,3 +221,17 @@ def test_production_goal_backwards_and_applied():
     next(b for b in at.button if "Policz okres" in b.label).click().run()
     assert not at.exception, at.exception
     assert any("Cel produkcyjny – wykonanie" in m.value for m in at.markdown)
+
+
+def test_calibration_screen_fits_and_saves():
+    at = AppTest.from_file(APP, default_timeout=300).run()  # the default mine, shift module
+    assert any("nieskalibrowany" in w.value for w in at.warning)
+    at.number_input(key="cal_tonnes_t").set_value(3500).run()
+    at.number_input(key="cal_trips").set_value(95).run()
+    next(b for b in at.button if "Dopasuj model" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert any("Model po kalibracji" in s.value for s in at.success)
+    next(b for b in at.button if "Zapisz kalibrację" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["raw"]["calibration"]["measured"]["tonnes_t"] == 3500
+    assert any("Model skalibrowany" in c.value for c in at.caption)

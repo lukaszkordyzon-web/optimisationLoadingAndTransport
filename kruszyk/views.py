@@ -24,6 +24,7 @@ STATE_LABELS = {
     "postoj_brak_urobku": "postój – brak urobku",
     "wyjazd_z_frontu": "manewruje / wyjeżdża z frontu",
     "mijanka": "czeka na mijance",
+    "inne_przestoje": "inne przestoje (z kalibracji)",
 }
 
 

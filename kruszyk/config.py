@@ -257,6 +257,18 @@ DISPATCH_MODES = ("natural", "fixed", "dynamic", "rl")
 
 
 @dataclass
+class Calibration:
+    """Model tuned to a real shift (see calibrate.py). Factors = real / model; 1.0 = assumptions only."""
+    travel_factor: float = 1.0      # driving times
+    load_factor: float = 1.0        # loading times
+    delay_min_per_trip: float = 0.0  # losses the model doesn't know (waiting for orders, cleaning, talks…) per trip
+    fuel_factor: float = 1.0
+    kwh_factor: float = 1.0
+    measured: dict = field(default_factory=dict)  # what was measured on the real shift
+    date: str = ""                  # when it was calibrated
+
+
+@dataclass
 class Scenario:
     name: str
     shift_hours: float
@@ -287,6 +299,7 @@ class Scenario:
     advisor: Advisor = field(default_factory=Advisor)
     excavator_policy: ExcavatorPolicy = field(default_factory=ExcavatorPolicy)
     pacing: Pacing = field(default_factory=Pacing)
+    calibration: Calibration = field(default_factory=Calibration)
     spotting: Spotting = field(default_factory=Spotting)
     site: dict | None = None  # map geometry (see site.py)
     links: dict = field(default_factory=dict)  # "K-1>K-2" -> Route between two excavators
@@ -430,6 +443,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         refueling=_build(Refueling, raw.get("refueling", {})),
         traffic=_build(Traffic, raw.get("traffic", {})),
         advisor=_build(Advisor, raw.get("advisor", {})),
+        calibration=_build(Calibration, raw.get("calibration", {})),
         excavator_policy=_build(ExcavatorPolicy, raw.get("excavator_policy", {})),
         site=raw.get("site"),
         links=_routes(raw.get("links")),
