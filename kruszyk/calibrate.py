@@ -21,7 +21,8 @@ import numpy as np
 from .config import Calibration, Scenario
 from .sim import simulate
 
-SEEDS = (11, 12, 13)  # every fitted value is an average over these shifts (rain, breakdowns, drivers differ)
+SEEDS = (11, 12, 13)
+MAX_DELAY_MIN = 240.0  # losses per trip the fit may assume  # every fitted value is an average over these shifts (rain, breakdowns, drivers differ)
 
 
 def model_shift(sc: Scenario, seeds=SEEDS) -> dict:
@@ -95,9 +96,9 @@ def calibrate(sc: Scenario, measured: dict, progress=None) -> tuple[Scenario, di
     if target:
         at0 = model_shift(_with(base, **cal))
         if at0["tonnes_t"] > target:
-            lo, hi = 0.0, 60.0
+            lo, hi = 0.0, MAX_DELAY_MIN
             best = (abs(at0["tonnes_t"] - target), 0.0)
-            for _ in range(10):  # tonnes jump by whole trips, so keep the closest point tried, not the last one
+            for _ in range(12):  # tonnes jump by whole trips, so keep the closest point tried, not the last one
                 mid = (lo + hi) / 2
                 got = model_shift(_with(base, **cal, delay_min_per_trip=mid))["tonnes_t"]
                 best = min(best, (abs(got - target), mid))
@@ -129,7 +130,11 @@ def calibrate(sc: Scenario, measured: dict, progress=None) -> tuple[Scenario, di
     fitted.calibration.date = dt.date.today().isoformat()
     after = model_shift(fitted)
     tick("gotowe")
-    if target and after["tonnes_t"] < 0.97 * target:  # the model can't get there: say what holds it back
+    if target and after["tonnes_t"] > 1.03 * target:  # even huge losses don't bring the model down to the measurement
+        after["note"] = (f"Model nie schodzi do {target:,.0f} t nawet przy {cal.get('delay_min_per_trip', 0):.0f} min "
+                         "przestoju na kurs – dane się nie zgadzają. Sprawdź liczbę wozideł w pracy i liczbę kursów: "
+                         "przy tej flocie i tych drogach produkcja byłaby dużo wyższa.").replace(",", " ")
+    elif target and after["tonnes_t"] < 0.97 * target:  # the model can't get there: say what holds it back
         after["note"] = (f"Model nie dochodzi do {target:,.0f} t – ogranicza go: {after['limit'] or 'flota'}. Sprawdź "
                          "wpisaną wydajność (kruszarki, łyżki koparek, liczba wozideł) – rzeczywista musi być wyższa."
                          ).replace(",", " ")
