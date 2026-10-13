@@ -41,6 +41,8 @@ class PeriodPlan:
     holidays: list = field(default_factory=list)  # dates without work
     blasts: list = field(default_factory=list)    # [PileBlasts]
     target_t: float = 0.0             # production target for the period (0 = none)
+    move_excavators: bool = True      # an excavator without material drives to the nearest free blasted pile
+    move_setup_min: float = 15.0      # + this on top of the drive (preparing the new face)
 
     def working_days(self) -> list[dt.date]:
         out = []
@@ -62,14 +64,30 @@ def _shift_start(first: str, shift_no: int, hours: float) -> str:
     return f"{total // 60:02d}:{total % 60:02d}"
 
 
+MIN_PILE_T = 50.0  # less than this in a pile = nothing to load
+
+
 def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> pd.DataFrame:
     """One row per shift. `progress(i, n)` is called after every shift (for a progress bar)."""
+    from .config import Blast
+    from .site import haversine_m
+
     shifts = plan.shifts()
     left = {b.id: float(b.tonnage_t) for b in sc.blasts}  # material in the piles now
+    planned = {p["id"]: p for p in sc.planned_blasts if p["id"] not in left}
+    for pid in planned:
+        left[pid] = 0.0  # not blasted yet
+    # where trucks load at every pile: the route of the excavator that works it / of the planned blast
+    pile_route = {p["id"]: p["route"] for p in planned.values()}
+    for e in sc.excavators:
+        pile_route.setdefault(e.blast, e.route)
+    ex_pile = {e.id: e.blast for e in sc.excavators}
+    ex_route = {e.id: e.route for e in sc.excavators}
     stock = float(sc.stockpile.initial_t)
     dig_step = {e.id: 0 for e in sc.excavators}
     blasts = {b.pile: b for b in plan.blasts}
     first_start = sc.shift_plan.start_time
+    move_kmh = sc.traffic.excavator_move_kmh
     rows = []
     for i, (day, wd, shift_no) in enumerate(shifts):
         blasted = {}
@@ -78,28 +96,60 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 if b.every_days > 0 and wd >= b.first_day and (wd - b.first_day) % b.every_days == 0 and pid in left:
                     left[pid] += float(b.tonnage_t)
                     blasted[pid] = float(b.tonnage_t)
+            for pid, p in planned.items():
+                if int(p.get("blast_day") or 1) == wd:
+                    left[pid] += float(p["tonnage_t"])
+                    blasted[pid] = float(p["tonnage_t"])
+        # an excavator without material drives to the nearest blasted pile nobody else works
+        moves, delay = [], {}
+        if plan.move_excavators:
+            for e in sc.excavators:
+                if left[ex_pile[e.id]] >= MIN_PILE_T:
+                    continue
+                busy = {ex_pile[x] for x in ex_pile if x != e.id and left[ex_pile[x]] >= MIN_PILE_T}
+                free = [p for p in left if left[p] >= MIN_PILE_T and p not in busy and p in pile_route]
+                if not free:
+                    continue
+                here = sc.routes[ex_route[e.id]].path
+                def dist(p, here=here):
+                    there = sc.routes[pile_route[p]].path
+                    return haversine_m(here[0], there[0]) if here and there else 0.0
+                target = min(free, key=dist)
+                d = dist(target)
+                delay[e.id] = round(d / (move_kmh / 3.6) / 60 + plan.move_setup_min, 1)
+                moves.append(f"{e.id} → {target} ({round(d):,} m".replace(",", " ") + f"; {delay[e.id]:.0f} min)")
+                ex_pile[e.id], ex_route[e.id] = target, pile_route[target]
         v = copy.deepcopy(sc)
         for b in v.blasts:
             b.tonnage_t = max(left[b.id], 0.0)
+        for pid, p in planned.items():
+            v.blasts.append(Blast(id=pid, tonnage_t=max(left[pid], 0.0), fragmentation=float(p.get("fragmentation", 0.3)),
+                                  material=p.get("material", ""), loose_density_t_m3=p.get("loose_density_t_m3"),
+                                  psd=p.get("psd")))
         v.stockpile.initial_t = stock
         v.blasting.enabled = bool(sc.blasting.enabled and blasted)
         v.shift_plan.start_time = _shift_start(first_start, shift_no, sc.shift_hours)
-        for e in v.excavators:  # continue along the face where the excavator stopped
-            k = min(dig_step[e.id], max(len(e.dig_routes) - 1, 0))
-            if e.dig_routes:
+        for e in v.excavators:
+            moved = ex_pile[e.id] != e.blast
+            e.blast, e.route = ex_pile[e.id], ex_route[e.id]
+            e.start_delay_min = delay.get(e.id, 0.0)
+            if moved:  # on another pile: no digging line there
+                e.dig_routes, e.dig_path = [], None
+            elif e.dig_routes:  # continue along the face where the excavator stopped
+                k = min(dig_step[e.id], len(e.dig_routes) - 1)
                 e.route, e.dig_routes = e.dig_routes[k], e.dig_routes[k:]
         res = simulate(v, seed=seed + 7919 * i)
         k = res.kpi
         loaded = res.loads.groupby("blast")["tonnes"].sum() if len(res.loads) else pd.Series(dtype=float)
-        for b in sc.blasts:
-            left[b.id] = max(0.0, left[b.id] - float(loaded.get(b.id, 0.0)))
+        for pid in left:
+            left[pid] = max(0.0, left[pid] - float(loaded.get(pid, 0.0)))
         stock = float(k.get("stockpile_end_t", stock) or 0.0)
         for e in v.excavators:
-            dig_step[e.id] += int(res.excavator_steps.get(e.id, 0))
-        pile_of = {e.id: e.blast for e in sc.excavators}
+            if e.dig_routes:
+                dig_step[e.id] += int(res.excavator_steps.get(e.id, 0))
         idle_empty = []
         for e in k["excavators"]:
-            if v.blast(pile_of[e["excavator"]]).tonnage_t <= 1:
+            if v.blast(ex_pile[e["excavator"]]).tonnage_t <= 1:
                 idle_empty.append(f"{e['excavator']} (od rana)")
             elif e.get("blast_done_at_h") is not None and e["blast_done_at_h"] < sc.shift_hours - 0.5:
                 idle_empty.append(f"{e['excavator']} (od {e['blast_done_at_h']:.1f} h)")
@@ -111,9 +161,11 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             "koparki_czekaly_h": round(sum(e["waiting_for_trucks_h"] for e in k["excavators"]), 2),
             "kruszarka_bez_nadawy_h": k["crusher_starved_h"], "awarie_h": k["truck_breakdown_h"],
             "strzal": ", ".join(f"{p} +{t:,.0f} t".replace(",", " ") for p, t in blasted.items()),
+            "przejazdy_koparek": ", ".join(moves),
+            "koparki_na": ", ".join(f"{x}:{ex_pile[x]}" for x in ex_pile),
             "skonczyl_sie_urobek": ", ".join(idle_empty),
-            **{f"zostalo_{b.id}_t": round(left[b.id]) for b in sc.blasts},
-            **{f"z_{b.id}_t": round(float(loaded.get(b.id, 0.0))) for b in sc.blasts},
+            **{f"zostalo_{p}_t": round(left[p]) for p in left},
+            **{f"z_{p}_t": round(float(loaded.get(p, 0.0))) for p in left},
             "halda_t": round(stock),
         })
         if progress:

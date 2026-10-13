@@ -465,6 +465,15 @@ def dig_points(e: dict, tonnes: float | None = None) -> list[tuple[float, float]
     return [point_along(path, L * i / n) for i in range(n + 1)]
 
 
+def loading_point(site: dict, polygon: list) -> tuple[float, float]:
+    """Where trucks load at a pile: its corner (or centre) closest to the road network."""
+    cands = [tuple(c) for c in polygon] + [centroid(polygon)]
+    roads = [r for r in site.get("roads", []) if r.get("active", True) and len(r.get("coords", [])) >= 2]
+    if not roads:
+        return cands[-1]
+    return min(cands, key=lambda q: min(along_m(r["coords"], q)[1] for r in roads))
+
+
 def site_to_scenario(site: dict, raw: dict) -> dict:
     """Replace blasts/excavators/routes of a raw scenario with what is drawn on the map.
     Trucks, crusher parameters, costs etc. stay as they are. Also builds links between every pair
@@ -523,6 +532,23 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
                         site, (a["lat"], a["lon"]), f"{a['id']}>{b['id']}", end=(b["lat"], b["lon"]), end_name="dojazd")
                 except ValueError:
                     pass  # not connected – such a pair can't be used for two-pile trips
+    new["planned_blasts"] = []
+    for p in site.get("planned_piles", []):  # future blasts: routes from their loading point
+        if len(p.get("polygon") or []) < 3:
+            continue
+        load_at = loading_point(site, p["polygon"])
+        rid = f"P-{p['id']}"
+        try:
+            new["routes"][rid] = build_route(site, load_at, rid)
+        except ValueError:
+            continue  # not connected to the roads yet
+        pb = {"id": p["id"], "tonnage_t": float(p.get("tonnage_t", 0)), "material": p.get("material", ""),
+              "blast_day": int(p.get("blast_day") or 1), "route": rid,
+              "fragmentation": float(p.get("fragmentation", 0.3))}
+        for key in ("psd", "loose_density_t_m3"):
+            if p.get(key):
+                pb[key] = p[key]
+        new["planned_blasts"].append(pb)
     # keep fleet assignments only if they still point to existing excavators
     ex_ids = {e["id"] for e in excavators}
     for f in new.get("trucks", []):

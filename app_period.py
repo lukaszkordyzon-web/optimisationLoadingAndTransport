@@ -80,10 +80,33 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                        "ile_t": st.column_config.NumberColumn("ile ton ze strzału", min_value=0.0, step=1000.0),
                                        "pierwszy_dzien": st.column_config.NumberColumn(
                                            "pierwszy strzał w dniu rob. nr", min_value=1, step=1)})
+    st.markdown("**🧨📍 Nowe strzały w nowych miejscach** – rysujesz je na mapie w kroku ① (tryb „Planowany strzał "
+                "(nowy usyp)”). W dniu strzału pojawia się nowy usyp; koparka, której skończył się urobek, "
+                "**sama przejeżdża** na najbliższy odstrzelony usyp, na którym nikt nie pracuje.")
+    if sc.planned_blasts:
+        pkey = f"per_planned__{hashlib.md5(repr([(p['id'], p.get('blast_day')) for p in sc.planned_blasts]).encode()).hexdigest()}"
+        if pkey not in st.session_state:
+            st.session_state[pkey] = pd.DataFrame([{"strzal": p["id"], "material": p.get("material", ""),
+                                                    "dzien": int(p.get("blast_day") or 1), "ile_t": float(p["tonnage_t"])}
+                                                   for p in sc.planned_blasts])
+        ped = st.data_editor(st.session_state[pkey], key=pkey + "_ed", hide_index=True, width="stretch",
+                             disabled=["strzal", "material"],
+                             column_config={"strzal": "strzał", "material": "materiał",
+                                            "dzien": st.column_config.NumberColumn("w dniu roboczym nr", min_value=1, step=1),
+                                            "ile_t": st.column_config.NumberColumn("ile ton", min_value=0.0, step=1000.0)})
+        for p, (_, r) in zip(sc.planned_blasts, ped.iterrows()):
+            p["blast_day"], p["tonnage_t"] = int(r["dzien"] or 1), float(r["ile_t"] or 0)
+    else:
+        st.caption("Na mapie nie ma planowanych strzałów – koparki pracują tylko na obecnych usypach.")
+    c = st.columns(2)
+    move = c[0].checkbox("Koparka bez urobku przejeżdża na inny usyp", True, key="per_move")
+    setup = c[1].number_input("Przygotowanie nowego frontu [min] (oprócz jazdy)", 0.0, 240.0, 15.0, 5.0,
+                              key="per_setup", disabled=not move)
     plan = PeriodPlan(start=start, days=int(days), shifts_per_day=int(shifts), saturdays=sat,
                       holidays=_holidays(hol, start.year), target_t=float(target),
                       blasts=[PileBlasts(r["usyp"], float(r["ile_t"] or 0), int(r["co_dni"] or 0),
-                                         int(r["pierwszy_dzien"] or 1)) for _, r in ed.iterrows()])
+                                         int(r["pierwszy_dzien"] or 1)) for _, r in ed.iterrows()],
+                      move_excavators=move, move_setup_min=float(setup))
     n = len(plan.shifts())
     st.caption(f"{len(plan.working_days())} dni roboczych × {shifts} = **{n} zmian** · liczy się ok. {max(1, n // 3)} s")
 
@@ -126,7 +149,7 @@ def _results(df: pd.DataFrame, plan: PeriodPlan, sc) -> None:
     c[3].metric("Średnio na zmianę", f"{s['srednio_na_zmiane_t']:,.0f} t".replace(",", " "))
     c[4].metric("Zmiany z brakiem urobku", s["zmian_bez_urobku"])
 
-    piles = [b.id for b in sc.blasts]
+    piles = [b.id for b in sc.blasts] + [p["id"] for p in sc.planned_blasts if f"z_{p['id']}_t" in df]
     df = df.copy()
     df["etykieta"] = df["data"].map(lambda d: d.strftime("%d.%m")) + " " + df["dzien"] + " z" + df["zmiana"].astype(str)
     fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -156,6 +179,7 @@ def _results(df: pd.DataFrame, plan: PeriodPlan, sc) -> None:
 
     day = df.groupby(["data", "dzien"], as_index=False).agg(
         wywiezione_t=("wywiezione_t", "sum"), koszt_zl=("koszt_zl", "sum"), strzal=("strzal", lambda x: ", ".join(v for v in x if v)),
+        przejazdy=("przejazdy_koparek", lambda x: ", ".join(v for v in x if v)),
         brak_urobku=("skonczyl_sie_urobek", lambda x: "; ".join(v for v in x if v)),
         kruszarka_bez_nadawy_h=("kruszarka_bez_nadawy_h", "sum"), deszcz=("deszcz", "any"))
     day["koszt_na_t"] = (day["koszt_zl"] / day["wywiezione_t"].where(day["wywiezione_t"] > 0)).round(2)
@@ -164,7 +188,8 @@ def _results(df: pd.DataFrame, plan: PeriodPlan, sc) -> None:
     st.dataframe(day, hide_index=True, width="stretch",
                  column_config={"wywiezione_t": st.column_config.NumberColumn("wywiezione [t]", format="%.0f"),
                                 "koszt_zl": st.column_config.NumberColumn("koszt [zł]", format="%.0f"),
-                                "koszt_na_t": "zł/t", "strzal": "strzał", "brak_urobku": "koparki bez urobku",
+                                "koszt_na_t": "zł/t", "strzal": "strzał", "przejazdy": "przejazdy koparek",
+                                "brak_urobku": "koparki bez urobku",
                                 "kruszarka_bez_nadawy_h": "kruszarka bez nadawy [h]"})
     with st.expander("Zmiana po zmianie (wszystkie kolumny)"):
         st.dataframe(df.drop(columns=["etykieta"]), hide_index=True, width="stretch")
@@ -184,10 +209,13 @@ def _findings(df: pd.DataFrame, plan: PeriodPlan, sc, s: dict) -> list[str]:
         for _, r in empty.iterrows():
             for item in r["skonczyl_sie_urobek"].split(", "):
                 by_ex.setdefault(item.split(" ")[0], []).append(f"{r['data'].strftime('%d.%m')} z{r['zmiana']}")
-        pile_of = {e.id: e.blast for e in sc.excavators}
         for ex, when in by_ex.items():
-            out.append(f"⛏️ **{ex}** (usyp {pile_of.get(ex, '?')}) zostaje bez urobku na **{len(when)}** zmianach "
-                       f"({', '.join(when[:6])}{' …' if len(when) > 6 else ''}) – strzał na ten usyp za rzadko albo za mały.")
+            out.append(f"⛏️ **{ex}** zostaje bez urobku na **{len(when)}** zmianach "
+                       f"({', '.join(when[:6])}{' …' if len(when) > 6 else ''}) – strzały za rzadko, za małe albo "
+                       "brak wolnego odstrzelonego usypu, na który mogłaby przejechać.")
+    mv = df[df["przejazdy_koparek"] != ""]
+    for _, r in mv.iterrows():
+        out.append(f"🚜 {r['data'].strftime('%d.%m')} z{r['zmiana']}: przejazd {r['przejazdy_koparek']}.")
     if s["kruszarka_bez_nadawy_h"] > 1:
         out.append(f"🏭 Kruszarka stała bez nadawy łącznie **{s['kruszarka_bez_nadawy_h']:.0f} h** w okresie.")
     zero = df[df["wywiezione_t"] <= 0]

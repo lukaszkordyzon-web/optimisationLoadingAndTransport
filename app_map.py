@@ -24,6 +24,7 @@ SKETCH_COLOR = "#ffd600"
 MODES = {
     "Droga / rampa": "polyline",
     "Usyp (materiał)": "polygon",
+    "Planowany strzał (nowy usyp)": "polygon",
     "Koparka": "marker",
     "Kruszarka": "marker",
     "Miejsce strzelania": "marker",
@@ -48,7 +49,7 @@ def ensure_uids(site: dict) -> None:
     import uuid
 
     seen = set()
-    for key in ("roads", "piles", "excavators", "passing_bays"):
+    for key in ("roads", "piles", "excavators", "passing_bays", "planned_piles"):
         for o in site.get(key, []):
             if not o.get("uid"):
                 o["uid"] = uuid.uuid4().hex[:10]
@@ -172,6 +173,14 @@ def draw_site(m, site: dict) -> None:
         folium.Marker(centroid(p["polygon"]), tooltip=f"⛰️ {p['id']} · usyp: {p.get('material', '')}", icon=folium.DivIcon(
             html=f"<div style='color:#fff;font-weight:700;text-shadow:0 0 3px #000;white-space:nowrap'>"
                  f"{p['id']} · {p.get('material', '')}</div>")).add_to(m)
+    for p in site.get("planned_piles", []):
+        tip = (f"📅 {p['id']} · planowany strzał w dniu roboczym {p.get('blast_day', 1)} · {p.get('material', '')} · "
+               f"{p.get('tonnage_t', 0):,.0f} t".replace(",", " "))
+        folium.Polygon([tuple(c) for c in p["polygon"]], color="#ff006e", weight=3, dash_array="8 6", fill=True,
+                       fill_opacity=0.12, tooltip=tip).add_to(m)
+        folium.Marker(centroid(p["polygon"]), tooltip=tip, icon=folium.DivIcon(
+            html=f"<div style='color:#fff;font-weight:700;text-shadow:0 0 3px #000;white-space:nowrap'>"
+                 f"🧨 {p['id']} · dzień {p.get('blast_day', 1)}</div>")).add_to(m)
     for e in site.get("excavators", []):
         dp = e.get("dig_path") or []
         if len(dp) >= 2:
@@ -213,6 +222,16 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
         target = mode if mode in ("Kruszarka", "Miejsce strzelania", "Miejsce postoju koparki", "Mijanka") else "Koparka"
     if g["type"] == "LineString" and mode in ("Trasa dedykowana", "Kierunek urabiania koparki"):
         target = mode
+    if g["type"] == "Polygon" and mode == "Planowany strzał (nowy usyp)":
+        site.setdefault("planned_piles", [])
+        ids = {p["id"] for p in site["piles"]} | {p["id"] for p in site["planned_piles"]}
+        a = dict(attrs)
+        if not a.get("id") or a["id"] in ids:
+            a["id"] = next(f"S-{i:02d}" for i in range(1, 1000) if f"S-{i:02d}" not in ids)
+        site["planned_piles"].append({**a, "polygon": _latlon(g["coordinates"][0][:-1])})
+        ensure_uids(site)
+        return (f"✅ Planowany strzał {a['id']} w dniu roboczym {a.get('blast_day', 1)} – w kroku „📅 Tydzień / "
+                f"miesiąc” koparka bez urobku sama tu przejedzie")
     if target == "Kierunek urabiania koparki":
         ex = next((e for e in site["excavators"] if e["id"] == attrs.get("excavator")), None)
         if ex is None:
@@ -280,6 +299,8 @@ def site_items(site: dict) -> dict:
         items[f"road:{r['uid']}"] = f"🛣️ {r.get('id')} · {r.get('name', '')}" + ("" if r.get("active", True) else " (planowana)")
     for p in site.get("piles", []):
         items[f"pile:{p['uid']}"] = f"⛰️ usyp {p['id']} · {p.get('material', '')}"
+    for p in site.get("planned_piles", []):
+        items[f"planned:{p['uid']}"] = f"📅 planowany strzał {p['id']} (dzień {p.get('blast_day', 1)})"
     for e in site.get("excavators", []):
         items[f"excavator:{e['uid']}"] = f"⛏️ koparka {e['id']}"
     if site.get("crusher"):
@@ -306,6 +327,8 @@ def find_obj(site: dict, sel: str | None):
         return next((o for o in site.get(kind + "s", []) if o.get("uid") == ident), None)
     if kind == "bay":
         return next((o for o in site.get("passing_bays", []) if o.get("uid") == ident), None)
+    if kind == "planned":
+        return next((o for o in site.get("planned_piles", []) if o.get("uid") == ident), None)
     if kind == "dig":
         e = next((o for o in site.get("excavators", []) if o.get("uid") == ident), None)
         return {"coords": e["dig_path"], "_ex": e} if e and len(e.get("dig_path") or []) >= 2 else None
@@ -322,7 +345,7 @@ def sel_from_click(site: dict, tooltip: str | None, latlng: dict | None) -> str 
     """Clicked object → selection key: by the tooltip prefix, otherwise the nearest object (≤ 40 m)."""
     head = (tooltip or "").strip().split(" · ")[0].strip()
     by_id = {"🛣️": ("road", "roads"), "⛰️": ("pile", "piles"), "⛏️": ("excavator", "excavators"),
-             "⇆": ("bay", "passing_bays")}
+             "⇆": ("bay", "passing_bays"), "📅": ("planned", "planned_piles")}
     for icon, (kind, key) in by_id.items():
         if head.startswith(icon):
             oid = head[len(icon):].strip()
@@ -355,7 +378,7 @@ def sel_from_click(site: dict, tooltip: str | None, latlng: dict | None) -> str 
         kind = sel.split(":", 1)[0]
         if kind in POINT_KINDS:
             pts = [(o["lat"], o["lon"])]
-        elif kind == "pile":
+        elif kind in ("pile", "planned"):
             pts = [tuple(c) for c in o["polygon"]] + [centroid(o["polygon"])]
         else:
             pts = [tuple(c) for c in o["coords"]]
@@ -406,6 +429,9 @@ def delete_obj(site: dict, sel: str) -> str:
     if kind == "bay":
         site["passing_bays"] = [b for b in site["passing_bays"] if b is not o]
         return f"🗑️ Usunięto mijankę {o.get('id')}"
+    if kind == "planned":
+        site["planned_piles"] = [p for p in site["planned_piles"] if p is not o]
+        return f"🗑️ Usunięto planowany strzał {o.get('id')}"
     if kind == "dig":
         o["_ex"].pop("dig_path", None)
         return f"🗑️ Usunięto kierunek urabiania koparki {o['_ex']['id']} (koparka stoi w miejscu)"
@@ -464,7 +490,7 @@ def highlight(m, site: dict, sel: str | None) -> None:
     if kind in POINT_KINDS:
         folium.CircleMarker((o["lat"], o["lon"]), radius=22, color=SKETCH_COLOR, weight=4, fill=True,
                             fill_opacity=0.15).add_to(m)
-    elif kind == "pile":
+    elif kind in ("pile", "planned"):
         folium.Polygon([tuple(c) for c in o["polygon"]], color=SKETCH_COLOR, weight=6, fill=False).add_to(m)
     else:
         folium.PolyLine([tuple(c) for c in o["coords"]], color=SKETCH_COLOR, weight=18, opacity=0.6).add_to(m)
@@ -545,7 +571,7 @@ def edit_panel(site: dict) -> None:
         st.rerun()
     if arm:
         tool = {"move": "postaw **znacznik (📍)** w nowym miejscu",
-                "redraw": "narysuj od nowa **wielokąt (⬠)**" if kind == "pile" else "narysuj od nowa **linię (/)**"}
+                "redraw": "narysuj od nowa **wielokąt (⬠)**" if kind in ("pile", "planned") else "narysuj od nowa **linię (/)**"}
         st.info(f"Teraz {tool[arm[0]]} – obiekt przeniesie się tam sam.")
         if st.button("Anuluj", key=f"ecn_{k}"):
             st.session_state.edit_arm = None
@@ -786,6 +812,21 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
             if share > 0:
                 attrs["target_share"] = share
             st.caption("Narzędzie „wielokąt” (⬠). Obrysuj usyp, zamknij klikając pierwszy punkt.")
+        elif mode == "Planowany strzał (nowy usyp)":
+            n_pl = len(site.get("planned_piles", []))
+            attrs["id"] = st.text_input("Oznaczenie", f"S-{n_pl + 1:02d}")
+            attrs["material"] = st.selectbox("Materiał", MATERIALS, key="pl_mat")
+            attrs["tonnage_t"] = st.number_input("Ile ton da strzał", 0.0, 10_000_000.0, 15_000.0, 1000.0, key="pl_t")
+            preset = st.selectbox("Spodziewane uziarnienie", list(PRESETS), index=list(PRESETS).index(DEFAULT_PRESET),
+                                  key="pl_psd")
+            attrs["psd"] = PRESETS[preset]
+            attrs["loose_density_t_m3"] = 1.75
+            attrs["blast_day"] = int(st.number_input("Strzał w dniu roboczym nr", 1, 300, 3, 1, key="pl_day",
+                                                     help="licząc od pierwszego dnia okresu w kroku „📅 Tydzień / "
+                                                          "miesiąc” (1 = pierwszy dzień roboczy)"))
+            st.caption("Narzędzie „wielokąt” (⬠). Obrysuj miejsce przyszłego strzału (urobek po strzale). Do dnia "
+                       "strzału nic tu nie ma; potem koparka, której skończył się urobek, przejedzie tu sama "
+                       "(najbliższa wolna). Wozidła ładują przy rogu usypu najbliższym drogi – doprowadź tam drogę.")
         elif mode == "Koparka":
             attrs["id"] = st.text_input("Oznaczenie koparki", f"K-{len(site['excavators']) + 1}")
             piles = [p["id"] for p in site["piles"]]
@@ -935,6 +976,16 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                          disabled=["pow. [m²]", "uziarnienie", "P80 [mm]", "nadziarno [%]"], column_config=PILE_COLS)
         else:
             st.caption("brak")
+        if site.get("planned_piles"):
+            st.markdown("**Planowane strzały** (wchodzą w kroku „📅 Tydzień / miesiąc”)")
+            object_table(site, "planned_piles", lambda: pd.DataFrame(
+                [{"id": p["id"], "material": p.get("material", ""), "tonnage_t": p.get("tonnage_t", 0.0),
+                  "blast_day": int(p.get("blast_day", 1)), "uziarnienie": preset_of(p["psd"]) if p.get("psd") else "–"}
+                 for p in site["planned_piles"]]),
+                disabled=["uziarnienie"],
+                column_config={"id": "strzał", "material": st.column_config.SelectboxColumn("materiał", options=MATERIALS),
+                               "tonnage_t": st.column_config.NumberColumn("ilość [t]", min_value=0.0),
+                               "blast_day": st.column_config.NumberColumn("dzień roboczy strzału", min_value=1, step=1)})
 
     spotting_editor(site, st.session_state.raw)
 

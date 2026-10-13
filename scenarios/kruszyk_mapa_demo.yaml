@@ -1370,6 +1370,98 @@ routes:
       - 20.0
     elev_start_m: -66.2
     elev_end_m: 0.0
+  P-S-01:
+    segments:
+    - name: front
+      length_m: 43.8
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: poziom dolny
+      length_m: 595.2
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 159.1
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 9.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.9942
+      - 20.0261
+    - - 49.99458839724072
+      - 20.026204424833566
+    - - 49.995
+      - 20.0225
+    - - 49.9955
+      - 20.018
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -66.2
+    elev_end_m: 0.0
+  P-S-02:
+    segments:
+    - name: front
+      length_m: 78.2
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: zjazd na poziom pośredni
+      length_m: 494.0
+      speed_limit_kmh: 30.0
+      grade_pct: 0.0
+    - name: rampa główna
+      length_m: 318.2
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 9.0
+    - name: droga główna
+      length_m: 895.9
+      speed_limit_kmh: 40.0
+      grade_pct: 1.0
+    path:
+    - - 49.9964
+      - 20.0076
+    - - 49.9968
+      - 20.0085
+    - - 49.9972
+      - 20.011
+    - - 49.997749999999996
+      - 20.01525
+    - - 50.0
+      - 20.0125
+    - - 50.0003
+      - 20.006
+    - - 50.0
+      - 20.0
+    - - 50.0
+      - 20.0
+    elev_start_m: -37.6
+    elev_end_m: 0.0
 crusher:
   capacity_tph: 2600
   hopper_t: 250
@@ -1678,6 +1770,63 @@ links:
       - 20.0225
     elev_start_m: -66.2
     elev_end_m: -66.2
+planned_blasts:
+- id: S-01
+  tonnage_t: 15000.0
+  material: wapień
+  blast_day: 2
+  route: P-S-01
+  fragmentation: 0.3
+  psd:
+  - - 10.0
+    - 2.7
+  - - 25.0
+    - 7.8
+  - - 50.0
+    - 17.1
+  - - 100.0
+    - 35.0
+  - - 200.0
+    - 62.8
+  - - 300.0
+    - 80.0
+  - - 500.0
+    - 94.9
+  - - 800.0
+    - 99.5
+  - - 1000.0
+    - 99.9
+  - - 1200.0
+    - 100.0
+  loose_density_t_m3: 1.75
+- id: S-02
+  tonnage_t: 12000.0
+  material: wapień
+  blast_day: 4
+  route: P-S-02
+  fragmentation: 0.3
+  psd:
+  - - 10.0
+    - 2.7
+  - - 25.0
+    - 7.8
+  - - 50.0
+    - 17.1
+  - - 100.0
+    - 35.0
+  - - 200.0
+    - 62.8
+  - - 300.0
+    - 80.0
+  - - 500.0
+    - 94.9
+  - - 800.0
+    - 99.5
+  - - 1000.0
+    - 99.9
+  - - 1200.0
+    - 100.0
+  loose_density_t_m3: 1.75
 site:
   center:
   - 49.9975
@@ -1897,6 +2046,77 @@ site:
   - id: M2
     lat: 49.996624999999995
     lon: 20.016625
+  planned_piles:
+  - id: S-01
+    material: wapień
+    tonnage_t: 15000
+    blast_day: 2
+    psd:
+    - - 10.0
+      - 2.7
+    - - 25.0
+      - 7.8
+    - - 50.0
+      - 17.1
+    - - 100.0
+      - 35.0
+    - - 200.0
+      - 62.8
+    - - 300.0
+      - 80.0
+    - - 500.0
+      - 94.9
+    - - 800.0
+      - 99.5
+    - - 1000.0
+      - 99.9
+    - - 1200.0
+      - 100.0
+    loose_density_t_m3: 1.75
+    polygon:
+    - - 49.9942
+      - 20.025
+    - - 49.9942
+      - 20.0261
+    - - 49.99372
+      - 20.0261
+    - - 49.99372
+      - 20.025
+  - id: S-02
+    material: wapień
+    tonnage_t: 12000
+    blast_day: 4
+    psd:
+    - - 10.0
+      - 2.7
+    - - 25.0
+      - 7.8
+    - - 50.0
+      - 17.1
+    - - 100.0
+      - 35.0
+    - - 200.0
+      - 62.8
+    - - 300.0
+      - 80.0
+    - - 500.0
+      - 94.9
+    - - 800.0
+      - 99.5
+    - - 1000.0
+      - 99.9
+    - - 1200.0
+      - 100.0
+    loose_density_t_m3: 1.75
+    polygon:
+    - - 49.9964
+      - 20.0064
+    - - 49.9964
+      - 20.0076
+    - - 49.99595
+      - 20.0076
+    - - 49.99595
+      - 20.0064
   blast:
     lat: 49.99405
     lon: 20.0262

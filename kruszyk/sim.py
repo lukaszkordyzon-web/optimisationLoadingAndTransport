@@ -110,6 +110,8 @@ class Simulation:
                                         "double": False, "out_blocks": False})]
             double = any(m["double"] for _, m in ex.spot_modes)
             ex.bays = simpy.Resource(self.env, 2 if double else 1)
+            if ex.cfg.start_delay_min > 0:  # drives to a new pile first
+                ex.down.append((0.0, ex.cfg.start_delay_min * 60, "przejazd"))
         # several excavators on the same blast share its tonnage
         by_blast: dict[str, list[ExcavatorState]] = {}
         for ex in self.excavators.values():
@@ -1155,7 +1157,7 @@ class SimResult:
             "truck_excavator_down_h": round(float(st.get("postoj_koparki", 0.0)), 2),
             "excavator_down_h": {r: round(sum(max(0.0, min(b, shift_s) - a) for e in sim.excavators.values()
                                               for a, b, rr in e.down if rr == r) / 3600, 2)
-                                 for r in ("przerwa", "strzelanie", "tankowanie", "przestawienie")},
+                                 for r in ("przerwa", "strzelanie", "tankowanie", "przestawienie", "przejazd")},
             "truck_queue_excavator_h": round(float(st.get("kolejka_koparka", 0.0)), 2),
             "truck_queue_crusher_h": round(float(st.get("kolejka_kruszarka", 0.0)), 2),
             "truck_breakdown_h": round(float(st.get("awaria", 0.0)), 2),

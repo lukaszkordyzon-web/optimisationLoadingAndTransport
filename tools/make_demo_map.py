@@ -69,6 +69,15 @@ raw["trucks"] = [
 # the main ramp is single-lane: trucks pass only at the junction half-way down and at the lower bay
 site["passing_bays"] = [{"id": "M1", "lat": MID[0], "lon": MID[1]},
                         {"id": "M2", "lat": MID[0] + 0.5 * (B[0] - MID[0]), "lon": MID[1] + 0.5 * (B[1] - MID[1])}]
+# next blasts in new places (used by the week / month run): next to U-01 and west of U-03
+site["planned_piles"] = [
+    {"id": "S-01", "material": "wapień", "tonnage_t": 15000, "blast_day": 2, "psd": PRESETS["średnie"],
+     "loose_density_t_m3": 1.75,
+     "polygon": [[49.99420, 20.0250], [49.99420, 20.0261], [49.99372, 20.0261], [49.99372, 20.0250]]},
+    {"id": "S-02", "material": "wapień", "tonnage_t": 12000, "blast_day": 4, "psd": PRESETS["średnie"],
+     "loose_density_t_m3": 1.75,
+     "polygon": [[49.99640, 20.0064], [49.99640, 20.0076], [49.99595, 20.0076], [49.99595, 20.0064]]},
+]
 site["blast"] = {"lat": 49.99405, "lon": 20.0262}  # next blast: on the bottom level, east of U-03
 # where excavators go for blasting / refuelling (K-1 has no marker: it backs off along its route)
 site["parking"] = [{"excavator": "K-2", "lat": 49.9953, "lon": 20.0195},

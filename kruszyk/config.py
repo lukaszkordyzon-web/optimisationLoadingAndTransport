@@ -57,6 +57,7 @@ class Excavator:
     dig_path: list | None = None
     relocate_every_t: float = 600.0
     relocate_min: float = 4.0
+    start_delay_min: float = 0.0  # not loading at the start of the shift (driving to a new pile)
 
 
 @dataclass
@@ -266,6 +267,9 @@ class Scenario:
     spotting: Spotting = field(default_factory=Spotting)
     site: dict | None = None  # map geometry (see site.py)
     links: dict = field(default_factory=dict)  # "K-1>K-2" -> Route between two excavators
+    # future blasts drawn on the map (used by the week / month run): [{id, tonnage_t, material, psd,
+    # fragmentation, loose_density_t_m3, blast_day, route}] – `route` = from its loading point to the crusher
+    planned_blasts: list = field(default_factory=list)
 
     @property
     def truck_count(self) -> int:
@@ -282,6 +286,7 @@ class Scenario:
             if ex.route not in self.routes:
                 raise ValueError(f"Koparka {ex.id}: nieznana trasa '{ex.route}'")
             missing = [r for r in ex.dig_routes if r not in self.routes]
+            missing += [p["route"] for p in self.planned_blasts if p.get("route") not in self.routes]
             if missing:
                 raise ValueError(f"Koparka {ex.id}: brak tras postępu {', '.join(missing)} – zbuduj trasy z mapy")
             bad = [m for m in ex.spotting if m not in SPOT_MODES]
@@ -377,12 +382,16 @@ def scenario_from_dict(raw: dict) -> Scenario:
         links=_routes(raw.get("links")),
         natural_switch_prob=raw.get("natural_switch_prob", 0.25),
         rl_weights=raw.get("rl_weights"),
+        planned_blasts=[dict(p) for p in raw.get("planned_blasts") or []],
     )
     from .psd import fragmentation_index
 
     for b in sc.blasts:  # a grading curve, when given, decides how blocky the material is
         if b.psd:
             b.fragmentation = fragmentation_index(b.psd, sc.crusher.max_feed_mm)
+    for p in sc.planned_blasts:
+        if p.get("psd"):
+            p["fragmentation"] = fragmentation_index(p["psd"], sc.crusher.max_feed_mm)
     sc.validate()
     return sc
 
