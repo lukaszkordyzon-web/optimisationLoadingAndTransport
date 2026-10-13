@@ -161,3 +161,24 @@ def test_planning_only_in_schedule_mode():
     assert not at.exception, at.exception
     assert [r for r in at.radio if r.key == "pile_status"]  # schedule: a pile can be a planned blast
     assert "📅 Plan strzałów" in at.radio(key="draw_group").options
+
+
+def test_advanced_editor_keeps_routes_to_second_crusher():
+    """The excavator table must not turn map-built routes to other crushers into text (TypeError in the sim)."""
+    import yaml
+
+    from kruszyk.site import site_to_scenario
+
+    raw = yaml.safe_load((Path(APP).parent / "scenarios" / "kruszyk_mapa_demo.yaml").read_text(encoding="utf-8"))
+    s = raw["site"]
+    s["crushers"] = [{"id": "C-2", "lat": 49.9946, "lon": 20.0240, "capacity_tph": 900, "hopper_t": 120,
+                      "accepts": ["all"], "product": "tłuczeń 31,5–63"}]
+    raw = site_to_scenario(s, raw)
+    assert any(e.get("crusher_routes") for e in raw["excavators"])
+    at = AppTest.from_file(APP, default_timeout=180)
+    at.session_state["raw"] = raw
+    at.session_state["ver"] = 1
+    at.run()
+    at.toggle(key="advanced").set_value(True).run()
+    assert not at.exception, at.exception
+    assert all(isinstance(e.get("crusher_routes", {}), dict) for e in at.session_state["raw"]["excavators"])

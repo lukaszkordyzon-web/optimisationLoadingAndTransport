@@ -71,3 +71,14 @@ def test_product_sets_energy_per_tonne():
     assert sc.crushers_extra[0].kwh_per_t == PRODUCTS["piasek łamany 0–2"] > sc.crusher.kwh_per_t
     by = {c["crusher"]: c for c in simulate(sc, seed=1).kpi["crushers"]}
     assert by["C-2"]["kwh_per_t"] > 1.5 * by["C-1"]["kwh_per_t"]  # fine product = much more energy per tonne
+
+
+def test_routes_to_crushers_saved_as_text_give_clear_error():
+    raw = yaml.safe_load(DEMO.read_text())
+    s = raw["site"]
+    s["crushers"] = [{"id": "C-2", "lat": 49.9946, "lon": 20.0240, "capacity_tph": 900, "hopper_t": 120,
+                      "accepts": ["all"]}]
+    raw = site_to_scenario(s, raw)
+    raw["excavators"][0]["crusher_routes"] = str(raw["excavators"][0]["crusher_routes"])  # what a table cell makes of it
+    with pytest.raises(ValueError, match="trasy do kruszarek"):
+        scenario_from_dict(raw)

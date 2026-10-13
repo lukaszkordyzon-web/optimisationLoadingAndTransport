@@ -351,6 +351,12 @@ class Scenario:
         ids = [c.id for c in self.crushers]
         if len(set(ids)) != len(ids):
             raise ValueError("Kruszarki muszą mieć różne oznaczenia")
+        for e in self.excavators:
+            if not isinstance(e.crusher_routes, dict):
+                raise ValueError(f"Koparka {e.id}: trasy do kruszarek uszkodzone – zbuduj trasy z mapy ponownie")
+            bad = [r for r in e.crusher_routes.values() if r not in self.routes]
+            if bad:
+                raise ValueError(f"Koparka {e.id}: nieznane trasy do kruszarek {', '.join(map(str, bad))}")
         for c in self.crushers_extra:
             missing = [e.id for e in self.excavators if c.id not in e.crusher_routes and c.takes(e.blast)]
             if missing:

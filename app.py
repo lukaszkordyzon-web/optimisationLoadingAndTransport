@@ -219,8 +219,11 @@ def editor() -> dict:
         c1.caption("Usypy z krzywą uziarnienia: rozdrobnienie liczone z krzywej (edycja na ekranie mapy).")
     route_ids = list(raw["routes"])
     blast_ids = [b["id"] for b in new["blasts"] if "id" in b]
-    spot_by_id = {e["id"]: e["spotting"] for e in raw["excavators"] if e.get("spotting")}  # set on the map screen
-    ex_df = pd.DataFrame([{k_: v for k_, v in e.items() if k_ != "spotting"} for e in raw["excavators"]])
+    # nested fields set on the map screen (spotting, routes to crushers, digging path) do not survive the table
+    nested = ("spotting", "crusher_routes", "dig_routes", "dig_path")
+    keep_by_id = {e["id"]: {f: e[f] for f in nested if e.get(f)} for e in raw["excavators"]}
+    spot_by_id = {i: v["spotting"] for i, v in keep_by_id.items() if "spotting" in v}
+    ex_df = pd.DataFrame([{k_: v for k_, v in e.items() if k_ not in nested} for e in raw["excavators"]])
     for col, default in (("fill_factor", 0.9), ("spot_time_s", 40.0)):
         if col not in ex_df:
             ex_df[col] = default
@@ -230,8 +233,7 @@ def editor() -> dict:
                        "route": st.column_config.SelectboxColumn("Trasa", options=route_ids),
                        "fill_factor": "Wsp. napełnienia", "spot_time_s": "Podstawienie [s]"}))
     for e in new["excavators"]:
-        if e.get("id") in spot_by_id:
-            e["spotting"] = spot_by_id[e["id"]]
+        e.update(keep_by_id.get(e.get("id"), {}))
     if spot_by_id:
         c2.caption("Koparki ze sposobami podstawiania (ekran mapy): „Podstawienie [s]” nie jest używane.")
 
