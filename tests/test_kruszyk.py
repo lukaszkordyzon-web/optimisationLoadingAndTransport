@@ -70,3 +70,16 @@ def test_travel_model_beats_physics_baseline(sc):
     data = generate_dataset(sc, shifts=12)
     _, m = train_travel_model(data)
     assert m["mae_model_s"] < m["mae_physics_baseline_s"]
+
+
+def test_live_cost_ends_at_the_final_cost_per_tonne():
+    """The live counter in the animation must end exactly at the shift result (same cost items)."""
+    import glob
+
+    from kruszyk.config import load_scenario
+    from kruszyk.sim import simulate
+
+    for f in sorted(glob.glob(str(Path(__file__).parent.parent / "scenarios" / "*.yaml"))):
+        r = simulate(load_scenario(f), seed=5)
+        assert r.timeline["t_s"].iloc[-1] == r.scenario.shift_hours * 3600
+        assert r.timeline["cost_per_t"].iloc[-1] == pytest.approx(r.kpi["cost_per_t"], abs=0.006), f

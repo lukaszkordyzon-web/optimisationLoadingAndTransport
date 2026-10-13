@@ -1038,11 +1038,40 @@ class SimResult:
         h = self.hopper.copy()
         if h.empty:
             return h
+        if h["t_s"].iloc[-1] < sim.shift_s:  # close the series at the end of the shift
+            last = h.iloc[-1].to_dict() | {"t_s": float(sim.shift_s), "fuel_l": sim.fuel_l, "kwh": sim.crusher_kwh,
+                                            "stockpile_in_t": sim.stockpile_in_t}
+            h = pd.concat([h, pd.DataFrame([last])], ignore_index=True)
+        # same formulas as the final KPIs (_kpis), applied to what has happened up to each moment
         fixed_per_h = (sc.truck_count * c.truck_per_h + len(sc.excavators) * c.excavator_per_h + c.crusher_per_h
                        + (sc.stockpile.loader_per_h if sc.stockpile.enabled else 0.0))
-        frag = float(np.mean([b.fragmentation for b in sc.blasts]))
-        h["cost"] = (fixed_per_h * h["t_s"] / 3600 + h["fuel_l"] * c.fuel_per_l + h["kwh"] * c.energy_per_kwh
-                     + h["dumped_t"] * drill_blast_cost_per_t(c, frag)
+        parked_s = sum(ex.parked_s for ex in sim.excavators.values())
+        loads = self.loads
+        done = (loads[loads["dumped_at_s"].notna()].sort_values("dumped_at_s") if "dumped_at_s" in loads
+                else loads.iloc[0:0])
+        t = h["t_s"].to_numpy()
+        blast_ids = [b.id for b in sc.blasts]
+        cum = {b: np.zeros(len(t)) for b in blast_ids}
+        frag_t = np.zeros(len(t))
+        if len(done):
+            idx = np.searchsorted(done["dumped_at_s"].to_numpy(), t, side="right")
+            for b in blast_ids:
+                w = np.concatenate([[0.0], np.cumsum(np.where(done["blast"].to_numpy() == b, done["tonnes"].to_numpy(), 0.0))])
+                cum[b] = w[idx]
+            fw = np.concatenate([[0.0], np.cumsum(done["tonnes"].to_numpy() * done["fragmentation"].to_numpy())])
+            frag_t = fw[idx]
+        dumped = sum(cum.values())
+        with np.errstate(invalid="ignore", divide="ignore"):
+            frag = np.where(dumped > 0, frag_t / np.where(dumped > 0, dumped, 1), 0.0)
+            dev = np.zeros(len(t))
+            for b, target in sim.targets.items():
+                share = np.where(dumped > 0, 100 * cum[b] / np.where(dumped > 0, dumped, 1), 0.0)
+                dev += 0.5 * np.abs(share - 100 * target)
+        drill = dumped * (c.drill_blast_per_t + c.drill_blast_fine_extra_per_t * (1 - frag))
+        parked_share = np.clip(t / sim.shift_s, 0, 1) * parked_s / 3600 * (1 - c.excavator_idle_share)
+        h["cost"] = (fixed_per_h * t / 3600 - c.excavator_per_h * parked_share
+                     + h["fuel_l"] * c.fuel_per_l + h["kwh"] * c.energy_per_kwh + drill
+                     + dumped * c.blend_penalty_per_t_pp * dev
                      + (h["stockpile_in_t"] * sc.stockpile.rehandle_cost_per_t if sc.stockpile.enabled else 0.0))
         h["cost_per_t"] = h["cost"] / h["dumped_t"].where(h["dumped_t"] > 0)
         h["fuel_l_per_t"] = h["fuel_l"] / h["dumped_t"].where(h["dumped_t"] > 0)
