@@ -84,7 +84,7 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
             st.rerun()
 
     t_prod, t_cal, t_old, t_new, t_ex, t_goal = st.tabs(
-        ["🎯 Cel produkcyjny", "🗓️ Kalendarz", "🧨 Strzały na obecnych usypach",
+        ["🎯 Cel produkcyjny", "🗓️ Kalendarz", "🪨 Usypy leżące",
          f"📍 Obszary i strzały z mapy ({len(sc.planned_blasts) + len(sc.areas)})",
          "⛏️ Koparki, wozidła, wiertnice", "⚙️ Dobór floty i zmian"])
     with t_cal:
@@ -100,22 +100,18 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         hol = st.text_input("Dni wolne (dd.mm, po przecinku)", "", key="per_hol", placeholder="np. 11.11, 24.12, 25.12")
 
     with t_old:
-        st.caption("Strzał w tym samym miejscu: co ile dni roboczych i ile ton trafia do usypu (0 = bez strzałów – "
-                   "tylko to, co jest w usypie teraz). **Udział w nadawie** – ile procent nadawy ma iść z tego usypu; "
-                   "liczą się tylko usypy, z których na danej zmianie da się ładować (udziały przeliczane do 100 %).")
-        base_key = f"per_blasts__{hashlib.md5(','.join(b.id for b in sc.blasts).encode()).hexdigest()}"
+        st.caption("Urobek, który leży dziś po wcześniejszych odstrzałach – wybiera się go do końca. Nowy urobek "
+                   "przybywa tylko z kolejnych strzałów: w obszarach wydobycia i planowanych (zakładka obok). "
+                   "**Udział w nadawie** – ile procent nadawy ma iść z tego usypu; liczą się tylko usypy, z których na "
+                   "danej zmianie da się ładować (udziały przeliczane do 100 %).")
+        base_key = f"per_piles__{hashlib.md5(','.join(b.id for b in sc.blasts).encode()).hexdigest()}"
         if base_key not in st.session_state:
             st.session_state[base_key] = pd.DataFrame([{"usyp": b.id, "material": b.material, "teraz_t": b.tonnage_t,
-                                                        "co_dni": 3, "ile_t": b.tonnage_t, "pierwszy_dzien": 2,
                                                         "udzial": b.target_share} for b in sc.blasts])
         ed = st.data_editor(st.session_state[base_key], key=base_key + "_ed", hide_index=True, width="stretch",
                             disabled=["usyp", "material", "teraz_t"],
                             column_config={"usyp": "usyp", "material": "materiał",
-                                           "teraz_t": st.column_config.NumberColumn("jest teraz [t]", format="%.0f"),
-                                           "co_dni": st.column_config.NumberColumn("strzał co [dni rob.]", min_value=0, step=1),
-                                           "ile_t": st.column_config.NumberColumn("ile ton ze strzału", min_value=0.0, step=1000.0),
-                                           "pierwszy_dzien": st.column_config.NumberColumn(
-                                               "pierwszy strzał w dniu rob. nr", min_value=1, step=1),
+                                           "teraz_t": st.column_config.NumberColumn("leży teraz [t]", format="%.0f"),
                                            "udzial": st.column_config.NumberColumn("udział w nadawie [%]", min_value=0.0,
                                                                                    max_value=100.0, step=5.0)})
     with t_new:
@@ -203,8 +199,7 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         reliability_editor(base_raw, sc, "rel_per")
     plan = PeriodPlan(start=start, days=int(days), shifts_per_day=int(shifts), saturdays=sat,
                       holidays=_holidays(hol, start.year), target_t=float(target),
-                      blasts=[PileBlasts(r["usyp"], float(r["ile_t"] or 0), int(r["co_dni"] or 0),
-                                         int(r["pierwszy_dzien"] or 1),
+                      blasts=[PileBlasts(r["usyp"], 0.0, 0, 1,  # piles only get emptied – no new blasts in a dug-out place
                                          None if pd.isna(r["udzial"]) or not r["udzial"] else float(r["udzial"]))
                               for _, r in ed.iterrows()],
                       move_excavators=move, move_setup_min=float(setup), drills=int(drills),
@@ -327,15 +322,8 @@ def _chance_results(r: dict) -> None:
 
 def _reset_tables() -> None:
     """Share tables are snapshots: drop them so they are rebuilt from the scenario."""
-    for k_ in [k_ for k_ in st.session_state if str(k_).startswith(("per_blasts__", "per_areas__", "per_planned__"))]:
+    for k_ in [k_ for k_ in st.session_state if str(k_).startswith(("per_piles__", "per_areas__", "per_planned__"))]:
         del st.session_state[k_]
-
-
-def _reblast_t(plan: PeriodPlan) -> dict:
-    """Tonnes the re-blasts set on the existing piles add during the period."""
-    n = len(plan.working_days())
-    return {b.pile: b.tonnage_t * sum(1 for i in range(1, n + 1) if i >= b.first_day and (i - b.first_day) % b.every_days == 0)
-            for b in plan.blasts if b.every_days > 0}
 
 
 def _production_tab(base_raw: dict, sc, plan: PeriodPlan, n_shifts: int) -> None:
@@ -402,7 +390,7 @@ def _production_tab(base_raw: dict, sc, plan: PeriodPlan, n_shifts: int) -> None
         with st.spinner("liczę dzisiejszą zmianę (kalibracja transportu) i plan…"):
             today = _today_kpi(dump_key(sc), int(sc.seed))
             st.session_state.prod_gp = (key, plan_backwards(
-                sc, total, mix, yields, n_shifts, _reblast_t(plan), plan.t_per_m, drills, plan.drill_m_per_shift, today))
+                sc, total, mix, yields, n_shifts, None, plan.t_per_m, drills, plan.drill_m_per_shift, today))
     got = st.session_state.get("prod_gp")
     if not got:
         st.caption(f"Okres: **{n_shifts} zmian** (kalendarz w zakładce obok).")
