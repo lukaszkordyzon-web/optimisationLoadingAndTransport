@@ -1,6 +1,6 @@
 # Scenariusz syntetyczny – wszystkie wartości są założeniami do zmiany.
 # Liczbę koparek, wozideł, odstrzałów i tras ustawia się dowolnie w listach poniżej.
-name: Kopalnia Kruszyk – scenariusz bazowy
+name: Kopalnia Kruszyk – prosty model (bez mapy)
 shift_hours: 8
 seed: 42
 dispatch: dynamic          # dynamic = system sam przydziela wozidła; fixed = wozidło przypisane do koparki

@@ -12,6 +12,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from kruszyk.config import scenario_from_dict
+from kruszyk.goal import GOAL_ITEMS, PRODUCTS, YIELD_PRESETS, apply_plan, default_yields, plan_backwards, products_made
 from kruszyk.period import GOALS, WEEKDAYS, PeriodPlan, PileBlasts, optimize_period, run_period, summary
 
 RL_LABEL = "📱 z systemem RL"
@@ -36,11 +37,11 @@ def _holidays(text: str, year: int) -> list[dt.date]:
 
 
 def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
-    st.markdown("### 📅 Tydzień / miesiąc")
-    st.markdown("Ta sama symulacja zmiany, ale **dzień po dniu**: urobek w usypach ubywa, **strzały go dokładają** "
-                "według harmonogramu, hałda i postęp koparek po froncie przechodzą na następną zmianę, a pogoda, "
-                "awarie i kierowcy losują się na każdą zmianę osobno. Widać, **czy zrobicie plan** i **kiedy "
-                "zabraknie urobku**.")
+    st.markdown("### 🗓️ Harmonogram na tydzień / miesiąc")
+    st.markdown("**Kolejność:** 🎯 **cel produkcyjny** (ile ton jakich produktów) → program **liczy wstecz od "
+                "kruszarek**: ile nadawy na każdą kruszarkę, z których usypów i obszarów, ile strzelać i wiercić, ile "
+                "wozideł – najtaniej → **zastosuj** → ▶️ **Policz okres** sprawdza plan zmiana po zmianie (pogoda, "
+                "awarie, kolejki) → ⚙️ **dobór floty i zmian** wybiera najtańszy wariant, który zdąży.")
     if base_yaml is None:
         st.info("Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia**.")
         return
@@ -67,9 +68,22 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     st.caption("Harmonogram liczony jest tak, jak jeździcie dziś (kierowca wraca do „swojej” koparki)"
                + (" – obok to samo z systemem RL." if compare_rl else "."))
 
-    t_cal, t_old, t_new, t_ex, t_goal = st.tabs(["🗓️ Kalendarz i cel", "🧨 Strzały na obecnych usypach",
-                                                 f"📍 Obszary i strzały z mapy ({len(sc.planned_blasts) + len(sc.areas)})",
-                                                 "⛏️ Koparki, wozidła, wiertnice", "🎯 Cel i dobór planu"])
+    applied = st.session_state.get("prod_applied")
+    if applied is not None:
+        apply_plan(sc, applied)  # crusher feed targets, accepted piles and feed shares from the production goal
+        c1, c2 = st.columns([4, 1])
+        c1.success(f"🎯 Zastosowany cel produkcyjny: **{applied.total_t:,.0f} t** produktów → nadawa "
+                   f"**{applied.feed_t:,.0f} t**; udziały usypów i plany kruszarek ustawione wstecz od kruszarek."
+                   .replace(",", " "))
+        if c2.button("Wyłącz", key="prod_off"):
+            st.session_state.pop("prod_applied")
+            _reset_tables()
+            st.rerun()
+
+    t_prod, t_cal, t_old, t_new, t_ex, t_goal = st.tabs(
+        ["🎯 Cel produkcyjny", "🗓️ Kalendarz", "🧨 Strzały na obecnych usypach",
+         f"📍 Obszary i strzały z mapy ({len(sc.planned_blasts) + len(sc.areas)})",
+         "⛏️ Koparki, wozidła, wiertnice", "⚙️ Dobór floty i zmian"])
     with t_cal:
         c = st.columns(5)
         start = c[0].date_input("Od dnia", _next_month(dt.date.today()), key="per_start", format="DD.MM.YYYY")
@@ -78,7 +92,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         shifts = c[2].selectbox("Zmian na dobę", [1, 2, 3], key="per_shifts",
                                 help=f"każda po {sc.shift_hours:g} h – pierwsza od {sc.shift_plan.start_time}")
         sat = c[3].checkbox("Soboty robocze", key="per_sat")
-        target = c[4].number_input("Cel na okres [t] (0 = bez celu)", 0.0, 10_000_000.0, 0.0, 5000.0, key="per_target")
+        target = c[4].number_input("Cel nadawy na okres [t] (0 = bez celu)", 0.0, 10_000_000.0, 0.0, 5000.0,
+                                   key="per_target", help="ustawia się sam po zastosowaniu celu produkcyjnego")
         hol = st.text_input("Dni wolne (dd.mm, po przecinku)", "", key="per_hol", placeholder="np. 11.11, 24.12, 25.12")
 
     with t_old:
@@ -195,6 +210,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     st.caption(f"{len(plan.working_days())} dni roboczych × {shifts} = **{n} zmian** · liczy się ok. {max(1, n // 3)} s")
     with t_goal:
         _goal_tab(sc, plan, seed, compare_rl)
+    with t_prod:
+        _production_tab(base_raw, sc, plan, n)
 
     key = hashlib.md5(repr((dump_key(sc), plan, seed, compare_rl)).encode()).hexdigest()
     if st.button("▶️ Policz okres", type="primary", disabled=n == 0):
@@ -217,6 +234,156 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     if len(res) > 3 and res[3] is not None:
         _rl_compare(res[1], res[3], res[2], sc)
     _results(res[1], res[2], sc)
+
+
+def _reset_tables() -> None:
+    """Share tables are snapshots: drop them so they are rebuilt from the scenario."""
+    for k_ in [k_ for k_ in st.session_state if str(k_).startswith(("per_blasts__", "per_areas__", "per_planned__"))]:
+        del st.session_state[k_]
+
+
+def _reblast_t(plan: PeriodPlan) -> dict:
+    """Tonnes the re-blasts set on the existing piles add during the period."""
+    n = len(plan.working_days())
+    return {b.pile: b.tonnage_t * sum(1 for i in range(1, n + 1) if i >= b.first_day and (i - b.first_day) % b.every_days == 0)
+            for b in plan.blasts if b.every_days > 0}
+
+
+def _production_tab(base_raw: dict, sc, plan: PeriodPlan, n_shifts: int) -> None:
+    """Production goal of the period (tonnes of products) planned backwards from the crushers."""
+    prod = base_raw.setdefault("production", {})  # kept in the mine file
+    st.markdown("Ile ton **jakich produktów** trzeba zrobić w okresie. Program liczy **wstecz od kruszarek**: z uzysków "
+                "każdej linii wie, ile nadawy potrzeba, a potem wybiera **najtańsze** źródła (koszt jazdy, kruszenia, "
+                "wiercenia i strzelania) w granicach wydajności kruszarek i koparek oraz zasobów usypów i obszarów.")
+    c1, c2 = st.columns([1, 2])
+    total = c1.number_input("Produkty razem w okresie [t]", 1000.0, 10_000_000.0, float(prod.get("total_t", 200_000)),
+                            10_000.0, key="prod_total", format="%.0f")
+    mix0 = prod.get("mix") or {"grysy (2–16)": 75.0, "kliniec 16–31,5": 15.0, "mieszanki / podbudowa": 10.0}
+    if "prod_mix_df" not in st.session_state:
+        st.session_state.prod_mix_df = pd.DataFrame([{"produkt": k_, "udzial": v_} for k_, v_ in mix0.items()])
+    with c2:
+        mix_df = st.data_editor(st.session_state.prod_mix_df, key="prod_mix_ed", num_rows="dynamic", hide_index=True,
+                                width="stretch",
+                                column_config={"produkt": st.column_config.SelectboxColumn("produkt / grupa",
+                                                                                           options=GOAL_ITEMS, required=True),
+                                               "udzial": st.column_config.NumberColumn("udział [%]", min_value=0.0,
+                                                                                       max_value=100.0, step=5.0)})
+    mix = {str(r["produkt"]): float(r["udzial"] or 0) for _, r in mix_df.iterrows()
+           if isinstance(r["produkt"], str) and not pd.isna(r["udzial"])}
+    tot_pct = sum(mix.values())
+    if abs(tot_pct - 100) > 0.5:
+        st.warning(f"Udziały sumują się do **{tot_pct:.0f} %** – liczę z nich proporcjonalnie (do 100 %).")
+    mix = {k_: 100 * v_ / tot_pct for k_, v_ in mix.items()} if tot_pct else {}
+    for k_ in mix:
+        st.caption(f"{k_}: **{total * mix[k_] / 100:,.0f} t**".replace(",", " ").replace("31 5", "31,5"))
+
+    st.markdown("**🏭 Uzyski kruszarek** – na co rozdziela się 1 t nadawy [%] (reszta to podziarno / odsiew).")
+    stored = prod.get("yields") or {}
+    ids = [c.id for c in sc.crushers]
+    if st.session_state.get("prod_y_ids") != ids:
+        st.session_state.prod_y_ids = ids
+        st.session_state.prod_y_df = pd.DataFrame(
+            [{"produkt": p, **{c.id: float((stored.get(c.id) or default_yields(c.product)).get(p, 0.0))
+                              for c in sc.crushers}} for p in PRODUCTS])
+    c = st.columns([2, 1, 1])
+    preset = c[0].selectbox("Typowe uzyski", list(YIELD_PRESETS), key="prod_preset")
+    who = c[1].selectbox("dla kruszarki", ids, key="prod_preset_c")
+    if c[2].button("Wstaw", key="prod_preset_go"):
+        df = st.session_state.prod_y_df.copy()
+        df[who] = [YIELD_PRESETS[preset].get(p, 0.0) for p in df["produkt"]]
+        st.session_state.prod_y_df = df
+        st.session_state.pop("prod_y_ed", None)
+        st.rerun()
+    y_df = st.data_editor(st.session_state.prod_y_df, key="prod_y_ed", hide_index=True, width="stretch",
+                          disabled=["produkt"],
+                          column_config={c.id: st.column_config.NumberColumn(
+                              f"{c.id} [%]" + (f" · {c.product}" if c.product else ""), min_value=0.0, max_value=100.0)
+                              for c in sc.crushers})
+    yields = {c.id: {r["produkt"]: float(r[c.id]) for _, r in y_df.iterrows() if r[c.id] and not pd.isna(r[c.id])}
+              for c in sc.crushers}
+    for c in sc.crushers:
+        tot = sum(yields[c.id].values())
+        if tot > 100.5:
+            st.warning(f"{c.id}: uzyski sumują się do {tot:.0f} % – więcej niż nadawa.")
+    prod.update({"total_t": float(total), "mix": {k_: round(v_, 2) for k_, v_ in mix.items()}, "yields": yields})
+
+    drills = int(st.session_state.get("per_drills", 1))
+    key = repr((total, mix, yields, n_shifts, dump_key(sc), plan))
+    if st.button("🔁 Policz plan wstecz od kruszarek", type="primary", key="prod_go", disabled=not mix or not n_shifts):
+        with st.spinner("liczę dzisiejszą zmianę (kalibracja transportu) i plan…"):
+            today = _today_kpi(dump_key(sc), int(sc.seed))
+            st.session_state.prod_gp = (key, plan_backwards(
+                sc, total, mix, yields, n_shifts, _reblast_t(plan), plan.t_per_m, drills, plan.drill_m_per_shift, today))
+    got = st.session_state.get("prod_gp")
+    if not got:
+        st.caption(f"Okres: **{n_shifts} zmian** (kalendarz w zakładce obok).")
+        return
+    if got[0] != key:
+        st.info("Cel, uzyski albo kalendarz zmieniły się – policz plan ponownie.")
+    _production_plan(got[1])
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def _today_kpi(yaml_text: str, seed: int) -> dict:
+    """One shift as it runs today – how many tonnes the fleet really hauls on these roads."""
+    from kruszyk.sim import simulate
+
+    sc_ = scenario_from_dict(yaml_load(yaml_text))
+    sc_.dispatch = "natural"
+    return {"hauled_t": float(simulate(sc_, seed=seed).kpi["hauled_t"])}
+
+
+def _production_plan(gp) -> None:
+    def t(x) -> str:
+        return f"{x:,.0f}".replace(",", " ")
+    head = (f"Nadawa **{t(gp.feed_t)} t** na kruszarki → **{t(sum(p['plan_t'] for p in gp.products))} t** produktów z "
+            f"celu · koszt ok. **{t(gp.cost_zl)} zł**" + (f" (**{gp.cost_per_t:.2f} zł/t** produktu)" if gp.cost_per_t else ""))
+    (st.success if gp.feasible else st.warning)(("✅ Cel do zrobienia. " if gp.feasible else "⚠️ Celu nie da się w pełni "
+                                                 "zrobić. ") + head)
+    for line in gp.limits:
+        st.markdown("• " + line)
+    c1, c2 = st.columns(2)
+    c1.markdown("**Produkty: cel i plan**")
+    pr = pd.DataFrame(gp.products)
+    pr["nadwyzka_t"] = (pr["plan_t"] - pr["cel_t"]).clip(lower=0)
+    c1.dataframe(pr, hide_index=True, width="stretch",
+                 column_config={"nadwyzka_t": st.column_config.NumberColumn(
+                                    "nadwyżka [t]", format="%.0f", help="produkt uboczny ponad cel – na skład / sprzedaż"),"cel_t": st.column_config.NumberColumn("cel [t]", format="%.0f"),
+                                "plan_t": st.column_config.NumberColumn("z planu [t]", format="%.0f"),
+                                "brak_t": st.column_config.NumberColumn("brak [t]", format="%.0f")})
+    c2.markdown("**Kruszarki: nadawa**")
+    c2.dataframe(pd.DataFrame(gp.crushers).drop(columns=["pelna"]), hide_index=True, width="stretch",
+                 column_config={"nadawa_t": st.column_config.NumberColumn("w okresie [t]", format="%.0f"),
+                                "na_zmiane_t": st.column_config.NumberColumn("na zmianę [t]", format="%.0f"),
+                                "wykorzystanie_pct": "wykorzystanie [%]"})
+    st.markdown("**Skąd urobek, ile strzelać i wiercić**")
+    st.dataframe(pd.DataFrame(gp.sources), hide_index=True, width="stretch",
+                 column_config={"skad": "skąd", "dostepne_t": st.column_config.NumberColumn("dostępne [t]", format="%.0f"),
+                                "plan_t": st.column_config.NumberColumn("do wybrania [t]", format="%.0f"),
+                                "udzial_pct": "udział w nadawie [%]",
+                                "do_odstrzalu_t": st.column_config.NumberColumn("do odstrzelenia [t]", format="%.0f"),
+                                "strzalow": "strzałów", "wiercenie_m": "wiercenie [m]"})
+    with st.expander("Trasy urobku: skąd → która kruszarka"):
+        st.dataframe(pd.DataFrame(gp.flows), hide_index=True, width="stretch",
+                     column_config={"skad": "skąd", "t": st.column_config.NumberColumn("t", format="%.0f"),
+                                    "odleglosc_m": "odległość [m]", "koszt_na_t": "koszt [zł/t]"})
+    d, h = gp.drilling, gp.haulage
+    c = st.columns(4)
+    c[0].metric("Wiercenie", f"{t(d['metry'])} m", f"{d['zmian_wiertnicy']:g} zmian wiertnicy", delta_color="off")
+    c[1].metric("Wiertnic potrzeba", d["wiertnic_potrzeba"], f"jest {d['wiertnic_jest']}", delta_color="off")
+    c[2].metric("Wozideł potrzeba", h["wozidel_potrzeba"], f"jest {h['wozidel_jest']}", delta_color="off",
+                help="z odległości, skalibrowane na dzisiejszej zmianie (rampy, mijanki, kolejki); dokładnie "
+                     "sprawdza ▶️ Policz okres i ⚙️ Dobór floty")
+    c[3].metric("Koparki załadują", f"{t(h['zaladunek_na_zmiane_t'])} t/zm.", delta_color="off")
+    if st.button("✅ Zastosuj w harmonogramie", key="prod_apply"):
+        st.session_state.prod_applied = gp
+        st.session_state.per_apply = {"per_target": float(gp.feed_t), "goal_kind": "deadline", "goal_t": float(gp.feed_t),
+                                      "per_trucks": max(1, int(h["wozidel_potrzeba"])),
+                                      "per_drills": max(int(d["wiertnic_jest"]), int(d["wiertnic_potrzeba"]))}
+        _reset_tables()
+        st.rerun()
+    st.caption("Zastosuj → udziały usypów i obszarów, plany kruszarek, cel nadawy, liczba wozideł i wiertnic ustawią się "
+               "same. Potem ▶️ **Policz okres** pokaże, czy plan wychodzi zmiana po zmianie.")
 
 
 def _rl_compare(df: pd.DataFrame, df_rl: pd.DataFrame, plan: PeriodPlan, sc) -> None:
@@ -447,6 +614,14 @@ def _results(df: pd.DataFrame, plan: PeriodPlan, sc) -> None:
         _blast_schedule(meta, sc)
     with r_find:
         st.markdown("  \n".join(_findings(df, plan, sc, s)))
+        gp = st.session_state.get("prod_applied")
+        if gp is not None:
+            crushed = {k_["kruszarka"]: k_["skruszone_t"] for k_ in s["kruszarki"]}
+            made = products_made(crushed, gp.yields, [p["produkt"] for p in gp.products])
+            st.markdown("**🎯 Cel produkcyjny – wykonanie w symulacji**")
+            st.dataframe(pd.DataFrame([{"produkt": p["produkt"], "cel [t]": p["cel_t"], "wykonanie [t]": round(made[p["produkt"]]),
+                                        "wykonanie [%]": round(100 * made[p["produkt"]] / p["cel_t"], 1) if p["cel_t"] else None}
+                                       for p in gp.products]), hide_index=True, width="stretch")
         if len(sc.crushers) > 1 or any(c.target_t or c.product for c in sc.crushers):
             st.markdown("**🏭 Kruszarki za okres**")
             st.dataframe(pd.DataFrame(s["kruszarki"]), hide_index=True, width="stretch",

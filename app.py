@@ -39,6 +39,9 @@ st.set_page_config(page_title="Kruszyk – załadunek, transport, kruszenie", pa
 
 
 # ------------------------------------------------------------------ state
+DEFAULT_SCENARIO = "kruszyk_kopalnia"  # the mine opened at start
+
+
 def presets() -> dict[str, Path]:
     return {yaml.safe_load(p.read_text(encoding="utf-8")).get("name", p.stem): p
             for p in sorted(SCEN_DIR.glob("*.yaml"))}
@@ -92,7 +95,7 @@ def import_scenario(text: str) -> None:
 
 if "raw" not in st.session_state:
     p = presets()
-    first = next((k for k, v in p.items() if v.stem == "kruszyk_bazowy"), next(iter(p)))
+    first = next((k for k, v in p.items() if v.stem == DEFAULT_SCENARIO), next(iter(p)))
     set_raw(yaml.safe_load(p[first].read_text(encoding="utf-8")))
 
 raw = st.session_state.raw
@@ -149,7 +152,8 @@ with st.sidebar:
     st.header("⛏️ Kruszyk")
     st.caption("Optymalizacja łańcucha odstrzał → koparka → wozidła → kruszarka (dane syntetyczne)")
     p = presets()
-    choice = st.selectbox("Scenariusz przykładowy", list(p))
+    choice = st.selectbox("Scenariusz przykładowy", list(p),
+                          index=next((i for i, v in enumerate(p.values()) if v.stem == DEFAULT_SCENARIO), 0))
     if st.button("Wczytaj scenariusz", width="stretch"):
         set_raw(yaml.safe_load(p[choice].read_text(encoding="utf-8")), new_mine=True)
         st.rerun()

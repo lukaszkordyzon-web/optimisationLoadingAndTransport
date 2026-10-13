@@ -203,3 +203,21 @@ def test_schedule_compares_with_rl_when_learned():
     assert not at.exception, at.exception
     assert at.session_state["period"][3] is not None
     assert any("Wywiezione z RL" in m.label for m in at.metric)
+
+
+def test_production_goal_backwards_and_applied():
+    at = AppTest.from_file(APP, default_timeout=300).run()  # the default mine
+    at.radio(key="work_kind").set_value("🗓️ Harmonogram – kierownictwo").run()
+    assert not at.exception, at.exception
+    at.number_input(key="per_days").set_value(3).run()
+    next(b for b in at.button if "Policz plan wstecz" in b.label).click().run()
+    assert not at.exception, at.exception
+    gp = at.session_state["prod_gp"][1]
+    assert gp.feed_t > 0 and gp.products
+    next(b for b in at.button if "Zastosuj w harmonogramie" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert at.number_input(key="per_target").value == float(gp.feed_t)
+    assert any("Zastosowany cel produkcyjny" in s.value for s in at.success)
+    next(b for b in at.button if "Policz okres" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert any("Cel produkcyjny – wykonanie" in m.value for m in at.markdown)

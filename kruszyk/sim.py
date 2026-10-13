@@ -1118,6 +1118,8 @@ class SimResult:
                 cum[b] = w[idx]
             fw = np.concatenate([[0.0], np.cumsum(done["tonnes"].to_numpy() * done["fragmentation"].to_numpy())])
             frag_t = fw[idx]
+            # tonnes dumped so far, from the same loads as the final KPIs (every crusher, every pile)
+            h["dumped_t"] = np.concatenate([[0.0], np.cumsum(done["tonnes"].to_numpy())])[idx]
         dumped = sum(cum.values())
         with np.errstate(invalid="ignore", divide="ignore"):
             frag = np.where(dumped > 0, frag_t / np.where(dumped > 0, dumped, 1), 0.0)
