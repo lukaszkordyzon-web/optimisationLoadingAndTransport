@@ -937,44 +937,65 @@ def checklist(site: dict, raw: dict) -> None:
     st.markdown(" · ".join(f"{'✅' if ok else '⬜'} {name}" for name, ok in items))
 
 
+TRUCK_COLS = {"id": "nr", "model": "typ", "count": None, "w_pracy": st.column_config.CheckboxColumn("w pracy"),
+              "payload_t": st.column_config.NumberColumn("ładowność [t]", min_value=5.0, step=1.0),
+              "empty_mass_t": st.column_config.NumberColumn("masa własna [t]", min_value=1.0),
+              "power_kw": st.column_config.NumberColumn("moc [kW]", min_value=50.0),
+              "max_speed_kmh": st.column_config.NumberColumn("v max [km/h]", min_value=5.0),
+              "fuel_lph_loaded": st.column_config.NumberColumn("paliwo pełny [l/h]", min_value=0.0),
+              "fuel_lph_empty": st.column_config.NumberColumn("paliwo pusty [l/h]", min_value=0.0),
+              "fuel_lph_idle": st.column_config.NumberColumn("paliwo postój [l/h]", min_value=0.0),
+              "tank_l": st.column_config.NumberColumn("zbiornik [l]", min_value=50.0),
+              "excavators": st.column_config.TextColumn("koparki (puste = wszystkie)")}
+TRUCK_NUM = ["payload_t", "empty_mass_t", "power_kw", "max_speed_kmh", "fuel_lph_loaded", "fuel_lph_empty",
+             "fuel_lph_idle", "tank_l"]
+
+
 def quick_fleet_crusher(raw: dict, site: dict) -> None:
-    """Trucks and crusher edited right next to the map (simple mode); changes go straight to the scenario."""
+    """Every truck as its own row with its own parameters; changes go straight to the scenario."""
+    from kruszyk.config import expand_trucks
+
     st.subheader("6. Wozidła")
-    st.caption("Dodaj wiersz na każdy typ wozideł. **Koparki**: do których koparek mogą jeździć, np. `K-1, K-2` "
-               "(puste = do wszystkich).")
+    st.caption("Każde wozidło osobno – z własną ładownością, masą, mocą, zużyciem paliwa i zbiornikiem. **W pracy** "
+               "odznacz, gdy wozidło stoi (np. w remoncie). **Koparki**: do których może jeździć, np. `K-1, K-2` "
+               "(puste = do wszystkich). Nowy wiersz = kopia ostatniego wozidła. Awaryjność każdego wozidła – w tabeli "
+               "„Awaryjność urządzeń” (kalibracja).")
     ex_ids = {e["id"] for e in site.get("excavators", [])} | {e["id"] for e in raw.get("excavators", [])}
     base_key = f"qfleet_base_{st.session_state.ver}"
     if base_key not in st.session_state:  # fixed starting table: the editor applies its edits on top of it
-        st.session_state[base_key] = (
-            copy.deepcopy(raw.get("trucks", [])),
-            pd.DataFrame([{"model": f.get("model", ""), "count": int(f.get("count", 0)),
-                           "payload_t": float(f.get("payload_t", 50)), "excavators": ", ".join(f.get("excavators") or [])}
-                          for f in raw.get("trucks", [])], columns=["model", "count", "payload_t", "excavators"]))
+        trucks = expand_trucks(raw.get("trucks", []))
+        st.session_state[base_key] = (trucks, pd.DataFrame(
+            [{"id": t["id"], "model": t.get("model", ""), "w_pracy": bool(t.get("count", 1)),
+              **{c: float(t.get(c) or 0) for c in TRUCK_NUM}, "excavators": ", ".join(t.get("excavators") or [])}
+             for t in trucks], columns=["id", "model", "w_pracy", *TRUCK_NUM, "excavators"]))
     old, start = st.session_state[base_key]
-    ed = st.data_editor(start, num_rows="dynamic",
-                        key=f"qfleet_{st.session_state.ver}", hide_index=True, width="stretch",
-                        column_config={"model": "typ wozidła", "count": st.column_config.NumberColumn("liczba", min_value=0, step=1),
-                                       "payload_t": st.column_config.NumberColumn("ładowność [t]", min_value=5.0, step=5.0),
-                                       "excavators": st.column_config.TextColumn("koparki (puste = wszystkie)")})
-    fleets = []
+    ed = st.data_editor(start, num_rows="dynamic", key=f"qfleet_{st.session_state.ver}", hide_index=True,
+                        width="stretch", column_config={k_: v_ for k_, v_ in TRUCK_COLS.items() if v_ is not None})
+    trucks, used = [], set()
     for i, r in ed.reset_index(drop=True).iterrows():
-        if pd.isna(r["payload_t"]) or not str(r["model"] or "").strip():
-            continue
-        payload = float(r["payload_t"])
-        base = dict(old[i]) if i < len(old) else {
-            # typical values scaled with payload for a new truck type
-            "empty_mass_t": round(payload * 0.75, 1), "power_kw": round(payload * 9.5), "max_speed_kmh": 45,
-            "fuel_lph_loaded": round(payload * 1.1), "fuel_lph_empty": round(payload * 0.58), "fuel_lph_idle": 10}
-        if i < len(old) and abs(float(old[i].get("payload_t", payload)) - payload) > 1e-6:
-            scale = payload / float(old[i]["payload_t"])
-            base["empty_mass_t"] = round(float(base.get("empty_mass_t", payload * 0.75)) * scale, 1)
-            base["power_kw"] = round(float(base.get("power_kw", payload * 9.5)) * scale)
+        prev = trucks[-1] if trucks else (old[-1] if old else {
+            "model": "wozidło 40 t", "payload_t": 40.0, "empty_mass_t": 30.0, "power_kw": 380, "max_speed_kmh": 45,
+            "fuel_lph_loaded": 45, "fuel_lph_empty": 24, "fuel_lph_idle": 10, "tank_l": 700.0})
+        base = dict(old[i]) if i < len(old) else dict(prev)
+        tid = str(r["id"] or "").strip()
+        n = len(trucks) + 1
+        while not tid or tid in used:  # a new row or a repeated number: next free WZ-nn
+            tid, n = f"WZ-{n:02d}", n + 1
+        used.add(tid)
+        row = {c: (float(r[c]) if not pd.isna(r[c]) else float(base.get(c) or 0)) for c in TRUCK_NUM}
+        if i < len(old) and abs(float(old[i].get("payload_t", row["payload_t"])) - row["payload_t"]) > 1e-6 \
+                and row["empty_mass_t"] == float(old[i].get("empty_mass_t", 0)):  # payload changed alone: scale the truck
+            scale = row["payload_t"] / float(old[i]["payload_t"])
+            row["empty_mass_t"] = round(row["empty_mass_t"] * scale, 1)
+            row["power_kw"] = round(row["power_kw"] * scale)
         excs = [x.strip() for x in str(r["excavators"] or "").split(",") if x.strip() in ex_ids]
-        fleets.append({**base, "model": str(r["model"]).strip(), "count": int(r["count"] or 0), "payload_t": payload,
-                       "excavators": excs})
-    raw["trucks"] = fleets
-    st.caption("Kruszarki (wydajność, kosz, produkt, plan, z których usypów przyjmują) – w sekcji 3, zakładka "
-               "„🛣️ Drogi, mijanki, kruszarki”.")
+        model = str(r["model"] or "").strip() or str(base.get("model", "wozidło"))
+        trucks.append({**{k_: v_ for k_, v_ in base.items() if k_ not in ("blend",)}, **row, "id": tid, "model": model,
+                       "count": 1 if bool(r["w_pracy"]) or pd.isna(r["w_pracy"]) else 0, "excavators": excs,
+                       **({"blend": base["blend"]} if base.get("blend") else {})})
+    raw["trucks"] = trucks
+    st.caption(f"W pracy: **{sum(t['count'] for t in trucks)}** z {len(trucks)} wozideł. Kruszarki (wydajność, kosz, "
+               "produkt, plan, z których usypów przyjmują) – w sekcji 3, zakładka „🛣️ Drogi, mijanki, kruszarki”.")
 
 
 def psd_editor(site: dict, max_feed_mm: float, penalty: float) -> None:

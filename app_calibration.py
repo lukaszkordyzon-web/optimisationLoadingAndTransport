@@ -120,10 +120,14 @@ def reliability_editor(raw: dict, sc, key: str) -> None:
                "niż zmiana; wtedy awaria przechodzi na kolejne zmiany.")
     rel = sc.reliability
     stored = (raw.get("reliability") or {}).get("machines") or {}
-    rows = [(c.id, "crusher", f"Kruszarka {c.id}") for c in sc.crushers]
-    rows += [(e.id, "excavator", f"Koparka {e.id}") for e in sc.excavators]
-    rows += [(f"truck:{f.model}", "truck", f"Wozidło {f.model} (każde)") for f in sc.trucks]
-    rows += [("drill", "drill", "Wiertnica (każda)")]
+    from kruszyk.config import truck_units
+
+    # (key, kind, name, where its value comes from when it has none of its own)
+    rows = [(c.id, "crusher", f"Kruszarka {c.id}", c.id) for c in sc.crushers]
+    rows += [(e.id, "excavator", f"Koparka {e.id}", e.id) for e in sc.excavators]
+    rows += [(tid, "truck", f"Wozidło {tid} · {f.model}", tid if tid in stored else f"truck:{f.model}")
+             for tid, f in truck_units(sc.trucks)]
+    rows += [("drill", "drill", "Wiertnica (każda)", "drill")]
     c = st.columns([1, 1, 2])
     enabled = c[0].toggle("Uwzględniaj awarie", rel.enabled, key=f"{key}_on")
     ref = c[1].number_input("Zmian na dobę w tym okresie", 1.0, 3.0, float(rel.ref_shifts_per_day), 1.0,
@@ -134,8 +138,8 @@ def reliability_editor(raw: dict, sc, key: str) -> None:
     ed_key = f"{key}_tab_{abs(hash(sig)) % 10**8}"
     if f"{ed_key}__base" not in st.session_state:
         st.session_state[f"{ed_key}__base"] = pd.DataFrame([
-            {"klucz": k_, "urzadzenie": name, "awarii": rel.values(k_, kind)[0], "godzin": rel.values(k_, kind)[1]}
-            for k_, kind, name in rows])
+            {"klucz": k_, "urzadzenie": name, "awarii": rel.values(src, kind)[0], "godzin": rel.values(src, kind)[1]}
+            for k_, kind, name, src in rows])
     df = st.data_editor(st.session_state[f"{ed_key}__base"], key=ed_key, hide_index=True, width="stretch",
                         disabled=["klucz", "urzadzenie"], column_order=["urzadzenie", "awarii", "godzin"],
                         column_config={"urzadzenie": "urządzenie",
@@ -144,10 +148,10 @@ def reliability_editor(raw: dict, sc, key: str) -> None:
                                                                                step=1.0)})
     machines, assumed, lines = {}, [], []
     probe = Reliability(enabled=True, ref_shifts_per_day=ref, ref_days_per_month=rel.ref_days_per_month)
-    for (k_, kind, name), (_, r) in zip(rows, df.iterrows()):
+    for (k_, kind, name, src), (_, r) in zip(rows, df.iterrows()):
         n, h = float(r["awarii"] or 0), float(r["godzin"] or 0)
-        d_n, d_h = Reliability().values(k_, kind)[:2]
-        if k_ in stored or (n, h) != (d_n, d_h):
+        d_n, d_h, d_assumed = rel.values(src, kind)
+        if k_ in stored or (n, h) != (d_n, d_h) or not d_assumed:
             machines[k_] = {"count": n, "hours": h}
         else:
             assumed.append(name)

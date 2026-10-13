@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import simpy
 
-from .config import REPAIR_SIGMA, Excavator, Scenario, TruckFleet, clock_to_s
+from .config import REPAIR_SIGMA, Excavator, Scenario, TruckFleet, clock_to_s, truck_units
 from .site import blast_point, haversine_m
 from .physics import (crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_t, load_time_s, passes_per_truck,
                       route_time_s, segment_time_s)
@@ -151,19 +151,18 @@ class Simulation:
         self.trucks: list[TruckState] = []
         # driver/truck style is persistent across shifts (drawn from the scenario seed, not the shift seed)
         crew_rng = np.random.default_rng(sc.seed)
-        i = 0
-        for fleet in sc.trucks:
+        per_fleet: dict[int, int] = {}
+        for i, (tid, fleet) in enumerate(truck_units(sc.trucks)):
             allowed = self.allowed_ids(fleet)
-            for j in range(fleet.count):
-                self.trucks.append(TruckState(
-                    id=f"WZ-{i + 1:02d}",
-                    fleet=fleet,
-                    driver_factor=float(np.clip(crew_rng.normal(1.0, v.driver_sd), 0.8, 1.3)),
-                    home_excavator=allowed[(i + j) % len(allowed)],
-                    speeder=bool(crew_rng.random() < v.speeding_share),
-                    fuel_left_l=fleet.tank_l,
-                ))
-                i += 1
+            j = per_fleet[id(fleet)] = per_fleet.get(id(fleet), -1) + 1
+            self.trucks.append(TruckState(
+                id=tid,
+                fleet=fleet,
+                driver_factor=float(np.clip(crew_rng.normal(1.0, v.driver_sd), 0.8, 1.3)),
+                home_excavator=allowed[(i + j) % len(allowed)],
+                speeder=bool(crew_rng.random() < v.speeding_share),
+                fuel_left_l=fleet.tank_l,
+            ))
 
         self.units = {c.id: CrusherUnit(c, simpy.Container(self.env, capacity=c.hopper_t, init=0),
                                         simpy.Resource(self.env, 1)) for c in sc.crushers}
@@ -976,7 +975,8 @@ class Simulation:
 
             # random breakdown, probability proportional to the time worked (cycle length)
             cycle = env.now - cycle_start
-            mtbf, mttr = sc.reliability.rates(f"truck:{fleet.model}", "truck", sc.shift_hours)
+            rel_key = truck.id if truck.id in sc.reliability.machines else f"truck:{fleet.model}"
+            mtbf, mttr = sc.reliability.rates(rel_key, "truck", sc.shift_hours)
             if mtbf < math.inf and self.frng.random() < 1 - math.exp(-cycle / (mtbf * 3600)):
                 t0 = env.now
                 truck.down_end = t0 + self._repair_s(mttr)

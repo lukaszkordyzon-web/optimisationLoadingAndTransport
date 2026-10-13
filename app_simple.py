@@ -220,16 +220,17 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
         st.session_state.pop("variant_rl", None)
         st.rerun()
 
-    st.markdown("**🚚 Wozidła** – zmień liczbę, ładowność albo przypisania (`K-1, K-2`; dwa usypy w kursie: `K-1:0.5, K-2:0.5`).")
+    st.markdown("**🚚 Wozidła** – każde osobno (nr); zmień ładowność, wyłącz z pracy (liczba 0), dodaj wiersz albo "
+                "zmień przypisania (`K-1, K-2`; dwa usypy w kursie: `K-1:0.5, K-2:0.5`).")
     ed = _snapshot_editor(
         f"vtrucks_{vv}",
-        lambda: pd.DataFrame([{"model": f.get("model", ""), "count": int(f.get("count", 0)),
+        lambda: pd.DataFrame([{"id": f.get("id", ""), "model": f.get("model", ""), "count": int(f.get("count", 0)),
                                "payload_t": float(f.get("payload_t", 50)),
                                "excavators": ", ".join(f.get("excavators") or []),
                                "blend": ", ".join(f"{a}:{b:g}" for a, b in (f.get("blend") or {}).items())}
                               for f in var.get("trucks", [])]),
         num_rows="dynamic", hide_index=True, width="stretch",
-        column_config={"model": "typ wozidła", "count": st.column_config.NumberColumn("liczba", min_value=0, step=1),
+        column_config={"id": "nr", "model": "typ wozidła", "count": st.column_config.NumberColumn("liczba", min_value=0, step=1),
                        "payload_t": st.column_config.NumberColumn("ładowność [t]", min_value=5.0),
                        "excavators": "koparki (puste = wszystkie)", "blend": "dwa usypy w kursie"})
     old = st.session_state[f"vtrucks_{vv}__base_fleets"] if f"vtrucks_{vv}__base_fleets" in st.session_state else None
@@ -246,6 +247,7 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
             for key in ("empty_mass_t", "power_kw", "fuel_lph_loaded", "fuel_lph_empty"):
                 if key in base:
                     base[key] = round(float(base[key]) * scale, 1)
+        base["id"] = "" if pd.isna(r.get("id")) else str(r.get("id") or "").strip()
         fleets.append({**base, "model": str(r["model"]).strip(), "count": int(r["count"] or 0), "payload_t": payload,
                        "excavators": _parse_list(r["excavators"]), "blend": _parse_blend(r["blend"])})
     var["trucks"] = fleets

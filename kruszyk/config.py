@@ -79,6 +79,38 @@ class TruckFleet:
     excavators: list = field(default_factory=list)
     # two-pile trips: {excavator: share of the payload}, loaded in this order, e.g. {K-1: 0.5, K-2: 0.5}
     blend: dict = field(default_factory=dict)
+    id: str = ""  # one particular truck (count 1), e.g. "WZ-03"; empty = a group of identical trucks
+
+
+def truck_units(trucks: list) -> list[tuple[str, "TruckFleet"]]:
+    """Every truck with its id: named trucks keep their id, groups get WZ-01, WZ-02 … (skipping names in use)."""
+    used = {f.id for f in trucks if f.id}
+    out, n = [], 0
+    for f in trucks:
+        for j in range(f.count):
+            if f.id:
+                tid = f.id if j == 0 else f"{f.id}-{j + 1}"
+            else:
+                n += 1
+                while f"WZ-{n:02d}" in used:
+                    n += 1
+                tid = f"WZ-{n:02d}"
+            out.append((tid, f))
+    return out
+
+
+def expand_trucks(raw_trucks: list[dict]) -> list[dict]:
+    """The fleet as one entry per truck (count 1, own id) – so every truck can have its own parameters."""
+    fleets = [TruckFleet(**{k: v for k, v in t.items() if k in TruckFleet.__dataclass_fields__}) for t in raw_trucks]
+    out, k = [], 0
+    for t, f in zip(raw_trucks, fleets):
+        for _ in range(int(t.get("count", 0))):
+            tid = truck_units(fleets)[k][0]
+            out.append({**t, "id": tid, "count": 1})
+            k += 1
+        if not int(t.get("count", 0)):  # a type with no trucks in work stays as one idle truck
+            out.append({**t, "id": t.get("id") or f"{t.get('model', 'wozidło')} (postój)", "count": 0})
+    return out
 
 
 # What a crusher can produce and how much energy it typically takes per tonne (crushing + screening).
@@ -268,7 +300,8 @@ class Reliability:
     """Breakdowns per machine: failures per month and their total hours – averages of the last 3–6 months,
     only stops longer than ~15 min, planned maintenance excluded. The month is the reference period below
     (shifts per day × working days): a machine that works more fails more often.
-    Keys: machine id (excavators, crushers), "truck:<model>" (per truck of that type), "drill" (per rig)."""
+    Keys: machine id (excavators, crushers, trucks – e.g. "WZ-03"), "truck:<model>" (every truck of that type
+    without its own entry), "drill" (per rig)."""
     enabled: bool = True
     ref_shifts_per_day: float = 2.0
     ref_days_per_month: float = 22.0
@@ -429,6 +462,24 @@ class Scenario:
         import copy
 
         sc = copy.deepcopy(self)
+        if sc.trucks and all(f.id and f.count <= 1 for f in sc.trucks):  # one entry per truck
+            working = [f for f in sc.trucks if f.count]
+            while len(working) > n:  # take the last ones out of work
+                working.pop().count = 0
+            spare = [f for f in sc.trucks if not f.count]
+            while len(working) < n and spare:  # idle trucks come back first
+                spare[0].count = 1
+                working.append(spare.pop(0))
+            while len(working) < n:  # then copies of the last truck
+                used = {f.id for f in sc.trucks}
+                k = len(sc.trucks) + 1
+                while f"WZ-{k:02d}" in used:
+                    k += 1
+                new = copy.deepcopy(working[-1] if working else sc.trucks[-1])
+                new.id, new.count = f"WZ-{k:02d}", 1
+                sc.trucks.append(new)
+                working.append(new)
+            return sc
         others = sum(f.count for f in sc.trucks[1:])
         sc.trucks[0].count = max(0, n - others)
         if sc.truck_count != n:  # n smaller than the other fleets: trim from the end

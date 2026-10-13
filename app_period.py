@@ -175,7 +175,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     with t_ex:
         st.session_state.setdefault("per_trucks", int(sc.truck_count))
         n_trucks = st.number_input("Liczba wozideł (wszystkie typy razem)", 1, 60, step=1,
-                                   key="per_trucks", help="zmiana dotyczy pierwszego typu wozideł z listy")
+                                   key="per_trucks", help="więcej = najpierw wracają wozidła odstawione, potem kopie ostatniego; mniej = "
+                                                         "odstawiane od końca listy")
         if n_trucks != sc.truck_count:
             sc = sc.with_truck_count(int(n_trucks))
         c = st.columns(2)
