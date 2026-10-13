@@ -57,6 +57,7 @@ class Excavator:
     dig_path: list | None = None
     relocate_every_t: float = 600.0
     relocate_min: float = 4.0
+    crusher_routes: dict = field(default_factory=dict)  # other crushers: crusher id -> route id from here
     start_delay_min: float = 0.0  # not loading at the start of the shift (driving to a new pile)
 
 
@@ -89,6 +90,13 @@ class Crusher:
     max_feed_mm: float = 800.0      # bigger blocks = oversize (hammering, slower feeding)
     kwh_per_t: float = 1.1          # specific energy at perfect fragmentation
     kwh_fragmentation_extra: float = 0.6  # +60 % energy at fragmentation=1
+    id: str = "C-1"
+    accepts: list = field(default_factory=list)  # piles (blast ids) it takes material from; empty = all
+    product: str = ""          # what it produces, e.g. "kruszywo 0–31,5"
+    target_t: float = 0.0      # production plan per shift [t] (0 = none)
+
+    def takes(self, blast_id: str) -> bool:
+        return not self.accepts or blast_id in self.accepts
 
 
 @dataclass
@@ -270,10 +278,18 @@ class Scenario:
     # future blasts drawn on the map (used by the week / month run): [{id, tonnage_t, material, psd,
     # fragmentation, loose_density_t_m3, blast_day, route}] – `route` = from its loading point to the crusher
     planned_blasts: list = field(default_factory=list)
+    crushers_extra: list = field(default_factory=list)  # second, third … crusher [Crusher]
+
+    @property
+    def crushers(self) -> list:
+        return [self.crusher] + list(self.crushers_extra)
 
     @property
     def truck_count(self) -> int:
         return sum(f.count for f in self.trucks)
+
+    def excavator(self, ex_id: str) -> "Excavator":
+        return next(e for e in self.excavators if e.id == ex_id)
 
     def blast(self, blast_id: str) -> Blast:
         return next(b for b in self.blasts if b.id == blast_id)
@@ -315,6 +331,20 @@ class Scenario:
                     if f"{a}>{b}" not in self.links:
                         raise ValueError(f"Wozidła {f.model}: brak połączenia {a} → {b} "
                                          "(zbuduj trasy z mapy, żeby wyznaczyć przejazd między koparkami)")
+        ids = [c.id for c in self.crushers]
+        if len(set(ids)) != len(ids):
+            raise ValueError("Kruszarki muszą mieć różne oznaczenia")
+        for c in self.crushers_extra:
+            missing = [e.id for e in self.excavators if c.id not in e.crusher_routes and c.takes(e.blast)]
+            if missing:
+                raise ValueError(f"Kruszarka {c.id}: brak tras od koparek {', '.join(missing)} – zbuduj trasy z mapy")
+        for e in self.excavators:
+            if not any(c.takes(e.blast) for c in self.crushers):
+                raise ValueError(f"Żadna kruszarka nie przyjmuje urobku z {e.blast} (koparka {e.id}) – "
+                                 "ustaw, z których usypów przyjmują kruszarki")
+        for f in self.trucks:
+            if f.count and f.blend and not any(all(c.takes(self.excavator(x).blast) for x in f.blend) for c in self.crushers):
+                raise ValueError(f"Wozidła {f.model}: żadna kruszarka nie przyjmuje mieszanki z {', '.join(f.blend)}")
         if self.crusher.hopper_t < max(f.payload_t for f in self.trucks if f.count > 0):
             raise ValueError("Kosz kruszarki mniejszy niż ładowność wozidła")
         for r in self.routes.values():
@@ -383,6 +413,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         natural_switch_prob=raw.get("natural_switch_prob", 0.25),
         rl_weights=raw.get("rl_weights"),
         planned_blasts=[dict(p) for p in raw.get("planned_blasts") or []],
+        crushers_extra=[_build(Crusher, c) for c in raw.get("crushers_extra") or []],
     )
     from .psd import fragmentation_index
 

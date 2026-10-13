@@ -68,6 +68,16 @@ def _shift_start(first: str, shift_no: int, hours: float) -> str:
 MIN_PILE_T = 50.0  # less than this in a pile = nothing to load
 
 
+def _blends_ok(sc: Scenario, ex_pile: dict, ex_id: str, pile: str) -> bool:
+    """Trucks loading at two excavators need a crusher that takes both materials – also after a move."""
+    for f in sc.trucks:
+        if f.count and f.blend and ex_id in f.blend:
+            piles = [pile if x == ex_id else ex_pile[x] for x in f.blend]
+            if not any(all(c.takes(p) for p in piles) for c in sc.crushers):
+                return False
+    return True
+
+
 def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> pd.DataFrame:
     """One row per shift. `progress(i, n)` is called after every shift (for a progress bar)."""
     from .config import Blast
@@ -80,8 +90,12 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
         left[pid] = 0.0  # not blasted yet
     # where trucks load at every pile: the route of the excavator that works it / of the planned blast
     pile_route = {p["id"]: p["route"] for p in planned.values()}
+    pile_croutes = {p["id"]: dict(p.get("crusher_routes") or {}) for p in planned.values()}
     for e in sc.excavators:
         pile_route.setdefault(e.blast, e.route)
+        pile_croutes.setdefault(e.blast, dict(e.crusher_routes))
+    ex_croutes = {e.id: dict(e.crusher_routes) for e in sc.excavators}
+    taken = {p: any(c.takes(p) for c in sc.crushers) for p in left}  # some crusher accepts this material
     ex_pile = {e.id: e.blast for e in sc.excavators}
     ex_route = {e.id: e.route for e in sc.excavators}
     stock = float(sc.stockpile.initial_t)
@@ -112,7 +126,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 if left[ex_pile[e.id]] >= MIN_PILE_T:
                     continue
                 busy = {ex_pile[x] for x in ex_pile if x != e.id and left[ex_pile[x]] >= MIN_PILE_T}
-                free = [p for p in left if left[p] >= MIN_PILE_T and p not in busy and p in pile_route]
+                free = [p for p in left if left[p] >= MIN_PILE_T and p not in busy and p in pile_route and taken[p]
+                        and _blends_ok(sc, ex_pile, e.id, p)]
                 if not free:
                     continue
                 here = sc.routes[ex_route[e.id]].path
@@ -124,6 +139,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 delay[e.id] = round(d / (move_kmh / 3.6) / 60 + plan.move_setup_min, 1)
                 moves.append(f"{e.id} → {target} ({round(d):,} m".replace(",", " ") + f"; {delay[e.id]:.0f} min)")
                 ex_pile[e.id], ex_route[e.id] = target, pile_route[target]
+                ex_croutes[e.id] = pile_croutes.get(target, {})
         v = copy.deepcopy(sc)
         for b in v.blasts:
             b.tonnage_t = max(left[b.id], 0.0)
@@ -140,7 +156,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
         v.shift_plan.start_time = _shift_start(first_start, shift_no, sc.shift_hours)
         for e in v.excavators:
             moved = ex_pile[e.id] != e.blast
-            e.blast, e.route = ex_pile[e.id], ex_route[e.id]
+            e.blast, e.route, e.crusher_routes = ex_pile[e.id], ex_route[e.id], ex_croutes[e.id]
             e.start_delay_min = delay.get(e.id, 0.0)
             if moved:  # on another pile: no digging line there
                 e.dig_routes, e.dig_path = [], None
@@ -179,6 +195,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             **{f"zostalo_{p}_t": round(left[p]) for p in left},
             **{f"z_{p}_t": round(float(loaded.get(p, 0.0))) for p in left},
             "halda_t": round(stock),
+            **{f"kr_{c['crusher']}_t": round(c["crushed_t"]) for c in k.get("crushers", [])},
         })
         if progress:
             progress(i + 1, len(shifts))
@@ -192,7 +209,7 @@ def _shares(df: pd.DataFrame) -> dict:
     return {c[2:-2]: round(100 * float(df[c].sum()) / total, 1) for c in cols} if total else {}
 
 
-def summary(df: pd.DataFrame, plan: PeriodPlan) -> dict:
+def summary(df: pd.DataFrame, plan: PeriodPlan, crushers: list | None = None) -> dict:
     if df.empty:
         return {}
     t = float(df["wywiezione_t"].sum())
@@ -204,6 +221,11 @@ def summary(df: pd.DataFrame, plan: PeriodPlan) -> dict:
         "cel_t": plan.target_t, "realizacja_celu_pct": round(100 * t / plan.target_t, 1) if plan.target_t else None,
         "zmian_bez_urobku": int((df["skonczyl_sie_urobek"] != "").sum()),
         "udzialy_pct": _shares(df),
+        "kruszarki": [{"kruszarka": c.id, "produkt": c.product or "–",
+                       "skruszone_t": round(float(df[f"kr_{c.id}_t"].sum())) if f"kr_{c.id}_t" in df else 0,
+                       "plan_t": round(c.target_t * len(df)) if c.target_t else None,
+                       "wykonanie_pct": round(100 * float(df[f"kr_{c.id}_t"].sum()) / (c.target_t * len(df)), 1)
+                       if c.target_t and f"kr_{c.id}_t" in df else None} for c in crushers] if crushers else [],
         "srednia_odchylka_skladu_pp": round(float((df["sklad_odchylka_pp"] * df["wywiezione_t"]).sum() / t), 1) if t else 0.0,
         "kruszarka_bez_nadawy_h": round(float(df["kruszarka_bez_nadawy_h"].sum()), 1),
     }

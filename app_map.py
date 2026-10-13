@@ -57,7 +57,7 @@ def ensure_uids(site: dict) -> None:
     import uuid
 
     seen = set()
-    for key in ("roads", "piles", "excavators", "passing_bays", "planned_piles"):
+    for key in ("roads", "piles", "excavators", "passing_bays", "planned_piles", "crushers"):
         for o in site.get(key, []):
             if not o.get("uid"):
                 o["uid"] = uuid.uuid4().hex[:10]
@@ -201,8 +201,14 @@ def draw_site(m, site: dict) -> None:
                       icon=folium.Icon(color="orange", icon="wrench", prefix="fa")).add_to(m)
     if site.get("crusher"):
         c = site["crusher"]
-        folium.Marker((c["lat"], c["lon"]), tooltip="🏭 Kruszarka",
+        acc = ", ".join(c.get("accepts") or []) or "wszystkich usypów"
+        folium.Marker((c["lat"], c["lon"]), tooltip=f"🏭 {c.get('id', 'C-1')} · kruszarka główna · przyjmuje z: {acc}",
                       icon=folium.Icon(color="red", icon="industry", prefix="fa")).add_to(m)
+    for c in site.get("crushers", []):
+        acc = ", ".join(c.get("accepts") or []) or "wszystkich usypów"
+        folium.Marker((c["lat"], c["lon"]), tooltip=f"🏭 {c['id']} · kruszarka · {c.get('capacity_tph', 0):g} t/h · "
+                                                    f"przyjmuje z: {acc}",
+                      icon=folium.Icon(color="darkred", icon="industry", prefix="fa")).add_to(m)
     if site.get("blast"):
         b = site["blast"]
         folium.Marker((b["lat"], b["lon"]), tooltip="🧨 Miejsce strzelania",
@@ -283,8 +289,18 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
         return f"✅ Dodano usyp {a['id']}{note}"
     lon, lat = g["coordinates"]
     if target == "Kruszarka":
-        site["crusher"] = {"lat": lat, "lon": lon}
-        return "✅ Ustawiono kruszarkę"
+        if attrs.get("new_crusher") and site.get("crusher"):
+            site.setdefault("crushers", [])
+            ids = {(site["crusher"] or {}).get("id", "C-1")} | {c["id"] for c in site["crushers"]}
+            cid = attrs.get("id") if attrs.get("id") and attrs["id"] not in ids else \
+                next(f"C-{i}" for i in range(2, 100) if f"C-{i}" not in ids)
+            site["crushers"].append({"id": cid, "lat": lat, "lon": lon, "capacity_tph": attrs.get("capacity_tph", 800.0),
+                                     "hopper_t": attrs.get("hopper_t", 150.0), "accepts": attrs.get("accepts", []),
+                                     "product": attrs.get("product", ""), "target_t": attrs.get("target_t", 0.0)})
+            ensure_uids(site)
+            return f"✅ Dodano kruszarkę {cid} – zbuduj trasy (zapisz kopalnię), żeby wozidła do niej jeździły"
+        site["crusher"] = {**(site.get("crusher") or {}), "lat": lat, "lon": lon}
+        return "✅ Ustawiono kruszarkę główną"
     if target == "Miejsce strzelania":
         site["blast"] = {"lat": lat, "lon": lon}
         return "✅ Ustawiono miejsce strzelania – godziny ustaw w sekcji „Zmiana i zdarzenia”"
@@ -297,7 +313,7 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
 
 
 # ---------- editing existing objects (select on the map → move / redraw / delete) ----------
-POINT_KINDS = ("excavator", "crusher", "blast", "parking", "bay")
+POINT_KINDS = ("excavator", "crusher", "crusher2", "blast", "parking", "bay")
 
 
 def site_items(site: dict) -> dict:
@@ -312,7 +328,9 @@ def site_items(site: dict) -> dict:
     for e in site.get("excavators", []):
         items[f"excavator:{e['uid']}"] = f"⛏️ koparka {e['id']}"
     if site.get("crusher"):
-        items["crusher:"] = "🏭 kruszarka"
+        items["crusher:"] = f"🏭 kruszarka główna {site['crusher'].get('id', 'C-1')}"
+    for c in site.get("crushers", []):
+        items[f"crusher2:{c['uid']}"] = f"🏭 kruszarka {c['id']}"
     if site.get("blast"):
         items["blast:"] = "🧨 miejsce strzelania"
     for e in site.get("excavators", []):
@@ -337,6 +355,8 @@ def find_obj(site: dict, sel: str | None):
         return next((o for o in site.get("passing_bays", []) if o.get("uid") == ident), None)
     if kind == "planned":
         return next((o for o in site.get("planned_piles", []) if o.get("uid") == ident), None)
+    if kind == "crusher2":
+        return next((o for o in site.get("crushers", []) if o.get("uid") == ident), None)
     if kind == "dig":
         e = next((o for o in site.get("excavators", []) if o.get("uid") == ident), None)
         return {"coords": e["dig_path"], "_ex": e} if e and len(e.get("dig_path") or []) >= 2 else None
@@ -365,8 +385,13 @@ def sel_from_click(site: dict, tooltip: str | None, latlng: dict | None) -> str 
         e = next((o for o in site.get("excavators", []) if o["id"] == who), None)
         if e:
             return f"dig:{e['uid']}"
-    if head.startswith("🏭") and site.get("crusher"):
-        return "crusher:"
+    if head.startswith("🏭"):
+        cid = head[len("🏭"):].strip()
+        extra = next((c for c in site.get("crushers", []) if c["id"] == cid), None)
+        if extra:
+            return f"crusher2:{extra['uid']}"
+        if site.get("crusher"):
+            return "crusher:"
     if head.startswith("🧨") and site.get("blast"):
         return "blast:"
     if head.startswith("🅿️"):
@@ -437,6 +462,9 @@ def delete_obj(site: dict, sel: str) -> str:
     if kind == "bay":
         site["passing_bays"] = [b for b in site["passing_bays"] if b is not o]
         return f"🗑️ Usunięto mijankę {o.get('id')}"
+    if kind == "crusher2":
+        site["crushers"] = [c for c in site["crushers"] if c is not o]
+        return f"🗑️ Usunięto kruszarkę {o['id']}"
     if kind == "planned":
         site["planned_piles"] = [p for p in site["planned_piles"] if p is not o]
         return f"🗑️ Usunięto planowany strzał {o.get('id')}"
@@ -597,6 +625,10 @@ def set_dig_path(ex: dict, coords: list, attrs: dict | None = None) -> None:
         ex[key] = float((attrs or {}).get(key) or ex.get(key) or default)
 
 
+def _pile_ids(site: dict) -> list[str]:
+    return [p["id"] for p in site.get("piles", [])] + [p["id"] for p in site.get("planned_piles", [])]
+
+
 def add_bay(site: dict, lat: float, lon: float) -> str:
     """Passing bay: snapped onto the nearest road; that road becomes single-lane."""
     roads = [r for r in site.get("roads", []) if len(r.get("coords", [])) >= 2]
@@ -661,7 +693,7 @@ def checklist(site: dict, raw: dict) -> None:
 
 def quick_fleet_crusher(raw: dict, site: dict) -> None:
     """Trucks and crusher edited right next to the map (simple mode); changes go straight to the scenario."""
-    st.subheader("6. Wozidła i kruszarka")
+    st.subheader("6. Wozidła")
     st.caption("Dodaj wiersz na każdy typ wozideł. **Koparki**: do których koparek mogą jeździć, np. `K-1, K-2` "
                "(puste = do wszystkich).")
     ex_ids = {e["id"] for e in site.get("excavators", [])} | {e["id"] for e in raw.get("excavators", [])}
@@ -695,12 +727,8 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
         fleets.append({**base, "model": str(r["model"]).strip(), "count": int(r["count"] or 0), "payload_t": payload,
                        "excavators": excs})
     raw["trucks"] = fleets
-    c1, c2, _ = st.columns([1, 1, 2])
-    cr = raw.setdefault("crusher", {})
-    cr["capacity_tph"] = c1.number_input("Kruszarka – wydajność [t/h]", 50.0, 10000.0,
-                                         float(cr.get("capacity_tph", 1000)), 50.0, key=f"qcap_{st.session_state.ver}")
-    cr["hopper_t"] = c2.number_input("Kosz kruszarki [t]", 10.0, 2000.0, float(cr.get("hopper_t", 150)), 10.0,
-                                     key=f"qhop_{st.session_state.ver}")
+    st.caption("Kruszarki (wydajność, kosz, produkt, plan, z których usypów przyjmują) – w sekcji 3, zakładka "
+               "„🛣️ Drogi, mijanki, kruszarki”.")
 
 
 def psd_editor(site: dict, max_feed_mm: float, penalty: float) -> None:
@@ -869,7 +897,23 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                        "ustawisz). Dojedzie trasą dedykowaną, a gdy jej nie ma – najkrótszą drogą; bez połączenia "
                        "drogowego – na wprost. Bez znacznika koparka cofa się o kilkaset metrów swoją trasą.")
         elif mode == "Kruszarka":
-            st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku).")
+            if site.get("crusher"):
+                attrs["new_crusher"] = st.radio("Kruszarka", ["Przesuń główną", "Dodaj kolejną"], key="cr_which",
+                                                horizontal=True) == "Dodaj kolejną"
+            if attrs.get("new_crusher"):
+                n_cr = len(site.get("crushers", []))
+                attrs["id"] = st.text_input("Oznaczenie", f"C-{n_cr + 2}", key="cr_id")
+                attrs["capacity_tph"] = st.number_input("Wydajność [t/h]", 50.0, 10_000.0, 800.0, 50.0, key="cr_cap")
+                attrs["hopper_t"] = st.number_input("Kosz [t]", 10.0, 2000.0, 150.0, 10.0, key="cr_hop")
+                attrs["accepts"] = st.multiselect(
+                    "Przyjmuje urobek z (puste = ze wszystkich)", _pile_ids(site), key="cr_acc")
+                attrs["product"] = st.text_input("Co produkuje", "", key="cr_prod", placeholder="np. kruszywo 0–31,5")
+                attrs["target_t"] = st.number_input("Plan na zmianę [t] (0 = bez planu)", 0.0, 100_000.0, 0.0, 500.0,
+                                                    key="cr_plan")
+            st.caption("Narzędzie „znacznik” (📍). Postaw go na koszu kruszarki (miejsce wyładunku). Każda kruszarka "
+                       "może przyjmować urobek ze wszystkich albo tylko z wybranych usypów – wozidło jedzie do "
+                       "kruszarki, która przyjmuje jego materiał (przy kilku: dziś najbliższej, system – tej, gdzie "
+                       "szybciej wyładuje).")
         elif mode == "Kierunek urabiania koparki":
             ex_ids = [e["id"] for e in site["excavators"]]
             attrs["excavator"] = st.selectbox("Której koparki?", ex_ids, key="dig_ex") if ex_ids else None
@@ -945,11 +989,11 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False) -> None:
                "„✏️ Edytuj / przesuń / usuń”.")
     n_pl = len(site.get("planned_piles", []))
     t_road, t_pile, t_ex, t_ev, t_plan = st.tabs([
-        f"🛣️ Drogi i mijanki ({len(site['roads'])})", f"⛰️ Usypy i uziarnienie ({len(site['piles'])})",
+        f"🛣️ Drogi, mijanki, kruszarki ({len(site['roads'])})", f"⛰️ Usypy i uziarnienie ({len(site['piles'])})",
         f"⛏️ Koparki i podstawianie ({len(site['excavators'])})", "🧨 Strzelanie, objazdy, postoje",
         f"📅 Plan strzałów ({n_pl})"])
     with t_road:
-        st.markdown(f"**Kruszarka:** {'✅ ustawiona' if site.get('crusher') else '❌ brak – postaw ją na mapie'}")
+        crushers_table(site, raw_for_build)
         if site["roads"]:
             object_table(site, "roads", lambda: pd.DataFrame(
                 [{k: v for k, v in r.items() if k not in ("coords", "uid")} | {"active": r.get("active", True),
@@ -1142,6 +1186,49 @@ def spotting_editor(site: dict, raw: dict) -> None:
         st.caption("Koparka czeka na wozidło: przy podstawianiu z jednej strony – cały wjazd (oraz wyjazd, gdy "
                    "wyjeżdża cofaniem albo tyłem z jednej strony); dwustronnie – tylko gdy nikt nie stoi po drugiej "
                    "stronie. Objazd (rondko) wydłuża tylko czas wozidła.")
+
+
+def crushers_table(site: dict, raw: dict) -> None:
+    """All crushers: capacity, hopper, what they produce, plan per shift and which piles they take material from."""
+    st.markdown("**🏭 Kruszarki**")
+    if not site.get("crusher"):
+        st.caption("❌ brak – postaw kruszarkę na mapie (grupa „🛣️ Drogi” → Kruszarka)")
+        return
+    main, cr = site["crusher"], raw.setdefault("crusher", {})
+    rows = [{"id": main.get("id", "C-1"), "rola": "główna", "capacity_tph": float(cr.get("capacity_tph", 1000)),
+             "hopper_t": float(cr.get("hopper_t", 150)), "product": main.get("product", ""),
+             "target_t": float(main.get("target_t") or 0.0), "accepts": list(main.get("accepts") or [])}]
+    rows += [{"id": c["id"], "rola": "dodatkowa", "capacity_tph": float(c.get("capacity_tph", 800)),
+              "hopper_t": float(c.get("hopper_t", 150)), "product": c.get("product", ""),
+              "target_t": float(c.get("target_t") or 0.0), "accepts": list(c.get("accepts") or [])}
+             for c in site.get("crushers", [])]
+    snap = f"crush_tbl_{st.session_state.obj_ver}_{st.session_state.get('ver', 0)}"
+    if snap not in st.session_state:
+        st.session_state[snap] = pd.DataFrame(rows)
+    ed = st.data_editor(st.session_state[snap], key=snap + "_ed", hide_index=True, width="stretch", disabled=["rola"],
+                        column_config={
+                            "id": "kruszarka", "rola": "rola",
+                            "capacity_tph": st.column_config.NumberColumn("wydajność [t/h]", min_value=50.0),
+                            "hopper_t": st.column_config.NumberColumn("kosz [t]", min_value=10.0),
+                            "product": st.column_config.TextColumn("co produkuje"),
+                            "target_t": st.column_config.NumberColumn("plan na zmianę [t]", min_value=0.0),
+                            "accepts": st.column_config.MultiselectColumn(
+                                "przyjmuje z usypów (puste = wszystkie)", options=_pile_ids(site))})
+    for i, r in ed.iterrows():
+        tgt = main if i == 0 else (site["crushers"][i - 1] if i - 1 < len(site.get("crushers", [])) else None)
+        if tgt is None:
+            continue
+        acc = [a for a in (r["accepts"] if isinstance(r["accepts"], list) else []) if a]
+        tgt.update({"product": str(r["product"] or ""), "target_t": float(r["target_t"] or 0.0), "accepts": acc})
+        if str(r["id"] or "").strip():
+            tgt["id"] = str(r["id"]).strip()
+        if i == 0:  # the main crusher's parameters live in the scenario
+            cr["capacity_tph"], cr["hopper_t"] = float(r["capacity_tph"]), float(r["hopper_t"])
+        else:
+            tgt["capacity_tph"], tgt["hopper_t"] = float(r["capacity_tph"]), float(r["hopper_t"])
+    st.caption("Wozidło wiezie urobek do kruszarki, która go przyjmuje; gdy przyjmuje kilka – dziś do najbliższej, "
+               "przy przydziale systemowym / RL do tej, gdzie szybciej wyładuje. Kolejną kruszarkę dodasz na mapie: "
+               "grupa „🛣️ Drogi” → Kruszarka → „Dodaj kolejną”.")
 
 
 def object_table(site: dict, key: str, make_df, extra: tuple = (), **editor_kw) -> None:

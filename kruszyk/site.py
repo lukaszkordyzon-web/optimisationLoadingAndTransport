@@ -474,6 +474,19 @@ def loading_point(site: dict, polygon: list) -> tuple[float, float]:
     return min(cands, key=lambda q: min(along_m(r["coords"], q)[1] for r in roads))
 
 
+def _crusher_routes(site: dict, start, rid: str, routes: dict) -> dict:
+    """Routes from a loading point to every additional crusher: {crusher id: route id}."""
+    out = {}
+    for c in site.get("crushers", []):
+        r_id = f"{rid}>{c['id']}"
+        try:
+            routes[r_id] = build_route(site, tuple(start), r_id, end=(c["lat"], c["lon"]))
+        except ValueError:
+            continue
+        out[c["id"]] = r_id
+    return out
+
+
 def site_to_scenario(site: dict, raw: dict) -> dict:
     """Replace blasts/excavators/routes of a raw scenario with what is drawn on the map.
     Trucks, crusher parameters, costs etc. stay as they are. Also builds links between every pair
@@ -523,6 +536,9 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
                     ex[key] = float(e[key])
         if e.get("spotting"):
             ex["spotting"] = {k: float(v) for k, v in e["spotting"].items() if v}
+        cr = _crusher_routes(site, pos, rid, new["routes"])
+        if cr:
+            ex["crusher_routes"] = cr
         new["excavators"].append(ex)
     for a in excavators:
         for b in excavators:
@@ -544,11 +560,23 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
             continue  # not connected to the roads yet
         pb = {"id": p["id"], "tonnage_t": float(p.get("tonnage_t", 0)), "material": p.get("material", ""),
               "blast_day": int(p.get("blast_day") or 1), "route": rid,
+              "crusher_routes": _crusher_routes(site, load_at, rid, new["routes"]),
               "fragmentation": float(p.get("fragmentation", 0.3))}
         for key in ("psd", "loose_density_t_m3", "target_share"):
             if p.get(key):
                 pb[key] = p[key]
         new["planned_blasts"].append(pb)
+    # crushers: the main one keeps its parameters from the scenario; more crushers come from the map
+    main = site.get("crusher") or {}
+    new["crusher"] = {**raw.get("crusher", {}), "id": main.get("id") or raw.get("crusher", {}).get("id") or "C-1",
+                      "accepts": list(main.get("accepts") or []), "product": main.get("product", ""),
+                      "target_t": float(main.get("target_t") or 0.0)}
+    base = {k: v for k, v in new["crusher"].items()
+            if k not in ("id", "accepts", "capacity_tph", "hopper_t", "product", "target_t")}
+    new["crushers_extra"] = [{**base, "id": c["id"], "capacity_tph": float(c.get("capacity_tph", 800)),
+                              "hopper_t": float(c.get("hopper_t", 150)), "accepts": list(c.get("accepts") or []),
+                              "product": c.get("product", ""), "target_t": float(c.get("target_t") or 0.0)}
+                             for c in site.get("crushers", [])]
     # keep fleet assignments only if they still point to existing excavators
     ex_ids = {e["id"] for e in excavators}
     for f in new.get("trucks", []):

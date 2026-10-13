@@ -130,7 +130,11 @@ N.excavators.forEach(e => { exMarkers[e.id] = L.marker([e.lat, e.lon], { icon: L
 const exTracks = Object.entries(D.excavator_tracks || {}).filter(([id]) => exMarkers[id]).map(([id, f]) => ({ v: { frames: f }, m: exMarkers[id], i: 0 }));
 N.excavators.forEach(e => bounds.push([e.lat, e.lon]));
 if (N.crusher) bounds.push([N.crusher.lat, N.crusher.lon]);
-if (N.crusher) L.marker([N.crusher.lat, N.crusher.lon], { icon: L.divIcon({ className: '', html: '<div class="tag" style="transform:translate(-50%,-30px)">🏭 kruszarka</div>' }) }).addTo(map);
+if (N.crusher) L.marker([N.crusher.lat, N.crusher.lon], { icon: L.divIcon({ className: '', html: `<div class="tag" style="transform:translate(-50%,-30px)">🏭 ${(N.crushers || []).length ? (N.crusher.id || 'C-1') : 'kruszarka'}${N.crusher.product ? ' · ' + N.crusher.product : ''}</div>` }) }).addTo(map);
+(N.crushers || []).forEach(c => {
+  bounds.push([c.lat, c.lon]);
+  L.marker([c.lat, c.lon], { icon: L.divIcon({ className: '', html: `<div class="tag" style="transform:translate(-50%,-30px)">🏭 ${c.id}${c.product ? ' · ' + c.product : ''}</div>` }) }).addTo(map);
+});
 function fit() { if (bounds.length) map.fitBounds(bounds, { padding: [50, 50] }); else map.setView(N.center || [52, 19], N.zoom || 15); }
 fit();
 // the page may be rendered in a hidden tab (size 0): refit as soon as the map becomes visible

@@ -35,7 +35,23 @@ class TruckState:
     home_excavator: str  # used by "fixed" dispatch
     trip: int = 0
     speeder: bool = False  # drives above the limit (site practice)
+    at: str = ""  # crusher where the truck is (dumped last); trucks start at the main crusher
     fuel_left_l: float = 0.0
+
+
+@dataclass
+class CrusherUnit:
+    """One crusher: its hopper, dump point and counters."""
+    cfg: object
+    hopper: simpy.Container
+    dump_point: simpy.Resource
+    frag: float = 0.0          # fragmentation of the material in the hopper
+    queued_dump_t: float = 0.0  # tonnes waiting at the dump point
+    inbound_t: float = 0.0     # tonnes on loaded trucks driving here
+    crushed_t: float = 0.0
+    busy_s: float = 0.0
+    starved_s: float = 0.0
+    kwh: float = 0.0
 
 
 @dataclass
@@ -140,15 +156,16 @@ class Simulation:
                 ))
                 i += 1
 
-        self.hopper = simpy.Container(self.env, capacity=sc.crusher.hopper_t, init=0)
-        self.dump_point = simpy.Resource(self.env, 1)
-        self.hopper_frag = 0.0
+        self.units = {c.id: CrusherUnit(c, simpy.Container(self.env, capacity=c.hopper_t, init=0),
+                                        simpy.Resource(self.env, 1)) for c in sc.crushers}
+        self.main = self.units[sc.crusher.id]
+        self.hopper, self.dump_point = self.main.hopper, self.main.dump_point
+        for t in self.trucks:
+            t.at = sc.crusher.id
         self.crushed_t = 0.0
         self.crusher_busy_s = 0.0
         self.crusher_starved_s = 0.0
         self.crusher_kwh = 0.0
-        self.queued_dump_t = 0.0   # tonnes waiting at the dump point
-        self.inbound_t = 0.0       # tonnes on loaded trucks driving to the crusher
         self.stockpile_t = sc.stockpile.initial_t
         self.stockpile_in_t = 0.0
         self.rehandled_t = 0.0
@@ -217,7 +234,7 @@ class Simulation:
         if end > start:
             self.states.append({"truck": truck.id, "state": state, "start_s": start,
                                 "end_s": end, "duration_s": end - start,
-                                "excavator": ex, "trip": truck.trip})
+                                "excavator": ex, "trip": truck.trip, "crusher": truck.at})
             if state in IDLE_STATES:
                 used = truck.fleet.fuel_lph_idle * (end - start) / 3600
                 self.fuel_l += used
@@ -240,6 +257,27 @@ class Simulation:
 
     def _route_of(self, ex: ExcavatorState):
         return self.sc.routes[ex.route_id or ex.cfg.route]
+
+    def _route_to(self, ex: ExcavatorState, crusher_id: str | None):
+        """Route between the excavator and a crusher (the main one follows the excavator along the face)."""
+        if not crusher_id or crusher_id == self.sc.crusher.id:
+            return self._route_of(ex)
+        return self.sc.routes[ex.cfg.crusher_routes[crusher_id]]
+
+    def _pick_crusher(self, truck: TruckState, plan, last: ExcavatorState, tonnes: float) -> CrusherUnit:
+        """Where to dump: a crusher taking all the material on board. Today's practice: the nearest one;
+        with the system: the one where the truck is unloaded soonest (drive + expected wait)."""
+        ok = [u for u in self.units.values() if all(u.cfg.takes(e.cfg.blast) for e, _ in plan)]
+        if len(ok) <= 1:
+            return ok[0] if ok else self.main
+        fleet, rr = truck.fleet, self.sc.rolling_resistance_pct
+        if self.sc.dispatch == "natural":
+            return min(ok, key=lambda u: self._route_to(last, u.cfg.id).length_m)
+
+        def finish(u):
+            haul = route_time_s(self._route_to(last, u.cfg.id), fleet, True, rr)
+            return haul + self.expected_dump_wait_s(tonnes, extra_t=u.inbound_t, ahead_s=haul, unit=u)
+        return min(ok, key=finish)
 
     def _relocate(self, ex: ExcavatorState):
         """The excavator moves to the next point of its digging line: the loader stands meanwhile
@@ -271,17 +309,20 @@ class Simulation:
     def _active(self, ex: ExcavatorState) -> bool:
         return ex.remaining_t - ex.committed_t > 1e-6
 
-    def _crusher_rate(self) -> float:
-        return crusher_rate_tph(self.sc.crusher, self.hopper_frag)
+    def _crusher_rate(self, unit: CrusherUnit | None = None) -> float:
+        u = unit or self.main
+        return crusher_rate_tph(u.cfg, u.frag)
 
-    def expected_dump_wait_s(self, tonnes: float, extra_t: float = 0.0, ahead_s: float = 0.0) -> float:
+    def expected_dump_wait_s(self, tonnes: float, extra_t: float = 0.0, ahead_s: float = 0.0,
+                             unit: CrusherUnit | None = None) -> float:
         """Expected wait at the hopper for `tonnes`, if `extra_t` more arrives first and the
         crusher keeps draining for `ahead_s` seconds before we get there."""
-        rate = self._crusher_rate()
-        backlog = self.hopper.level + self.queued_dump_t + extra_t - rate * ahead_s / 3600
-        missing = max(0.0, backlog + tonnes - self.sc.crusher.hopper_t)
+        u = unit or self.main
+        rate = self._crusher_rate(u)
+        backlog = u.hopper.level + u.queued_dump_t + extra_t - rate * ahead_s / 3600
+        missing = max(0.0, backlog + tonnes - u.cfg.hopper_t)
         hopper_wait = missing / rate * 3600
-        queue_wait = (len(self.dump_point.queue) + len(self.dump_point.users)) * self.sc.crusher.dump_time_s
+        queue_wait = (len(u.dump_point.queue) + len(u.dump_point.users)) * u.cfg.dump_time_s
         return max(hopper_wait, queue_wait if extra_t == 0 else 0.0)
 
     # ------------------------------------------------------------ light vehicles
@@ -518,7 +559,7 @@ class Simulation:
     def features(self, truck: TruckState, ex: ExcavatorState) -> list[float]:
         """What the dispatcher knows about sending `truck` to `ex` now (RL state for one action)."""
         sc = self.sc
-        route = self._route_of(ex)
+        route = self._route_to(ex, truck.at)
         travel = route_time_s(route, truck.fleet, False, sc.rolling_resistance_pct)
         haul = route_time_s(route, truck.fleet, True, sc.rolling_resistance_pct)
         service = self._expected_service(ex, truck.fleet)
@@ -557,7 +598,7 @@ class Simulation:
             return min(active, key=lambda ex: float(np.dot(w, feats[ex.cfg.id])))
         best, best_finish = None, math.inf
         for ex in active:
-            travel = route_time_s(self._route_of(ex), truck.fleet, False,
+            travel = route_time_s(self._route_to(ex, truck.at), truck.fleet, False,
                                   self.sc.rolling_resistance_pct)
             finish = self.predicted_finish(ex, self.env.now + travel, self._expected_service(ex, truck.fleet))
             if finish < best_finish:
@@ -803,7 +844,7 @@ class Simulation:
         """Expected (time until loaded, full cycle) for the truck's usual excavator – for shift planning."""
         sc = self.sc
         ex = self.excavators.get(truck.home_excavator) or next(iter(self.excavators.values()))
-        r = self._route_of(ex)
+        r = self._route_to(ex, truck.at)
         to_loaded = route_time_s(r, truck.fleet, False, sc.rolling_resistance_pct) + self._expected_service(ex, truck.fleet)
         if truck.fleet.blend:  # two piles: one more drive and one more loading in the pit
             to_loaded *= 1.8
@@ -846,7 +887,7 @@ class Simulation:
             for ex, amount in plan:
                 ex.committed_t += amount
             first = plan[0][0]
-            travel = route_time_s(self._route_of(first), fleet, False, sc.rolling_resistance_pct)
+            travel = route_time_s(self._route_to(first, truck.at), fleet, False, sc.rolling_resistance_pct)
             service = self._expected_service(first, fleet)
             pace_empty = 1.0
             if sc.advisor.enabled:
@@ -857,7 +898,7 @@ class Simulation:
             first.pending[truck.id] = (env.now + travel * pace_empty, service)
             cycle_start = env.now
 
-            yield from self._drive(truck, self._route_of(first), False, 0.0, "pusty", first.cfg.id, pace_empty)
+            yield from self._drive(truck, self._route_to(first, truck.at), False, 0.0, "pusty", first.cfg.id, pace_empty)
             tonnes, prev = 0.0, None
             for ex, amount in plan:
                 if prev is not None:
@@ -871,40 +912,43 @@ class Simulation:
             blast = sc.blast(last.cfg.blast)
             frag = float(np.mean([sc.blast(e.cfg.blast).fragmentation for e, _ in plan]))
 
+            # which crusher takes this load
+            unit = self._pick_crusher(truck, plan, last, tonnes)
             # speed advice: if we would only queue at the crusher, drive slower instead
-            route = self._route_of(last)
+            route = self._route_to(last, unit.cfg.id)
             pace = 1.0
             if (sc.pacing.enabled and sc.dispatch != "natural") or sc.advisor.enabled:
                 haul = route_time_s(route, fleet, True, sc.rolling_resistance_pct)
-                wait = self.expected_dump_wait_s(tonnes, extra_t=self.inbound_t, ahead_s=haul)
+                wait = self.expected_dump_wait_s(tonnes, extra_t=unit.inbound_t, ahead_s=haul, unit=unit)
                 if sc.advisor.enabled:
                     pace = 1 + min(sc.advisor.max_slowdown, sc.advisor.crusher_pacing * wait / haul)
                 else:
                     pace = 1 + min(sc.pacing.max_slowdown, wait / haul)
-            self.inbound_t += tonnes
+            unit.inbound_t += tonnes
             yield from self._drive(truck, route, True, tonnes, "pelny", last.cfg.id, pace)
-            self.inbound_t -= tonnes
+            unit.inbound_t -= tonnes
+            truck.at = unit.cfg.id
 
             sp = sc.stockpile
             t0 = env.now
-            if sp.enabled and self.expected_dump_wait_s(tonnes) > sp.divert_wait_s:
+            if sp.enabled and unit is self.main and self.expected_dump_wait_s(tonnes) > sp.divert_wait_s:
                 yield env.timeout(sp.dump_time_s * self._noise(0.15))
                 self.stockpile_t += tonnes
                 self.stockpile_in_t += tonnes
                 self._log_state(truck, "wyladunek_halda", t0)
                 self._mark_dumped(truck, env.now, "halda")
             else:
-                self.queued_dump_t += tonnes
-                with self.dump_point.request() as req:
+                unit.queued_dump_t += tonnes
+                with unit.dump_point.request() as req:
                     yield req
-                    yield self.hopper.put(tonnes)  # waits while the hopper is full
-                    self.queued_dump_t -= tonnes
+                    yield unit.hopper.put(tonnes)  # waits while the hopper is full
+                    unit.queued_dump_t -= tonnes
                     self._log_state(truck, "kolejka_kruszarka", t0)
-                    self._mix_into_hopper(tonnes, frag)
+                    self._mix_into_hopper(tonnes, frag, unit)
                     t0 = env.now
-                    yield env.timeout(sc.crusher.dump_time_s * self._noise(0.15))
+                    yield env.timeout(unit.cfg.dump_time_s * self._noise(0.15))
                     self._log_state(truck, "wyladunek", t0)
-                self._mark_dumped(truck, env.now, "kosz")
+                self._mark_dumped(truck, env.now, "kosz", unit.cfg.id)
             self.dumped_t += tonnes
 
             # fuel: trucks start full; below the reserve they go to the fuel station next to the crusher
@@ -922,33 +966,41 @@ class Simulation:
                 yield env.timeout(self.rng.exponential(v.truck_mttr_min * 60))
                 self._log_state(truck, "awaria", t0)
 
-    def _mix_into_hopper(self, tonnes: float, frag: float):
-        level = self.hopper.level
-        self.hopper_frag = ((level - tonnes) * self.hopper_frag + tonnes * frag) / max(level, 1e-9)
+    def _mix_into_hopper(self, tonnes: float, frag: float, unit: CrusherUnit | None = None):
+        u = unit or self.main
+        level = u.hopper.level
+        u.frag = ((level - tonnes) * u.frag + tonnes * frag) / max(level, 1e-9)
 
-    def _mark_dumped(self, truck: TruckState, t: float, where: str):
+    def _mark_dumped(self, truck: TruckState, t: float, where: str, crusher: str | None = None):
         for load in reversed(self.loads):
             if load["truck"] == truck.id and load["trip"] == truck.trip:
                 load["dumped_at_s"] = t
                 load["dumped_to"] = where
+                load["crusher"] = crusher or self.sc.crusher.id
             elif load["truck"] == truck.id:
                 return
 
-    def crusher_process(self):
+    def crusher_process(self, u: CrusherUnit):
         env = self.env
         while True:
-            rate = self._crusher_rate()
+            rate = self._crusher_rate(u)
             capacity = rate * CRUSHER_TICK_S / 3600
-            amount = min(self.hopper.level, capacity)
+            amount = min(u.hopper.level, capacity)
             if amount > 1e-9:
-                yield self.hopper.get(amount)
+                yield u.hopper.get(amount)
+                kwh = amount * crusher_kwh_per_t(u.cfg, u.frag)
+                u.crushed_t += amount
+                u.kwh += kwh
+                u.busy_s += CRUSHER_TICK_S * amount / capacity
+                u.starved_s += CRUSHER_TICK_S * (1 - amount / capacity)
                 self.crushed_t += amount
-                self.crusher_kwh += amount * crusher_kwh_per_t(self.sc.crusher, self.hopper_frag)
+                self.crusher_kwh += kwh
                 self.crusher_busy_s += CRUSHER_TICK_S * amount / capacity
                 self.crusher_starved_s += CRUSHER_TICK_S * (1 - amount / capacity)
             else:
+                u.starved_s += CRUSHER_TICK_S
                 self.crusher_starved_s += CRUSHER_TICK_S
-            if int(env.now) % 60 == 0:
+            if u is self.main and int(env.now) % 60 == 0:
                 self.hopper_log.append({"t_s": env.now, "level_t": self.hopper.level,
                                         "stockpile_t": self.stockpile_t, "crushed_t": self.crushed_t,
                                         "dumped_t": self.dumped_t, "fuel_l": self.fuel_l,
@@ -961,7 +1013,7 @@ class Simulation:
         sp = self.sc.stockpile
         frag = float(np.mean([b.fragmentation for b in self.sc.blasts]))
         while True:
-            free = self.hopper.capacity - self.hopper.level - self.queued_dump_t
+            free = self.hopper.capacity - self.hopper.level - self.main.queued_dump_t
             if self.stockpile_t > 1e-6 and self.hopper.level < sp.feed_below_t and free > 1:
                 amount = min(self.stockpile_t, sp.loader_tph * LOADER_TICK_S / 3600, free)
                 yield self.hopper.put(amount)
@@ -999,7 +1051,8 @@ class Simulation:
             yield self.env.timeout(pol.review_min * 60)
 
     def run(self) -> "SimResult":
-        self.env.process(self.crusher_process())
+        for u in self.units.values():
+            self.env.process(self.crusher_process(u))
         if self.sc.dispatch == "rl" and self.sc.excavator_policy.min_trucks_per_excavator > 0.05:
             self.env.process(self.excavator_review())
         if self.sc.stockpile.enabled:
@@ -1020,7 +1073,7 @@ class SimResult:
         self.rain = sim.rain
         self.segments = pd.DataFrame(sim.segments)
         self.states = pd.DataFrame(sim.states, columns=["truck", "state", "start_s", "end_s",
-                                                        "duration_s", "excavator", "trip"])
+                                                        "duration_s", "excavator", "trip", "crusher"])
         self.loads = pd.DataFrame(sim.loads, columns=None if sim.loads else [
             "truck", "excavator", "blast", "material", "tonnes", "fragmentation", "loaded_at_s", "trip", "dumped_at_s"])
         self.hopper = pd.DataFrame(sim.hopper_log)
@@ -1047,7 +1100,8 @@ class SimResult:
                                             "stockpile_in_t": sim.stockpile_in_t}
             h = pd.concat([h, pd.DataFrame([last])], ignore_index=True)
         # same formulas as the final KPIs (_kpis), applied to what has happened up to each moment
-        fixed_per_h = (sc.truck_count * c.truck_per_h + len(sc.excavators) * c.excavator_per_h + c.crusher_per_h
+        fixed_per_h = (sc.truck_count * c.truck_per_h + len(sc.excavators) * c.excavator_per_h
+                       + len(sc.crushers) * c.crusher_per_h
                        + (sc.stockpile.loader_per_h if sc.stockpile.enabled else 0.0))
         parked_s = sum(ex.parked_s for ex in sim.excavators.values())
         loads = self.loads
@@ -1122,7 +1176,7 @@ class SimResult:
             "paliwo": sim.fuel_l * c.fuel_per_l,
             # a parked excavator still costs its operator, but no fuel / wear
             "koparki": c.excavator_per_h * (len(sc.excavators) * h - parked_h * (1 - c.excavator_idle_share)),
-            "kruszarka": c.crusher_per_h * h,
+            "kruszarka": c.crusher_per_h * h * len(sc.crushers),
             "energia": sim.crusher_kwh * c.energy_per_kwh,
             # everything put on the stockpile will be rehandled at some point – charge it now
             "halda_ladowarka": (sc.stockpile.loader_per_h * h + sc.stockpile.rehandle_cost_per_t
@@ -1163,7 +1217,12 @@ class SimResult:
             "truck_breakdown_h": round(float(st.get("awaria", 0.0)), 2),
             "truck_idle_no_material_h": round(float(st.get("postoj_brak_urobku", 0.0)), 2),
             "avg_queue_per_cycle_min": round(60 * float(st.get("kolejka_koparka", 0.0) + st.get("kolejka_kruszarka", 0.0)) / max(n_cycles, 1), 2),
-            "crusher_utilization": round(sim.crusher_busy_s / shift_s, 3),
+            "crusher_utilization": round(sim.crusher_busy_s / shift_s / len(sim.units), 3),
+            "crushers": [{"crusher": u.cfg.id, "crushed_t": round(u.crushed_t, 1),
+                          "utilization": round(u.busy_s / shift_s, 3), "starved_h": round(u.starved_s / 3600, 2),
+                          "accepts": list(u.cfg.accepts), "product": u.cfg.product, "target_t": u.cfg.target_t,
+                          "plan_pct": round(100 * u.crushed_t / u.cfg.target_t, 1) if u.cfg.target_t else None,
+                          "capacity_tph": u.cfg.capacity_tph} for u in sim.units.values()],
             "crusher_starved_h": round(sim.crusher_starved_s / 3600, 2),
             "stockpile_in_t": round(sim.stockpile_in_t, 1),
             "stockpile_end_t": round(sim.stockpile_t, 1),

@@ -76,6 +76,7 @@ def trajectories(res) -> dict[str, list[list]]:
             bounds = np.concatenate([[0.0], np.cumsum(seg_len)]) * scale
             geo[rid] = (r.path, cum, bounds)
     crusher = (sc.site["crusher"]["lat"], sc.site["crusher"]["lon"])
+    crusher_pos = {sc.crusher.id: crusher} | {c["id"]: (c["lat"], c["lon"]) for c in sc.site.get("crushers", [])}
     ex_pos = {e.id: tuple(routes[e.route].path[0]) for e in sc.excavators if e.route in geo}
     moving = {e.id for e in sc.excavators if len(e.dig_routes) > 1}  # advance along the face
     code = {s: i for i, s in enumerate(STATE_CODES)}
@@ -113,7 +114,7 @@ def trajectories(res) -> dict[str, list[list]]:
             if state in ("kolejka_koparka", "podstawienie", "zaladunek", "postoj_koparki", "wyjazd_z_frontu"):
                 spot = last if row.excavator in moving else ex_pos.get(row.excavator, last)
             elif state in CRUSHER_SIDE:
-                spot = crusher
+                spot = crusher_pos.get(getattr(row, "crusher", None), crusher)
             else:
                 spot = last
             spread = state in QUEUES or state in CRUSHER_SIDE - {"wyladunek", "wyladunek_halda"}
@@ -143,6 +144,8 @@ def network(sc) -> dict:
         "excavators": [{"id": e["id"], "lat": e["lat"], "lon": e["lon"],
                         "elev": (levels.get(e["id"]) or {}).get("elev_m")} for e in site.get("excavators", [])],
         "crusher": site.get("crusher"),
+        "crushers": [{"id": c["id"], "lat": c["lat"], "lon": c["lon"], "product": c.get("product", "")}
+                     for c in site.get("crushers", [])],
         "blast": site.get("blast"),
         "parking": site.get("parking", []),
         "bays": site.get("passing_bays", []),

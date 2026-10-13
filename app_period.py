@@ -171,7 +171,7 @@ def dump_key(sc) -> str:
 
 
 def _results(df: pd.DataFrame, plan: PeriodPlan, sc) -> None:
-    s = summary(df, plan)
+    s = summary(df, plan, sc.crushers)
     if not s:
         return
     c = st.columns(5)
@@ -189,6 +189,11 @@ def _results(df: pd.DataFrame, plan: PeriodPlan, sc) -> None:
     r_find, r_prod, r_mix, r_day = st.tabs(["💡 Wnioski", "📈 Produkcja i usypy", "🧪 Skład nadawy", "📋 Dzień po dniu"])
     with r_find:
         st.markdown("  \n".join(_findings(df, plan, sc, s)))
+        if len(sc.crushers) > 1 or any(c.target_t or c.product for c in sc.crushers):
+            st.markdown("**🏭 Kruszarki za okres**")
+            st.dataframe(pd.DataFrame(s["kruszarki"]), hide_index=True, width="stretch",
+                         column_config={"skruszone_t": "skruszone [t]", "plan_t": "plan [t]",
+                                        "wykonanie_pct": "wykonanie planu [%]"})
     with r_prod:
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         for p in piles:

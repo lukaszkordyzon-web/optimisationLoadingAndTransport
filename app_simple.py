@@ -68,6 +68,20 @@ def _demo_button(set_raw, key: str):
         st.rerun()
 
 
+def _crushers_summary(k: dict) -> None:
+    """Production per crusher vs its plan (shown when there are several crushers or a plan / product is set)."""
+    cs = k.get("crushers") or []
+    if len(cs) < 2 and not any(c.get("target_t") or c.get("product") for c in cs):
+        return
+    rows = [{"kruszarka": c["crusher"], "produkt": c.get("product") or "–",
+             "przyjmuje z": ", ".join(c.get("accepts") or []) or "wszystkich",
+             "skruszone [t]": round(c["crushed_t"]), "plan [t]": round(c["target_t"]) if c.get("target_t") else None,
+             "wykonanie planu [%]": c.get("plan_pct"), "wykorzystanie [%]": round(100 * c["utilization"]),
+             "bez nadawy [h]": c["starved_h"]} for c in cs]
+    st.markdown("**🏭 Kruszarki – produkcja**")
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+
 def _losses(k: dict) -> list[str]:
     """Where the time and money go – in plain words."""
     ex = k["excavators"]
@@ -144,6 +158,7 @@ def step_today(sc, yaml_text: str, seed: int, set_raw):
         return
     k = run_policy(yaml_text, seed, "natural").kpi
     _tiles(k)
+    _crushers_summary(k)
     st.markdown("**Gdzie tracimy:**  \n" + "  \n".join(_losses(k)))
     st.caption("▶ Kliknij **Start** na panelu obok mapy – zmiana leci przyspieszona, kropki to wozidła "
                "(kolor = co robią), liczniki pokazują koszty na bieżąco.")
@@ -304,6 +319,7 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
     st.markdown("#### Wariant vs dziś (ta sama zmiana: pogoda, awarie, kierowcy)")
     k = run_policy(vyaml, seed, "natural").kpi
     _tiles(k, run_policy(base_yaml, seed, "natural").kpi)
+    _crushers_summary(k)
     st.markdown("**Gdzie tracimy w wariancie:**  \n" + "  \n".join(_losses(k)))
     if _has_map_routes(vsc):
         components.html(compare_page(vyaml, "natural", base_yaml, seed, "Wariant (przydział jak dziś)"),

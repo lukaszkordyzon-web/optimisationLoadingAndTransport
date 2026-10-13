@@ -99,3 +99,22 @@ def test_passing_bay_snaps_to_road_and_marks_it_single_lane(site):
     assert find_obj(site, sel) is not None  # moved, still the same bay
     delete_obj(site, sel)
     assert bay["uid"] not in {x["uid"] for x in site["passing_bays"]}
+
+
+def test_second_crusher_on_the_map(site):
+    from app_map import add_drawing
+
+    msg = add_drawing(site, {"type": "Point", "coordinates": [20.024, 49.9946]}, "Kruszarka",
+                      {"new_crusher": True, "id": "C-2", "capacity_tph": 900.0, "hopper_t": 120.0,
+                       "accepts": ["U-03"], "product": "tłuczeń", "target_t": 3000.0})
+    assert msg.startswith("✅") and site["crushers"][0]["accepts"] == ["U-03"]
+    main_before = dict(site["crusher"])
+    add_drawing(site, {"type": "Point", "coordinates": [20.0, 50.0]}, "Kruszarka", {})  # moves the main one
+    assert (site["crusher"]["lat"], site["crusher"]["lon"]) == (50.0, 20.0)
+    assert site["crusher"].get("elev_m") == main_before.get("elev_m")  # other settings kept
+    c2 = site["crushers"][0]
+    sel = sel_from_click(site, "🏭 C-2 · kruszarka · 900 t/h", None)
+    assert sel == f"crusher2:{c2['uid']}"
+    assert sel_from_click(site, "🏭 C-1 · kruszarka główna", None) == "crusher:"
+    delete_obj(site, sel)
+    assert site["crushers"] == []
