@@ -16,6 +16,7 @@ Dobór „jak inżynier” (`kopalnia_testowa.human_sizing`): kruszarka 400 t/h 
 PYTHONPATH=. python tools/walidacja/czulosc.py     # 1 400 zmian: 10 parametrów po kolei + siatka wozidła × kruszarka × odległość
 PYTHONPATH=. python tools/walidacja/polityki.py    # 4 sytuacje × nauka RL + 4 polityki × 30 tych samych zmian
 PYTHONPATH=. python tools/walidacja/kolejki.py     # rampy jednopasowe, kolejki pod koparkami: 4 polityki × 30 zmian
+PYTHONPATH=. python tools/walidacja/warianty.py    # porównanie wariantów: 1 zmiana vs 20 zmian, 5 pytań × 40 powtórzeń
 PYTHONPATH=. python tools/walidacja/harmonogram.py # miesiąc: flota, wyczerpanie usypów, strzały, szansa realizacji, cel od kruszarek
 ```
 
@@ -107,6 +108,32 @@ Zasady na odcinkach jednopasowych – takie same dla wozideł i aut osobowych (s
 jadący pod górę ma pierwszeństwo; kto już minął mijankę i jest na odcinku, jedzie pierwszy (jadący pod górę czeka na
 mijance); nikt nie wjeżdża na odcinek, jeśli jadący z naprzeciwka dojedzie do mijanki, zanim zdążyłby przejechać.
 Zatrzymanie kosztuje ruszenie. Test: nigdy dwa pojazdy w przeciwnych kierunkach na jednym odcinku.
+
+## Porównanie wariantów na wielu zmianach (`warianty.py`)
+
+Krok „Wariant – co jeśli” porównuje teraz wariant ze stanem obecnym na 10/20/30 tych samych zmianach i ocenia
+wynik testem znaków (wariant „lepszy”, jeśli wygrywa na co najmniej 15 z 20 zmian), plus tabela „ile wozideł”.
+Sprawdzenie: 5 pytań, każde zadane 40 razy na innych zmianach; prawda z 200 zmian.
+
+| pytanie (prawda z 200 zmian) | jedna zmiana: dobrze / źle / nie wiadomo | 20 zmian: dobrze / źle / nie wiadomo |
+|---|---|---|
+| 4 zamiast 3 wozideł – taniej? (nie, +4,9 %) | 39 / 1 / 0 | **40 / 0 / 0** |
+| 4 zamiast 3 wozideł – więcej ton? (tak, +1,4 %) | 39 / 0 / 1 | **40 / 0 / 0** |
+| druga mijanka – więcej ton? (tak, +1,8 %) | 37 / 0 / 3 | **40 / 0 / 0** |
+| łyżka 5 m³ zamiast 4,5 – więcej ton? (+0,1 % – praktycznie nic) | 4 / 0 / 36 | 0 / 0 / **40** („bez pewnej różnicy”) |
+| wozidła 40 t zamiast 36 t – taniej? (tak, −0,6 %) | 38 / **2** / 0 | **39 / 0 / 1** |
+
+Wielkość efektu (P10–P90 oszacowania z 40 powtórzeń):
+
+| pytanie | jedna zmiana | 20 zmian |
+|---|---|---|
+| druga mijanka – ile więcej ton | +0,7 … +3,1 % | **+1,7 … +2,2 %** |
+| wozidła 40 t – ile taniej | −0,9 … 0,0 % | **−0,8 … −0,5 %** |
+
+Wnioski: porównanie na tych samych zmianach (ta sama pogoda, awarie, kierowcy) już przy jednej zmianie zwykle
+wskazuje dobry kierunek, ale myli się w kilku procentach przypadków i podaje wielkość efektu z rozrzutem kilku
+punktów procentowych. 20 zmian: w 200 próbach ani jednej złej odpowiedzi, wielkość efektu z dokładnością ~±0,3 pp,
+a efekt pomijalny (łyżka +0,1 %) uczciwie nazwany „bez pewnej różnicy” zamiast „lepiej”.
 
 ## Harmonogram
 

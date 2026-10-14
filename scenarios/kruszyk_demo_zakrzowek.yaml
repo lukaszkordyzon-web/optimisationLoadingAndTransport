@@ -65,7 +65,7 @@ blasts:
   fragmentation: 0.3
   material: wapień
   loose_density_t_m3: 1.7
-  psd:
+  psd: &id001
   - - 10.0
     - 2.7
   - - 25.0
@@ -91,7 +91,7 @@ blasts:
   fragmentation: 0.3
   material: wapień
   loose_density_t_m3: 1.7
-  psd:
+  psd: &id002
   - - 10.0
     - 1.0
   - - 25.0
@@ -118,11 +118,13 @@ excavators:
   swing_cycle_s: 27.0
   blast: U-01
   route: T-K-1
+  fill_factor: 0.85
 - id: K-2
   bucket_m3: 4.5
   swing_cycle_s: 27.0
   blast: U-01
   route: T-K-2
+  fill_factor: 0.85
 trucks:
 - model: wozidło sztywnoramowe 38 t
   payload_t: 38.0
@@ -212,6 +214,13 @@ routes:
     - name: droga 3
       length_m: 407.4
       speed_limit_kmh: 40.0
+      curves:
+      - - 37.6
+        - 145.3
+      - - 40.6
+        - 95.8
+      - - 18.3
+        - 165.7
       grade_pct: 0.0
     - name: rampa 2
       length_m: 96.6
@@ -230,10 +239,16 @@ routes:
       speed_limit_kmh: 25.0
       section: R2#0
       section_dir: -1
+      curves:
+      - - 69.5
+        - 31.6
       grade_pct: 10.0
     - name: droga 1
       length_m: 390.7
       speed_limit_kmh: 40.0
+      curves:
+      - - 92.1
+        - 24.1
       grade_pct: 0.0
     - name: plac_kruszarki
       length_m: 28.4
@@ -285,10 +300,18 @@ routes:
     - name: droga 5
       length_m: 425.9
       speed_limit_kmh: 40.0
+      curves:
+      - - 50.0
+        - 84.1
+      - - 62.7
+        - 34.8
       grade_pct: 0.0
     - name: droga 1
       length_m: 390.7
       speed_limit_kmh: 40.0
+      curves:
+      - - 92.1
+        - 24.1
       grade_pct: 0.0
     - name: plac_kruszarki
       length_m: 28.4
@@ -325,6 +348,13 @@ links:
     - name: droga 3
       length_m: 407.4
       speed_limit_kmh: 40.0
+      curves:
+      - - 37.6
+        - 145.3
+      - - 40.6
+        - 95.8
+      - - 18.3
+        - 165.7
       grade_pct: 0.0
     - name: rampa 2
       length_m: 96.6
@@ -343,10 +373,16 @@ links:
       speed_limit_kmh: 25.0
       section: R2#0
       section_dir: -1
+      curves:
+      - - 23.1
+        - 113.6
       grade_pct: 10.0
     - name: droga 5
       length_m: 425.9
       speed_limit_kmh: 40.0
+      curves:
+      - - 50.0
+        - 84.1
       grade_pct: 0.0
     - name: dojazd
       length_m: 17.0
@@ -398,6 +434,9 @@ links:
     - name: droga 5
       length_m: 425.9
       speed_limit_kmh: 40.0
+      curves:
+      - - 23.1
+        - 197.7
       grade_pct: 0.0
     - name: rampa 2
       length_m: 1.0
@@ -416,10 +455,20 @@ links:
       speed_limit_kmh: 25.0
       section: R2#2
       section_dir: 1
+      curves:
+      - - 18.3
+        - 93.2
       grade_pct: -10.0
     - name: droga 3
       length_m: 407.4
       speed_limit_kmh: 40.0
+      curves:
+      - - 42.6
+        - 72.5
+      - - 40.6
+        - 95.8
+      - - 37.6
+        - 145.3
       grade_pct: 0.0
     - name: dojazd
       length_m: 36.1
@@ -466,7 +515,7 @@ planned_blasts: []
 areas:
 - id: O1
   material: wapień
-  psd:
+  psd: &id003
   - - 10.0
     - 1.0
   - - 25.0
@@ -503,7 +552,7 @@ areas:
   evacuation_min: 15.0
   crew_leave: '10:40'
   level_m: 458.8
-  polygon:
+  polygon: &id004
   - - 50.040053
     - 19.909566
   - - 50.03975
@@ -519,7 +568,7 @@ areas:
   target_share: null
 - id: O2
   material: wapień
-  psd:
+  psd: &id005
   - - 10.0
     - 1.0
   - - 25.0
@@ -558,7 +607,7 @@ areas:
   fire_to: '10:15'
   evacuation_min: 15.0
   crew_leave: '10:40'
-  polygon:
+  polygon: &id006
   - - 50.034389
     - 19.911036
   - - 50.034712
@@ -571,7 +620,7 @@ areas:
     - 19.911937
 - id: O3
   material: wapień
-  psd:
+  psd: &id007
   - - 10.0
     - 1.0
   - - 25.0
@@ -610,7 +659,7 @@ areas:
   fire_to: '10:15'
   evacuation_min: 15.0
   crew_leave: '10:40'
-  polygon:
+  polygon: &id008
   - - 50.039474
     - 19.91066
   - - 50.038751
@@ -670,27 +719,7 @@ site:
   - id: U-01
     material: wapień
     tonnage_t: 10000.0
-    psd:
-    - - 10.0
-      - 2.7
-    - - 25.0
-      - 7.8
-    - - 50.0
-      - 17.1
-    - - 100.0
-      - 35.0
-    - - 200.0
-      - 62.8
-    - - 300.0
-      - 80.0
-    - - 500.0
-      - 94.9
-    - - 800.0
-      - 99.5
-    - - 1000.0
-      - 99.9
-    - - 1200.0
-      - 100.0
+    psd: *id001
     loose_density_t_m3: 1.7
     polygon:
     - - 50.03444
@@ -711,27 +740,7 @@ site:
   - id: U-02
     material: wapień
     tonnage_t: 7000.0
-    psd:
-    - - 10.0
-      - 1.0
-    - - 25.0
-      - 3.3
-    - - 50.0
-      - 8.1
-    - - 100.0
-      - 19.3
-    - - 200.0
-      - 41.9
-    - - 300.0
-      - 60.7
-    - - 500.0
-      - 84.3
-    - - 800.0
-      - 96.9
-    - - 1000.0
-      - 99.1
-    - - 1200.0
-      - 99.7
+    psd: *id002
     loose_density_t_m3: 1.7
     polygon:
     - - 50.039123
@@ -939,27 +948,7 @@ site:
   areas:
   - id: O1
     material: wapień
-    psd:
-    - - 10.0
-      - 1.0
-    - - 25.0
-      - 3.3
-    - - 50.0
-      - 8.1
-    - - 100.0
-      - 19.3
-    - - 200.0
-      - 41.9
-    - - 300.0
-      - 60.7
-    - - 500.0
-      - 84.3
-    - - 800.0
-      - 96.9
-    - - 1000.0
-      - 99.1
-    - - 1200.0
-      - 99.7
+    psd: *id003
     loose_density_t_m3: 1.7
     reserves_t: 2350300.0
     bench_m: 15.0
@@ -976,44 +965,14 @@ site:
     evacuation_min: 15.0
     crew_leave: '10:40'
     level_m: 458.8
-    polygon:
-    - - 50.040053
-      - 19.909566
-    - - 50.03975
-      - 19.910317
-    - - 50.037007
-      - 19.907893
-    - - 50.038027
-      - 19.905361
-    - - 50.040328
-      - 19.908815
+    polygon: *id004
     uid: fa2eebb6aa
     level: Poziom +459
     level_auto: Poziom +459
     target_share: null
   - id: O2
     material: wapień
-    psd:
-    - - 10.0
-      - 1.0
-    - - 25.0
-      - 3.3
-    - - 50.0
-      - 8.1
-    - - 100.0
-      - 19.3
-    - - 200.0
-      - 41.9
-    - - 300.0
-      - 60.7
-    - - 500.0
-      - 84.3
-    - - 800.0
-      - 96.9
-    - - 1000.0
-      - 99.1
-    - - 1200.0
-      - 99.7
+    psd: *id005
     loose_density_t_m3: 1.7
     reserves_t: 523600.0
     level: Poziom +459
@@ -1032,41 +991,11 @@ site:
     fire_to: '10:15'
     evacuation_min: 15.0
     crew_leave: '10:40'
-    polygon:
-    - - 50.034389
-      - 19.911036
-    - - 50.034712
-      - 19.90962
-    - - 50.033858
-      - 19.908901
-    - - 50.033251
-      - 19.911497
-    - - 50.03403
-      - 19.911937
+    polygon: *id006
     uid: 95b89fe087
   - id: O3
     material: wapień
-    psd:
-    - - 10.0
-      - 1.0
-    - - 25.0
-      - 3.3
-    - - 50.0
-      - 8.1
-    - - 100.0
-      - 19.3
-    - - 200.0
-      - 41.9
-    - - 300.0
-      - 60.7
-    - - 500.0
-      - 84.3
-    - - 800.0
-      - 96.9
-    - - 1000.0
-      - 99.1
-    - - 1200.0
-      - 99.7
+    psd: *id007
     loose_density_t_m3: 1.7
     reserves_t: 598300.0
     level: Poziom +478
@@ -1085,15 +1014,7 @@ site:
     fire_to: '10:15'
     evacuation_min: 15.0
     crew_leave: '10:40'
-    polygon:
-    - - 50.039474
-      - 19.91066
-    - - 50.038751
-      - 19.912902
-    - - 50.039846
-      - 19.913868
-    - - 50.040384
-      - 19.9117
+    polygon: *id008
     uid: 0c3ad1857b
 reliability:
   enabled: true

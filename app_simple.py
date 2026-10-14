@@ -228,8 +228,9 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
     st.markdown("### ② Wariant – co jeśli")
     st.markdown("Kopia stanu obecnego, w której **zmieniasz** np. liczbę wozideł, przypisanie do koparek, drogi "
                 "(włączasz drogę planowaną, zamykasz istniejącą, zmieniasz nachylenie), wydajność kruszarki albo "
-                "uziarnienie usypów – i od razu widzisz wynik jednej zmiany obok stanu obecnego. Stan obecny się nie "
-                "zmienia. **Efekt na cały okres** policzysz w kroku **③ Harmonogram** (wybierz tam „wariant”).")
+                "uziarnienie usypów – i porównujesz go ze stanem obecnym **na wielu tych samych zmianach** (wynik "
+                "jednej zmiany bywa przypadkiem). Poniżej też: **ile wozideł** opłaca się w tej kopalni. Stan obecny "
+                "się nie zmienia. **Efekt na cały okres** policzysz w kroku **③ Harmonogram** (wybierz tam „wariant”).")
     if base_yaml is None:
         st.info("Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia**.")
         return
@@ -354,14 +355,139 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
         st.error(f"Wariant nie daje się policzyć: {e}")
         return
     st.session_state.variant_yaml = vyaml
-    st.markdown("#### Wariant vs dziś (ta sama zmiana: pogoda, awarie, kierowcy)")
-    k = run_policy(vyaml, seed, "natural").kpi
-    _tiles(k, run_policy(base_yaml, seed, "natural").kpi)
-    _crushers_summary(k)
-    st.markdown("**Gdzie tracimy w wariancie:**  \n" + "  \n".join(_losses(k)))
-    if _has_map_routes(vsc):
-        components.html(compare_page(vyaml, "natural", base_yaml, seed, "Wariant (przydział jak dziś)"),
-                        height=760, scrolling=False)
+    # today rebuilt from the map exactly like the variant: an unchanged copy must compare as identical
+    try:
+        cmp_base = dump_scenario(scenario_from_dict(
+            site_to_scenario(copy.deepcopy(base_raw["site"]), copy.deepcopy(base_raw)) if base_raw.get("site")
+            else copy.deepcopy(base_raw)))
+    except Exception:  # noqa: BLE001 – the map can't be rebuilt: compare with the stored routes
+        cmp_base = base_yaml
+    _variant_compare(cmp_base, vyaml, seed)
+    _fleet_section(cmp_base, vyaml, seed)
+    with st.expander("🎬 Jedna zmiana z bliska – animacja i straty wariantu"):
+        st.caption("Pojedyncza zmiana pokazuje, CO się dzieje (kolejki, przestoje). Czy wariant jest lepszy, mówi "
+                   "porównanie na wielu zmianach powyżej – jedna zmiana może być przypadkiem (awaria, deszcz).")
+        k = run_policy(vyaml, seed, "natural").kpi
+        _tiles(k, run_policy(base_yaml, seed, "natural").kpi)
+        _crushers_summary(k)
+        st.markdown("**Gdzie tracimy w wariancie:**  \n" + "  \n".join(_losses(k)))
+        if _has_map_routes(vsc):
+            components.html(compare_page(vyaml, "natural", base_yaml, seed, "Wariant (przydział jak dziś)"),
+                            height=760, scrolling=False)
+
+
+def _pct(x: float) -> str:
+    return f"{x:+.1f} %".replace(".", ",")
+
+
+def _variant_compare(base_yaml: str, vyaml: str, seed: int) -> None:
+    """Variant vs today on many shifts (same weather, breakdowns, drivers) – with a verdict that is not chance."""
+    from kruszyk.compare import N_SHIFTS, compare, noise_note
+    from ui import card
+
+    with card("var_cmp"):
+        st.markdown("#### ⚖️ Wariant vs dziś – na wielu zmianach")
+        st.caption("Oba scenariusze liczone na tych samych zmianach: ta sama pogoda, te same awarie i kierowcy – "
+                   "różnica wynika ze zmiany, nie z losu. Przydział wozideł jak dziś (sztygar).")
+        c = st.columns([1, 1, 2])
+        n = c[0].selectbox("Ile zmian porównać", N_SHIFTS, index=1, key="vcmp_n")
+        key = hash((base_yaml, vyaml, n, seed))
+        if c[1].button("▶️ Porównaj", type="primary", key="vcmp_go"):
+            bar = st.progress(0.0, "liczę…")
+            res = compare(scenario_from_dict(yaml.safe_load(base_yaml)), scenario_from_dict(yaml.safe_load(vyaml)),
+                          n=n, seed=seed, progress=lambda i, k_: bar.progress(i / k_, f"zmiana {i} z {k_}"))
+            bar.empty()
+            st.session_state.vcmp = (key, res)
+        got = st.session_state.get("vcmp")
+        if not got:
+            c[2].caption("Kliknij **Porównaj** – kilka sekund.")
+            return
+        if got[0] != key:
+            st.warning("Wariant zmienił się od ostatniego porównania – kliknij **Porównaj** ponownie.")
+        r = got[1]
+        a, b = r["base"], r["variant"]
+        m = st.columns(4)
+        m[0].metric("Tony na zmianę (średnio)", f"{b['t']:,.0f} t".replace(",", " "), _pct(r["d_t_pct"]) + " vs dziś")
+        m[1].metric("Koszt na tonę", f"{b['zl_t']:.2f} zł/t".replace(".", ","), _pct(r["d_cost_pct"]) + " vs dziś",
+                    delta_color="inverse")
+        m[2].metric("Paliwo na tonę", f"{b['paliwo_l_t']:.3f} l/t".replace(".", ","),
+                    _pct(100 * (b["paliwo_l_t"] / a["paliwo_l_t"] - 1)) if a["paliwo_l_t"] else None, delta_color="inverse")
+        m[3].metric("Kolejka pod kruszarką", f"{b['kolejka_kruszarka_h']:.1f} h".replace(".", ","),
+                    f"{b['kolejka_kruszarka_h'] - a['kolejka_kruszarka_h']:+.1f} h".replace(".", ","),
+                    delta_color="inverse")
+        lines = []
+        for what, verdict, win, lose, unit in (("koszt na tonę", r["cost_verdict"], r["cost_better"], r["cost_worse"],
+                                                "taniej"),
+                                               ("tony", r["t_verdict"], r["t_more"], r["t_less"], "więcej ton")):
+            if verdict == "lepiej":
+                lines.append(f"✅ **{what}: wariant lepszy** – {unit} na **{win} z {r['n']}** zmian.")
+            elif verdict == "gorzej":
+                lines.append(f"❌ **{what}: wariant gorszy** – gorzej na **{lose} z {r['n']}** zmian.")
+            else:
+                lines.append(f"➖ **{what}: bez pewnej różnicy** – lepiej na {win}, gorzej na {lose} z {r['n']} zmian "
+                             "(to może być przypadek).")
+        st.markdown("  \n".join(lines))
+        st.caption(f"Typowa zmiana (P10–P90): dziś {a['t_p10']:,.0f}–{a['t_p90']:,.0f} t, wariant "
+                   f"{b['t_p10']:,.0f}–{b['t_p90']:,.0f} t. ".replace(",", " ") + noise_note(r["n"]))
+        ps = r["per_shift"]
+        fig = go.Figure()
+        fig.add_scatter(x=ps["zmiana"], y=ps["dzis_t"], name="dziś", mode="lines+markers", line=dict(color="#9aa0a6"))
+        fig.add_scatter(x=ps["zmiana"], y=ps["wariant_t"], name="wariant", mode="lines+markers",
+                        line=dict(color="#c8102e", width=3))
+        fig.update_layout(height=260, margin=dict(t=30, b=10), title="Tony na każdej z porównanych zmian",
+                          xaxis_title="zmiana", yaxis_title="t", legend=dict(orientation="h"))
+        st.plotly_chart(fig, width="stretch")
+
+
+def _fleet_section(base_yaml: str, vyaml: str, seed: int) -> None:
+    """How many trucks: the same mine with fewer / more trucks on the same shifts."""
+    from kruszyk.compare import N_SHIFTS, fleet_sweep
+    from ui import card
+
+    with card("var_fleet"):
+        st.markdown("#### 🚚 Ile wozideł? – ta sama kopalnia z mniejszą i większą flotą")
+        which = st.radio("Dla", ["stanu obecnego", "wariantu"], horizontal=True, key="vfleet_which")
+        sc = scenario_from_dict(yaml.safe_load(base_yaml if which == "stanu obecnego" else vyaml))
+        now = sc.truck_count
+        c = st.columns([2, 1, 1])
+        lo, hi = c[0].slider("Liczba wozideł", 1, max(12, now + 6), (max(1, now - 2), now + 3), key="vfleet_range")
+        n = c[1].selectbox("Zmian na wariant", N_SHIFTS, index=0, key="vfleet_n")
+        key = hash((base_yaml if which == "stanu obecnego" else vyaml, lo, hi, n, seed))
+        if c[2].button("▶️ Policz", key="vfleet_go"):
+            counts = list(range(lo, hi + 1))
+            bar = st.progress(0.0, "liczę…")
+            tab, rec = fleet_sweep(sc, counts, n=n, seed=seed,
+                                   progress=lambda i, k_: bar.progress(i / k_, f"zmiana {i} z {k_}"))
+            bar.empty()
+            st.session_state.vfleet = (key, tab, rec, now)
+        got = st.session_state.get("vfleet")
+        if not got:
+            st.caption(f"Teraz w pracy: **{now}** wozideł. Kliknij **Policz** – każda flota liczona na tych samych zmianach.")
+            return
+        if got[0] != key:
+            st.warning("Ustawienia zmieniły się – kliknij **Policz** ponownie.")
+        _, tab, rec, now = got
+        show = tab.rename(columns={"wozidla": "wozidła", "t": "tony / zmianę", "t_p10": "P10 [t]", "t_p90": "P90 [t]",
+                                   "zl_t": "zł/t", "paliwo_l_t": "paliwo l/t", "kolejka_kruszarka_h": "kolejka pod koszem [h]",
+                                   "kolejka_koparki_h": "kolejka pod koparkami [h]", "kruszarka_pct": "kruszarka [%]"})
+        st.dataframe(show.round(2), hide_index=True, width="stretch")
+        fig = go.Figure()
+        fig.add_bar(x=tab["wozidla"], y=tab["t"], name="tony na zmianę", marker_color="#9fb3c8")
+        fig.add_scatter(x=tab["wozidla"], y=tab["zl_t"], name="zł/t", yaxis="y2", mode="lines+markers",
+                        line=dict(color="#c8102e", width=3))
+        fig.update_layout(height=280, margin=dict(t=30, b=10), xaxis_title="wozidła", yaxis_title="t / zmianę",
+                          yaxis2=dict(title="zł/t", overlaying="y", side="right"), legend=dict(orientation="h"),
+                          title="Tony i koszt tony w zależności od liczby wozideł")
+        st.plotly_chart(fig, width="stretch")
+        msg = (f"💰 Najtańsza tona: **{rec['najtansza']} wozideł** ({rec['najtansza_zl_t']:.2f} zł/t, "
+               f"{rec['najtansza_t']:,.0f} t/zmianę). 🏭 Prawie pełna produkcja (97 % maksimum): od "
+               f"**{rec['pelna_produkcja']} wozideł** ({rec['pelna_t']:,.0f} t).").replace(",", " ")
+        st.success(msg)
+        if now > rec["pelna_produkcja"]:
+            st.info(f"Dziś pracuje {now} wozideł – {now - rec['pelna_produkcja']} więcej, niż potrzeba do pełnej "
+                    "produkcji: dodatkowe stoją w kolejkach (rezerwa na awarie kosztuje – patrz zł/t).")
+        elif now < rec["pelna_produkcja"]:
+            st.info(f"Dziś pracuje {now} wozideł – dołożenie do {rec['pelna_produkcja']} podnosi produkcję.")
 
 
 def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
