@@ -1,9 +1,9 @@
-1. Miesiąc (40 zmian)  dużo urobku – flota: 2 woz. 84 096 t 18.20 zł/t; 3 woz. 98 568 t 17.58 zł/t; 4 woz. 99 288 t 18.53 zł/t; 5 woz. 99 756 t 19.43 zł/t; 6 woz. 99 828 t 20.43 zł/t → najtańsza: 3 wozidła
-   3 wozidła: 98 568 t = 2 464 t na zmianę (sd 657)
+1. Miesiąc (40 zmian)  dużo urobku – flota: 2 woz. 85 428 t 18.03 zł/t; 3 woz. 98 928 t 17.54 zł/t; 4 woz. 99 756 t 18.48 zł/t; 5 woz. 99 828 t 19.42 zł/t; 6 woz. 99 828 t 20.43 zł/t → najtańsza: 3 wozidła
+   3 wozidła: 98 928 t = 2 473 t na zmianę (sd 656)
 2. Dwa usypy po 15 000 t  bez strzałów: 29 784 t w okresie  produkcja staje od zmiany nr 12 (zmian bez urobku: 32)
-3. To samo + strzał 10 000 t co 2 dni robocze na każdym poziomie: 98 568 t  zmian bez urobku: 0
-4. Szansa realizacji (40 wariantów miesiąca): P10 99 857 t  P50 102 420 t  P90 105 408 t
-   cel 100 000 t → szansa 88 %
+3. To samo + strzał 10 000 t co 2 dni robocze na każdym poziomie: 98 928 t  zmian bez urobku: 0
+4. Szansa realizacji (40 wariantów miesiąca): P10 102 794 t  P50 104 562 t  P90 106 452 t
+   cel 100 000 t → szansa 100 %
    cel 110 000 t → szansa 0 %
    cel 115 000 t → szansa 0 %
    cel 120 000 t → szansa 0 %

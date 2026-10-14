@@ -88,6 +88,8 @@ def test_small_tank_forces_refuelling(demo):
 
 
 def test_advisor_prefills_buckets_and_slows_trucks_instead_of_queueing(demo):
+    demo = copy.deepcopy(demo)
+    demo.dispatch = "dynamic"  # advice comes with the system; today's practice has none
     base = simulate(demo).kpi
     sc = copy.deepcopy(demo)
     sc.advisor.enabled = True

@@ -122,6 +122,11 @@ class Simulation:
     def __init__(self, sc: Scenario, seed: int | None = None):
         sc.validate()
         self.sc = sc
+        # today's practice ("natural", "fixed"): drivers and operators act on what they see and hear on the radio –
+        # no knowledge of queues, of trucks on the way or of when an excavator will be free. Only the system
+        # ("dynamic") and the learned policy ("rl") have that information and can give advice.
+        self.informed = sc.dispatch in ("rl", "dynamic")
+        self.advice = bool(sc.advisor.enabled) and self.informed
         self.rng = np.random.default_rng(sc.seed if seed is None else seed)
         # breakdowns: every machine draws from its own stream, so the same shift brings the same breakdowns
         # whatever the dispatch does (fair comparison of policies; the rest of the shift stays comparable too)
@@ -382,6 +387,10 @@ class Simulation:
             self.relocated_at.setdefault(cfg.id, []).append((env.now, tuple(new[0]), tuple(old[0])))
         self.excavator_moves_done.append({"excavator": cfg.id, "from": cfg.blast, "to": nxt,
                                           "start_h": round(a / 3600, 2), "end_h": round(env.now / 3600, 2)})
+
+    def _broken(self, ex: ExcavatorState) -> bool:
+        now = self.env.now
+        return any(a <= now < b and r == "awaria" for a, b, r in ex.down)
 
     def _queue_len(self, ex: ExcavatorState) -> int:
         return len(ex.bays.queue) + len(ex.resource.queue)
@@ -673,12 +682,14 @@ class Simulation:
         self.decisions += 1
         mode = self.sc.dispatch
         home = self.excavators.get(truck.home_excavator)
-        if mode in ("fixed", "natural") and home in active:
-            # natural: drivers mostly go back to "their" excavator, sometimes elsewhere, without information
-            if mode == "fixed" or self.rng.random() >= self.sc.natural_switch_prob:
-                return home
-        if mode == "natural":
-            return active[int(self.rng.integers(len(active)))]
+        if mode in ("fixed", "natural"):
+            # a breakdown is reported on the radio: drivers go elsewhere (they don't know where it is better)
+            working = [ex for ex in active if not self._broken(ex)] or active
+            if home in working:
+                # natural: drivers mostly go back to "their" excavator, sometimes elsewhere, without information
+                if mode == "fixed" or self.rng.random() >= self.sc.natural_switch_prob:
+                    return home
+            return working[int(self.rng.integers(len(working)))]
         if mode == "rl":
             w = np.asarray(self.sc.rl_weights, dtype=float)
             feats = {ex.cfg.id: self.features(truck, ex) for ex in active}
@@ -882,7 +893,7 @@ class Simulation:
                 one_pass = ex.cfg.swing_cycle_s * (1.0 + 0.5 * blast.fragmentation)
                 load = full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd) * sc.calibration.load_factor
                 # a bucket filled while the truck was still coming saves one pass – if the operator knew it was coming
-                p_prefill = 1.0 if sc.advisor.enabled else PREFILL_NATURAL_P
+                p_prefill = 1.0 if self.advice else PREFILL_NATURAL_P
                 if idle_before >= one_pass and load > 1.5 * one_pass and self.rng.random() < p_prefill:
                     load -= one_pass
                     ex.prefills += 1
@@ -964,7 +975,9 @@ class Simulation:
                 return False
             goal = self.sc.goal_t
             if goal and self.sc.shift_goal.get("stop", True):
-                on_way = sum(u.inbound_t + u.queued_dump_t for u in self.units.values()) + self.pit_t
+                # the system knows what is on the way; without it the shift stops when the scale shows the goal
+                on_way = (sum(u.inbound_t + u.queued_dump_t for u in self.units.values()) + self.pit_t
+                          if self.informed else 0.0)
                 if self.dumped_t + on_way >= goal:  # the goal of the shift is covered: no more trips
                     self._log_state(truck, "cel_osiagniety", now, end=self.shift_s)
                     self.truck_parked_s += self.shift_s - now  # engine off until the end of the shift
@@ -1022,7 +1035,7 @@ class Simulation:
             travel = route_time_s(self._route_to(first, truck.at), fleet, False, sc.rolling_resistance_pct)
             service = self._expected_service(first, fleet)
             pace_empty = 1.0
-            if sc.advisor.enabled:
+            if self.advice:
                 # recommended speed: arrive when the excavator is free – not earlier (queue), not later
                 wait = self.predicted_finish(first, env.now + travel, service) - service - (env.now + travel)
                 wait -= sc.advisor.arrival_margin_s  # learned safety margin: better a bit early than late
@@ -1050,10 +1063,10 @@ class Simulation:
             # speed advice: if we would only queue at the crusher, drive slower instead
             route = self._route_to(last, unit.cfg.id)
             pace = 1.0
-            if (sc.pacing.enabled and sc.dispatch != "natural") or sc.advisor.enabled:
+            if (sc.pacing.enabled and self.informed) or self.advice:
                 haul = route_time_s(route, fleet, True, sc.rolling_resistance_pct)
                 wait = self.expected_dump_wait_s(tonnes, extra_t=unit.inbound_t, ahead_s=haul, unit=unit)
-                if sc.advisor.enabled:
+                if self.advice:
                     pace = 1 + min(sc.advisor.max_slowdown, sc.advisor.crusher_pacing * wait / haul)
                 else:
                     pace = 1 + min(sc.pacing.max_slowdown, wait / haul)
