@@ -54,11 +54,12 @@ def sign_threshold(n: int, alpha: float = 0.05) -> int:
 
 
 def compare(base: Scenario, variant: Scenario, n: int = 20, seed: int = 0, dispatch: str = "natural",
-            progress=None) -> dict:
-    """Base and variant on the same n shifts. Returns summaries, per-shift rows and the verdict."""
+            progress=None, variant_dispatch: str | None = None) -> dict:
+    """Base and variant on the same n shifts. Returns summaries, per-shift rows and the verdict.
+    `variant_dispatch` – the variant runs with another dispatch (e.g. "rl": today with the live system)."""
     seeds = seeds_for(seed, n)
     a, b = copy.deepcopy(base), copy.deepcopy(variant)
-    a.dispatch = b.dispatch = dispatch
+    a.dispatch, b.dispatch = dispatch, variant_dispatch or dispatch
     da = shift_rows(a, seeds, progress, 0, 2 * n)
     db = shift_rows(b, seeds, progress, n, 2 * n)
     sa, sb = summary(da), summary(db)

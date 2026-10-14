@@ -348,6 +348,12 @@ def test_rl_training_in_the_app():
     before, after = entry["test"]
     assert ("rl_weights" in at.session_state["raw"]) == (not entry["no_gain"])  # saved only when it is cheaper
     assert any("Wynik:" in m.value for m in at.markdown)
+    # recommendations card: what works without a system (checked on the same shifts) and what needs it
+    assert any("Rekomendacje dla kopalni" in m.value for m in at.markdown)
+    assert any("Wymaga systemu na żywo" in m.value for m in at.markdown)
+    advice = entry["advice"]
+    for r in advice["organisational"]:
+        assert r["d_t_pct"] >= -1.5 and (r["d_cost_pct"] < 0)  # never "cheaper" by hauling less
 
 
 def test_calibration_on_a_table_of_shifts():

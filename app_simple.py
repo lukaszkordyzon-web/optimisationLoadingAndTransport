@@ -599,6 +599,7 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     res = entry["result"]
     sc = _with_policy(sc, res)
     rl_yaml = dump_scenario(sc)
+    _recommendations(entry, base_yaml, sc, seed)
     today = run_policy(base_yaml, seed, "natural").kpi
     best = run_policy(rl_yaml, seed, "rl").kpi
     if entry.get("no_gain"):
@@ -640,6 +641,55 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     st.plotly_chart(fig, width="stretch")
     st.markdown("#### Zobacz, jak jeżdżą po optymalizacji")
     components.html(compare_page(rl_yaml, "rl", base_yaml, seed, f"{which} + nauczony przydział"), height=760, scrolling=False)
+
+
+def _rec_numbers(x: dict) -> str:
+    return (f"koszt tony **{x['d_cost_pct']:+.1f} %** ({x['zl_t']:.2f} zamiast {x['today_zl_t']:.2f} zł/t), "
+            f"tony {x['d_t_pct']:+.1f} %, taniej na {x['wins']} z {x['n']} zmian").replace(".", ",")
+
+
+def _recommendations(entry: dict, base_yaml: str, sc_policy, seed: int) -> None:
+    """What the mine can change tomorrow without a system, and what only the live system gives – every
+    organisational recommendation checked on the same shifts as today's practice."""
+    from kruszyk.advice import recommend
+    from ui import card
+
+    if "advice" not in entry:
+        bar = st.progress(0.0, "Sprawdzam rekomendacje na 10 zmianach…")
+        entry["advice"] = recommend(scenario_from_dict(yaml.safe_load(base_yaml)), sc_policy, seed=seed,
+                                    progress=lambda f, t: bar.progress(min(f, 1.0), t))
+        bar.empty()
+    a = entry["advice"]
+    with card("rl_recs"):
+        st.markdown("#### 📋 Rekomendacje dla kopalni")
+        st.markdown("**✅ Do wprowadzenia od jutra – bez żadnego systemu**")
+        if a["organisational"]:
+            for r in a["organisational"]:
+                small = " _(mały efekt)_" if abs(r["d_cost_pct"]) < 1 else ""
+                st.markdown(f"**{r['title']}**{small}  \n{r['why']}  \n{_rec_numbers(r)}.")
+                if r.get("changes"):
+                    st.caption("Zmiany przydziału: " + "; ".join(
+                        f"{t}: {', '.join(old) or 'bez przydziału'} → {new}" for t, old, new in r["changes"]))
+        else:
+            st.caption("Nie ma zmian organizacyjnych, które bez systemu dają pewną oszczędność – to, co robi polityka, "
+                       "wymaga informacji na żywo.")
+        for t in a.get("tradeoffs", []):
+            st.markdown(f"⚖️ **Do decyzji: {t['title']}** – taniej, ale mniej produkcji: {_rec_numbers(t)}. Opłaca "
+                        "się tylko, jeśli tych ton i tak nie sprzedacie.")
+        st.markdown("**📱 Wymaga systemu na żywo** (telefony w wozidłach i koparkach)")
+        st.markdown("  \n".join(f"• {x['title']} – {x['detail']}" for x in a["system"]))
+        f = a["full"]
+        msg = f"Cały system na żywo vs dziś: {_rec_numbers(f)}."
+        if f["d_t_pct"] < -1.5:
+            st.warning(msg + " **Mniej ton**: polityka oszczędza na koszcie tony kosztem produkcji. Jeśli liczy się "
+                             "produkcja, ustaw **cel zmiany** w kroku ② Plan zmiany i naucz politykę ponownie.")
+        elif f["verdict"] == "lepiej":
+            st.success(msg)
+        else:
+            st.info(msg + " Różnica niepewna – system na żywo niewiele tu daje.")
+        st.caption(f"Każda rekomendacja sprawdzona w symulacji na tych samych {a['n']} zmianach (pogoda, awarie, "
+                   "kierowcy) co praca jak dziś. Wyniki modelu – przed decyzją inwestycyjną sprawdź je w kroku "
+                   "Planowanie produkcji → ② Wariant (20–30 zmian).")
 
 
 def _decisions(k: dict, today: dict, sc) -> None:
