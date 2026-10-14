@@ -16,7 +16,7 @@ from .site import analyze_site, haversine_m
 STATE_CODES = ["jazda_pusty", "przejazd_miedzy_usypami", "jazda_pelny", "kolejka_koparka", "podstawienie",
                "zaladunek", "kolejka_kruszarka", "wyladunek", "wyladunek_halda", "awaria", "postoj_brak_urobku",
                "start", "przerwa", "postoj_strzelanie", "koniec_zmiany", "tankowanie", "postoj_koparki",
-               "wyjazd_z_frontu", "mijanka", "inne_przestoje"]
+               "wyjazd_z_frontu", "mijanka", "inne_przestoje", "parking"]
 STATE_LABELS = {
     "jazda_pusty": "jedzie pusty", "przejazd_miedzy_usypami": "jedzie na 2. usyp", "jazda_pelny": "jedzie pełny",
     "kolejka_koparka": "czeka pod koparką", "podstawienie": "podstawia się", "zaladunek": "ładowany",
@@ -25,7 +25,7 @@ STATE_LABELS = {
     "przerwa": "przerwa", "postoj_strzelanie": "czeka – strzelanie", "koniec_zmiany": "koniec zmiany",
     "tankowanie": "tankowanie", "postoj_koparki": "czeka – koparka stoi",
     "wyjazd_z_frontu": "manewruje / wyjeżdża z frontu", "mijanka": "czeka na mijance",
-    "inne_przestoje": "inne przestoje (z kalibracji)",
+    "inne_przestoje": "inne przestoje (z kalibracji)", "parking": "parking – silnik wyłączony (RL)",
 }
 STATE_COLORS = {
     "jazda_pusty": "#8ecae6", "przejazd_miedzy_usypami": "#b5838d", "jazda_pelny": "#219ebc",
@@ -33,11 +33,11 @@ STATE_COLORS = {
     "kolejka_kruszarka": "#d62828", "wyladunek": "#264653", "wyladunek_halda": "#6c757d", "awaria": "#000000",
     "postoj_brak_urobku": "#adb5bd", "start": "#adb5bd", "przerwa": "#ffd166", "postoj_strzelanie": "#ff006e",
     "koniec_zmiany": "#adb5bd", "tankowanie": "#8338ec", "postoj_koparki": "#fb8500",
-    "wyjazd_z_frontu": "#e9c46a", "mijanka": "#ff4d6d", "inne_przestoje": "#7f5539",
+    "wyjazd_z_frontu": "#e9c46a", "mijanka": "#ff4d6d", "inne_przestoje": "#7f5539", "parking": "#90be6d",
 }
 QUEUES = {"kolejka_koparka", "kolejka_kruszarka", "postoj_koparki", "mijanka"}
 CRUSHER_SIDE = {"kolejka_kruszarka", "wyladunek", "wyladunek_halda", "postoj_brak_urobku", "przerwa",
-                "postoj_strzelanie", "koniec_zmiany", "tankowanie"}
+                "postoj_strzelanie", "koniec_zmiany", "tankowanie", "parking"}
 
 
 def _cum(path: list) -> list[float]:

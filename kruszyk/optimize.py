@@ -26,6 +26,7 @@ def kpi_row(k: dict) -> dict:
         "stockpile_end_t": k["stockpile_end_t"],
         "feed_dev_pp": k.get("feed_dev_pp", 0.0),
         "parked_excavator_h": k.get("parked_excavator_h", 0.0),
+        "parked_truck_h": k.get("parked_truck_h", 0.0),
         "topup_skips": k.get("topup_skips", 0),
         "bay_wait_h": k.get("bay_wait_h", 0.0),
         "spot_exit_h": k.get("spot_exit_h", 0.0),

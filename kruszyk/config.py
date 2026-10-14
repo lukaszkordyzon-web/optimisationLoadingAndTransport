@@ -264,6 +264,8 @@ class Costs:
     drill_blast_per_t: float = 3.0
     drill_blast_fine_extra_per_t: float = 2.5  # extra cost at fragmentation=0
     excavator_idle_share: float = 0.35  # a parked excavator still costs this share of its hourly rate (operator)
+    # part of the truck rate that goes with engine hours (service, tyres, wear); a parked truck saves it
+    truck_variable_share: float = 0.4
     blend_penalty_per_t_pp: float = 0.05  # zł per tonne for each percentage point the feed misses its target mix
 
 
@@ -275,6 +277,11 @@ class ExcavatorPolicy:
     topup_min_fill: float = 1.0            # send a truck without its last bucket if already this full…
     topup_min_queue: float = 1.5           # …and at least this many trucks are waiting
     review_min: float = 30.0               # how often the number of working excavators is reviewed
+    # trucks: park (engine off) instead of queueing at the crusher. Off when < 0; otherwise a truck parks when
+    # it would queue at the crusher longer than this many minutes after its next cycle
+    truck_park_queue_min: float = -1.0
+    truck_min_working_share: float = 0.5   # never park more than the rest of this share of the fleet
+    truck_park_check_min: float = 3.0      # a parked truck looks at the queue again every few minutes
 
 
 # Ways of spotting a truck at the excavator. in_s = manoeuvre to the loading position, out_s = leaving it,

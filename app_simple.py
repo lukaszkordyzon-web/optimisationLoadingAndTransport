@@ -127,6 +127,9 @@ def _losses(k: dict) -> list[str]:
         out.append(f"🧪 Skład nadawy: {mix} – odchyłka **{k['feed_dev_pp']:.1f} pp**.")
     if k.get("parked_excavator_h", 0) > 0.05:
         out.append(f"🅿️ Koparki odstawione (za mało wozideł): **{k['parked_excavator_h']:.1f} h**.")
+    if k.get("parked_truck_h", 0) > 0.05:
+        out.append(f"🅿️ Wozidła zaparkowane zamiast stać w kolejce do kosza: **{k['parked_truck_h']:.1f} h** "
+                   "(silnik wyłączony – bez paliwa i zużycia).")
     if k.get("over_limit_pct", 0) > 0.5:
         out.append(f"🚦 **{k['over_limit_pct']:.0f} %** przejazdów odcinków powyżej limitu prędkości "
                    f"({k['speeders']} kierowców jeździ szybciej).")

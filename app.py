@@ -32,6 +32,7 @@ STATE_COLORS = {
     "podstawienie": "#f4a261", "zaladunek": "#2a9d8f", "kolejka_kruszarka": "#d62828",
     "wyladunek": "#264653", "wyladunek_halda": "#6c757d", "awaria": "#000000",
     "postoj_brak_urobku": "#adb5bd", "wyjazd_z_frontu": "#e9c46a", "mijanka": "#ff4d6d", "inne_przestoje": "#7f5539",
+    "parking": "#90be6d",
 }
 BASE_TS = pd.Timestamp("2026-01-01 06:00")
 
@@ -352,6 +353,10 @@ def editor() -> dict:
                     "energy_per_kwh": 0.9, "drill_blast_per_t": 3.0, "drill_blast_fine_extra_per_t": 2.5}
         for i, (key, lab) in enumerate(labels.items()):
             cs[key] = c[i % 4].number_input(lab, 0.0, 100000.0, float(cs.get(key, defaults[key])), key=k("c" + key))
+        cs["truck_variable_share"] = c[3].number_input(
+            "Wozidło: część zależna od motogodzin [%]", 0.0, 100.0, 100 * float(cs.get("truck_variable_share", 0.4)),
+            5.0, key=k("ctruck_var"), help="serwis, opony, zużycie – tyle stawki oszczędza wozidło zaparkowane "
+                                          "z wyłączonym silnikiem (decyzja polityki RL); reszta to kierowca i leasing") / 100
         new["costs"] = cs
     return new
 

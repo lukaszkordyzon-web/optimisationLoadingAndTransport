@@ -39,6 +39,7 @@ class TruckState:
     at: str = ""  # crusher where the truck is (dumped last); trucks start at the main crusher
     fuel_left_l: float = 0.0
     down_end: float = 0.0  # end of the current / last repair
+    parked: bool = False   # parked (engine off) by the policy instead of queueing at the crusher
 
 
 @dataclass
@@ -180,6 +181,8 @@ class Simulation:
         self.rehandled_t = 0.0
         self.fuel_l = 0.0
         self.dumped_t = 0.0
+        self.pit_t = 0.0  # tonnes planned by trucks still on their way to / at the excavators
+        self.truck_parked_s = 0.0
         self.decisions = 0
         # feed mix: what each pile should give (normalised targets) and what it has given so far
         targets = {b.id: float(b.target_share) for b in sc.blasts if b.target_share}
@@ -889,9 +892,40 @@ class Simulation:
                 return False
             return True
 
+    def _crusher_backlog_s(self, truck: TruckState) -> float:
+        """How long the crushers would still be busy with what is already in the system when this truck,
+        starting a cycle now, comes back loaded: positive = it would queue that long."""
+        units = list(self.units.values())
+        work_t = sum(u.hopper.level + u.queued_dump_t + u.inbound_t for u in units) + self.pit_t
+        rate = sum(self._crusher_rate(u) for u in units if self.env.now >= u.down_until)
+        if rate <= 0:
+            return math.inf
+        return work_t / rate * 3600 - self._est_cycle(truck)[1]
+
+    def _park_truck(self, truck: TruckState):
+        """Learned rule: rather than drive a cycle only to queue at the crusher, park with the engine off."""
+        pol, env = self.sc.excavator_policy, self.env
+        if self.sc.dispatch != "rl" or pol.truck_park_queue_min < 0:
+            return
+        n = len(self.trucks)
+        may_park = n - max(1, math.ceil(pol.truck_min_working_share * n))
+        t0 = env.now
+        while (sum(t.parked for t in self.trucks) - truck.parked < may_park
+               and self._crusher_backlog_s(truck) > pol.truck_park_queue_min * 60
+               and env.now + pol.truck_park_check_min * 60 < self.work_end):
+            truck.parked = True
+            yield env.timeout(pol.truck_park_check_min * 60)
+        truck.parked = False
+        if env.now > t0:
+            self._log_state(truck, "parking", t0)
+            self.truck_parked_s += env.now - t0
+
     def truck_process(self, truck: TruckState):
         env, v, sc = self.env, self.sc.variability, self.sc
         while True:
+            if not (yield from self._shift_gate(truck)):
+                return
+            yield from self._park_truck(truck)
             if not (yield from self._shift_gate(truck)):
                 return
             plan = self._plan(truck)
@@ -903,6 +937,8 @@ class Simulation:
             fleet = truck.fleet
             for ex, amount in plan:
                 ex.committed_t += amount
+            planned_t = sum(a for _, a in plan)
+            self.pit_t += planned_t
             first = plan[0][0]
             travel = route_time_s(self._route_to(first, truck.at), fleet, False, sc.rolling_resistance_pct)
             service = self._expected_service(first, fleet)
@@ -924,6 +960,7 @@ class Simulation:
                 tonnes += yield from self._load_at(truck, ex, amount, amount)
                 prev = ex
             last = prev
+            self.pit_t -= planned_t
             if tonnes <= 1e-6:
                 continue  # material ran out while driving there
             blast = sc.blast(last.cfg.blast)
@@ -1194,7 +1231,11 @@ class SimResult:
                 dev += 0.5 * np.abs(share - 100 * target)
         drill = dumped * (c.drill_blast_per_t + c.drill_blast_fine_extra_per_t * (1 - frag))
         parked_share = np.clip(t / sim.shift_s, 0, 1) * parked_s / 3600 * (1 - c.excavator_idle_share)
+        tp = self.states[self.states["state"] == "parking"]
+        truck_parked_h = np.array([float(np.clip(np.minimum(tp["end_s"], x) - tp["start_s"], 0, None).sum()) / 3600
+                                   for x in t]) if len(tp) else np.zeros(len(t))
         h["cost"] = (fixed_per_h * t / 3600 - c.excavator_per_h * parked_share
+                     - c.truck_per_h * c.truck_variable_share * truck_parked_h
                      + h["fuel_l"] * c.fuel_per_l + h["kwh"] * c.energy_per_kwh + drill
                      + dumped * c.blend_penalty_per_t_pp * dev
                      + (h["stockpile_in_t"] * sc.stockpile.rehandle_cost_per_t if sc.stockpile.enabled else 0.0))
@@ -1239,7 +1280,8 @@ class SimResult:
         h, c = sc.shift_hours, sc.costs
         frag_loaded = float((done["tonnes"] * done["fragmentation"]).sum() / dumped) if dumped else 0.0
         cost = {
-            "wozidla": sc.truck_count * c.truck_per_h * h,
+            # a parked truck (engine off) does not wear: it saves the engine-hour part of its rate
+            "wozidla": c.truck_per_h * (sc.truck_count * h - sim.truck_parked_s / 3600 * c.truck_variable_share),
             "paliwo": sim.fuel_l * c.fuel_per_l,
             # a parked excavator still costs its operator, but no fuel / wear
             "koparki": c.excavator_per_h * (len(sc.excavators) * h - parked_h * (1 - c.excavator_idle_share)),
@@ -1311,6 +1353,7 @@ class SimResult:
             "cost_per_t": round(total / dumped, 2) if dumped else None,
             "cost_breakdown": {k: round(v, 0) for k, v in cost.items()},
             "parked_excavator_h": round(parked_h, 2),
+            "parked_truck_h": round(sim.truck_parked_s / 3600, 2),
             "topup_skips": sum(e.topup_skips for e in sim.excavators.values()),
             "feed_share": feed_share,
             "feed_target": feed_target,

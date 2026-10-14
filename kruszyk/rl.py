@@ -32,7 +32,9 @@ FEATURE_NAMES = [
     "„własna” koparka kierowcy",
     "niedobór usypu względem udziału w nadawie [kursy]",
 ]
-EXCAVATOR_PARAMS = ["min. wozideł na koparkę", "ostatnia łyżka: min. wypełnienie", "ostatnia łyżka: min. kolejka"]
+EXCAVATOR_PARAMS = ["min. wozideł na koparkę", "ostatnia łyżka: min. wypełnienie", "ostatnia łyżka: min. kolejka",
+                    "parking wozidła: próg kolejki [min]", "parking wozidła: min. udział floty w pracy"]
+N_EX = len(EXCAVATOR_PARAMS)
 POLICIES = {"natural": "naturalny (obecna praktyka)", "fixed": "stały do koparki",
             "dynamic": "heurystyka systemu", "rl": "polityka RL"}
 
@@ -53,18 +55,21 @@ def decode_advisor(x) -> dict:
 def decode_excavators(x) -> dict:
     """Unbounded learned numbers -> excavator management. x = 0 is today's practice:
     all excavators work, every truck is filled to the payload."""
-    x = np.asarray(x, dtype=float)
+    x = np.pad(np.asarray(x, dtype=float), (0, max(0, N_EX - len(x))))
     return {"min_trucks_per_excavator": float(3 * max(0.0, np.tanh(x[0]))),
             "topup_min_fill": float(1 - 0.25 * max(0.0, np.tanh(x[1]))),
-            "topup_min_queue": float(3 / (1 + np.exp(-x[2])))}
+            "topup_min_queue": float(3 / (1 + np.exp(-x[2]))),
+            # trucks park instead of queueing at the crusher only when x > 0 (x = 0: today, nobody parks)
+            "truck_park_queue_min": float(30 * (1 - np.tanh(x[3]))) if x[3] > 0 else -1.0,
+            "truck_min_working_share": float(0.25 + 0.75 / (1 + np.exp(-x[4])))}
 
 
 def split_theta(theta, learn_excavators: bool, learn_advisor: bool):
-    """theta = [dispatch weights | excavator management (3) | advice settings (3)]."""
+    """theta = [dispatch weights | excavator and truck management (N_EX) | advice settings (3)]."""
     n = len(FEATURE_NAMES)
     theta = np.asarray(theta, dtype=float)
-    ex = theta[n:n + 3] if learn_excavators else None
-    adv_start = n + (3 if learn_excavators else 0)
+    ex = theta[n:n + N_EX] if learn_excavators else None
+    adv_start = n + (N_EX if learn_excavators else 0)
     adv = theta[adv_start:adv_start + 3] if learn_advisor else None
     return theta[:n], ex, adv
 
@@ -121,7 +126,7 @@ def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: 
     rng = np.random.default_rng(seed)
     n = len(FEATURE_NAMES)
     learn_adv = advisor and learn_advisor
-    dim = n + (3 if learn_excavators else 0) + (len(ADVISOR_PARAMS) if learn_adv else 0)
+    dim = n + (N_EX if learn_excavators else 0) + (len(ADVISOR_PARAMS) if learn_adv else 0)
     kw = dict(advisor=advisor, learn_excavators=learn_excavators, learn_advisor=learn_adv)
     mu = np.zeros(dim)  # start: an untrained dispatch policy + the hand-made advice rules
     sigma = np.concatenate([np.full(n, 1.5), np.full(dim - n, 1.0)])
@@ -204,6 +209,13 @@ def explain_excavators(p: dict) -> list[str]:
     else:
         out.append(f"🪣 Ostatnią łyżkę można pominąć, gdy wozidło jest pełne w **{100 * p['topup_min_fill']:.0f} %** "
                    f"lub więcej, a w kolejce czeka co najmniej **{p['topup_min_queue']:.1f}** wozidło.")
+    if p.get("truck_park_queue_min", -1.0) < 0:
+        out.append("🚚 Wozidła nie są odstawiane – każde jeździ całą zmianę.")
+    else:
+        out.append(f"🅿️ Wozidło po wyładunku **parkuje z wyłączonym silnikiem**, gdy po następnym kursie czekałoby "
+                   f"pod kruszarką dłużej niż **{p['truck_park_queue_min']:.0f} min**; co kilka minut sprawdza "
+                   f"kolejkę. W pracy zostaje zawsze co najmniej **{100 * p['truck_min_working_share']:.0f} %** "
+                   "wozideł.")
     return out
 
 

@@ -25,6 +25,7 @@ STATE_LABELS = {
     "wyjazd_z_frontu": "manewruje / wyjeżdża z frontu",
     "mijanka": "czeka na mijance",
     "inne_przestoje": "inne przestoje (z kalibracji)",
+    "parking": "parking – silnik wyłączony (RL)",
 }
 
 
