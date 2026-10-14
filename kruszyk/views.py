@@ -26,6 +26,7 @@ STATE_LABELS = {
     "mijanka": "czeka na mijance",
     "inne_przestoje": "inne przestoje (z kalibracji)",
     "parking": "parking – silnik wyłączony (RL)",
+    "cel_osiagniety": "cel zmiany osiągnięty – koniec wożenia",
 }
 
 

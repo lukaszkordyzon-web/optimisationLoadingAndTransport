@@ -640,6 +640,8 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
         new["routes"][rid] = build_route(site, pos, rid)
         ex = {"id": e["id"], "bucket_m3": float(e.get("bucket_m3", 5.0)),
               "swing_cycle_s": float(e.get("swing_cycle_s", 30.0)), "blast": pile, "route": rid}
+        if e.get("fill_factor"):
+            ex["fill_factor"] = float(e["fill_factor"])
         if dig:
             ex["dig_routes"], ex["dig_path"] = [rid], [list(p) for p in e["dig_path"]]
             for i, p in enumerate(dig[1:], start=1):
@@ -655,6 +657,19 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
         cr = _crusher_routes(site, pos, rid, new["routes"])
         if cr:
             ex["crusher_routes"] = cr
+        nxt = next((p for p in piles if p["id"] == e.get("then_pile") and p["id"] != pile), None)
+        if nxt is not None and len(nxt.get("polygon") or []) >= 3:  # rule: then drives to this pile
+            load_at = loading_point(site, nxt["polygon"])
+            then_rid = f"{rid}>>{nxt['id']}"
+            try:
+                new["routes"][then_rid] = build_route(site, load_at, then_rid)
+                kmh = float((raw.get("traffic") or {}).get("excavator_move_kmh") or 2.5)
+                ex.update(then_blast=nxt["id"], then_route=then_rid,
+                          then_crusher_routes=_crusher_routes(site, load_at, then_rid, new["routes"]),
+                          then_move_min=round(1.3 * haversine_m(pos, load_at) / (kmh / 3.6) / 60, 1),
+                          then_below_t=float(e.get("then_below_t") or 0.0))
+            except ValueError:
+                pass  # the next pile is not connected to the roads
         new["excavators"].append(ex)
     for a in excavators:
         for b in excavators:
@@ -701,7 +716,7 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
     new["crushers_extra"] = [{**base, "id": c["id"], "capacity_tph": float(c.get("capacity_tph", 800)),
                               "hopper_t": float(c.get("hopper_t", 150)), "accepts": list(c.get("accepts") or []),
                               "product": c.get("product", ""), "target_t": float(c.get("target_t") or 0.0),
-                              **({"kwh_per_t": float(c["kwh_per_t"])} if c.get("kwh_per_t") else {})}
+                              **{k: float(c[k]) for k in ("kwh_per_t", "max_feed_mm", "dump_time_s") if c.get(k)}}
                              for c in site.get("crushers", [])]
     # keep fleet assignments only if they still point to existing excavators
     ex_ids = {e["id"] for e in excavators}

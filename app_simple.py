@@ -153,7 +153,7 @@ def _tiles(k: dict, ref: dict | None = None):
 
 # ---------------------------------------------------------------- the three steps
 def step_today(sc, yaml_text: str, seed: int, set_raw):
-    st.markdown("### ④ Jak było dziś")
+    st.markdown("### ⑤ Jak było dziś")
     st.markdown("Odtworzenie **jednej zmiany tak, jak pracujecie obecnie**: kierowca po wyładunku wraca do „swojej” "
                 "koparki, czasem jedzie gdzie indziej, nikt nie wie, gdzie jest kolejka. Do tego losowość: deszcz, "
                 "różni kierowcy, awarie, różne czasy załadunku.")
@@ -168,11 +168,36 @@ def step_today(sc, yaml_text: str, seed: int, set_raw):
     status_line(sc)
     k = run_policy(yaml_text, seed, "natural").kpi
     _tiles(k)
+    _goal_line(k, sc)
     _crushers_summary(k)
     st.markdown("**Gdzie tracimy:**  \n" + "  \n".join(_losses(k)))
     st.caption("▶ Kliknij **Start** na panelu obok mapy – zmiana leci przyspieszona, kropki to wozidła "
                "(kolor = co robią), liczniki pokazują koszty na bieżąco.")
     components.html(animation_page(yaml_text, seed, "natural", False), height=760, scrolling=False)
+
+
+def _clock(sc, h: float) -> str:
+    hh, mm = (int(x) for x in sc.shift_plan.start_time.split(":"))
+    m = hh * 60 + mm + int(round(h * 60))
+    return f"{m // 60 % 24:02d}:{m % 60:02d}"
+
+
+def _goal_line(k: dict, sc) -> None:
+    """Did the shift reach its goal (rules of the shift)?"""
+    g = sc.shift_goal or {}
+    if not k.get("goal_t"):
+        return
+    what = (f"{g['t']:,.0f} t „{g['item']}” (≈ {k['goal_t']:,.0f} t nadawy)" if g.get("kind") == "product"
+            else f"{k['goal_t']:,.0f} t przez zakład").replace(",", " ")
+    if k.get("goal_reached_h") is not None:
+        st.success(f"🎯 Cel zmiany {what}: **osiągnięty o {_clock(sc, k['goal_reached_h'])}**"
+                   + (" – potem wozidła parkują." if g.get("stop", True) else "."))
+    else:
+        st.error(f"🎯 Cel zmiany {what}: **niezrealizowany – {k['goal_pct']:.0f} %** "
+                 f"({k['hauled_t']:,.0f} t).".replace(",", " "))
+    for m in k.get("excavator_moves") or []:
+        st.caption(f"⛏️ {m['excavator']} przejechał z {m['from']} na {m['to']} o {_clock(sc, m['start_h'])} "
+                   f"({60 * (m['end_h'] - m['start_h']):.0f} min).")
 
 
 def _snapshot_editor(key: str, make_df, **kwargs) -> pd.DataFrame:
@@ -340,14 +365,18 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
 
 
 def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
-    st.markdown("### ⑤ Optymalizacja RL – zalecenia na żywo")
+    st.markdown("### ⑥ Optymalizacja RL – decyzje na żywo")
     st.markdown(
-        "Program **uczy się sam**, do której koparki wysyłać każde wozidło po wyładunku, żeby **koszt na tonę był jak "
-        "najniższy**. Przy każdej decyzji patrzy na to, co system wie w tej chwili: gdzie jest kolejka, ile jest jazdy, "
-        "jak szybko ładuje dana koparka, ile urobku zostało. Ćwiczy na setkach symulowanych zmian i z rundy na rundę "
-        "wybiera lepsze reguły. Wynik porównujemy zawsze z **dziś** (stan obecny, przydział jak dziś). Po wdrożeniu "
-        "te decyzje trafiają na żywo na telefony kierowców i operatorów koparek. Nauczona polityka zapisuje się w "
-        "kopalni – w module **Planowanie produkcji** zobaczysz, ile daje na cały miesiąc.")
+        "Program **uczy się sam** decyzji na zmianie, żeby **koszt na tonę był jak najniższy**. Ćwiczy na setkach "
+        "symulowanych zmian i z rundy na rundę wybiera lepsze reguły. Wynik porównujemy zawsze z **dziś**. Po wdrożeniu "
+        "te decyzje trafiają na żywo na telefony kierowców i operatorów koparek; nauczona polityka zapisuje się w "
+        "kopalni – w **Planowaniu produkcji** widać, ile daje na cały miesiąc.")
+    st.markdown("| Decyzja | Kiedy |\n|---|---|\n"
+                "| 🚚 **dokąd jedzie wozidło** po wyładunku | zawsze – patrzy na kolejki, jazdę, tempo koparek, urobek |\n"
+                "| 🅿️ **wozidło parkuje** z wyłączonym silnikiem | gdy po kursie i tak stałoby w kolejce do kosza |\n"
+                "| ⛏️ **koparka zostaje odstawiona** | gdy wozideł jest za mało na wszystkie koparki |\n"
+                "| 🪣 **bez ostatniej łyżki** | gdy wozidło prawie pełne, a w kolejce czekają inne |\n"
+                "| 📱 **zalecana prędkość** | żeby dojechać, gdy koparka jest wolna, a nie stać w kolejce |")
     if base_yaml is None:
         st.info("Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia**.")
         return
@@ -388,8 +417,8 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
         # the policy is used only if it really beats today's practice on full shifts (not just in training)
         trial = _with_policy(sc, res)
         seeds = [seed + 101 + i for i in range(4)]
-        before = np.mean([run_policy(base_yaml, s_, "natural").kpi["cost_per_t"] for s_ in seeds])
-        after = np.mean([run_policy(dump_scenario(trial), s_, "rl").kpi["cost_per_t"] for s_ in seeds])
+        before = np.mean([run_policy(base_yaml, s_, "natural").kpi["objective"] for s_ in seeds])
+        after = np.mean([run_policy(dump_scenario(trial), s_, "rl").kpi["objective"] for s_ in seeds])
         no_gain = after > before * (1 - RL_MIN_GAIN)
         store[which] = {"result": res, "key": mine_key, "no_gain": no_gain, "test": (before, after)}
         if which == "stan obecny" and no_gain:
@@ -424,11 +453,13 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
                    + "  \n".join(bottleneck(today)))
     st.markdown(f"#### Wynik: {which} + nauczony przydział vs dziś (ta sama zmiana)")
     _tiles(best, today)
+    _goal_line(best, sc)
     saving = (today["cost_per_t"] - best["cost_per_t"]) * best["hauled_t"]
     if not entry.get("no_gain"):
         st.success(f"**{best['cost_per_t']:.2f} zł/t** zamiast {today['cost_per_t']:.2f} zł/t i "
                    f"**{best['hauled_t'] - today['hauled_t']:+,.0f} t** urobku na zmianę – ok. **{saving:,.0f} zł** "
                    "oszczędności na zmianę.".replace(",", " "))
+    _decisions(best, today, sc)
     lessons = (explain_excavators(res.excavators) if res.excavators else []) + \
         (explain_advisor(res.advisor) if res.advisor else [])
     if lessons:
@@ -454,6 +485,30 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     st.plotly_chart(fig, width="stretch")
     st.markdown("#### Zobacz, jak jeżdżą po optymalizacji")
     components.html(compare_page(rl_yaml, "rl", base_yaml, seed, f"{which} + nauczony przydział"), height=760, scrolling=False)
+
+
+def _decisions(k: dict, today: dict, sc) -> None:
+    """What the learned policy did on this shift that today's practice doesn't do."""
+    c = sc.costs
+    st.markdown("#### Co polityka zrobiła na tej zmianie")
+    cols = st.columns(4)
+    park = k.get("parked_truck_h", 0.0)
+    cols[0].metric("🅿️ Wozidła na parkingu", f"{park:.1f} h",
+                   f"−{park * c.truck_per_h * c.truck_variable_share:,.0f} zł zużycia".replace(",", " ") if park else None,
+                   delta_color="off", help="silnik wyłączony zamiast stania w kolejce do kosza: bez paliwa i bez "
+                                           f"zużycia ({100 * c.truck_variable_share:.0f} % stawki wozidła)")
+    cols[1].metric("⏳ Kolejka pod kruszarką", f"{k.get('truck_queue_crusher_h', 0):.1f} h",
+                   f"{k.get('truck_queue_crusher_h', 0) - today.get('truck_queue_crusher_h', 0):+.1f} h vs dziś",
+                   delta_color="inverse")
+    cols[2].metric("⛏️ Koparki odstawione", f"{k.get('parked_excavator_h', 0):.1f} h")
+    cols[3].metric("🪣 Kursy bez ostatniej łyżki", f"{k.get('topup_skips', 0)}")
+    off = k.get("off_rule_trips") or {}
+    if off:
+        lines = [f"{t}: " + ", ".join(f"{n}× do {e}" for e, n in sorted(v.items())) for t, v in sorted(off.items())]
+        st.markdown("**🔀 Zmiany przydziału względem reguł** (wozidła bez 🔒, kursy do innej koparki niż przypisana):  \n"
+                    + "  \n".join(lines))
+    elif any(f.excavators and not f.assign_locked for f in sc.trucks):
+        st.caption("🔀 Polityka nie zmieniła przydziału wozideł – reguły zmiany są tu dobre.")
 
 
 DAY, SCHEDULE = "Analiza zmiany", "Planowanie produkcji"
@@ -525,30 +580,36 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
 
             step_period(raw, yaml_text, seed)
         return
-    st.markdown("**① Kopalnia dziś → ② Organizacja zmiany** (godziny, przerwy, strzelanie, objazd, tankowanie) **→ ③ "
-                "Kalibracja** (model dopasowany do rzeczywistej zmiany) **→ ④ Jak było dziś** (odtworzenie zmiany – "
-                "docelowo z danych telemetrycznych) **→ ⑤ Optymalizacja RL** – nauczona polityka przydziału i komunikaty "
+    st.markdown("**① Kopalnia dziś → ② Reguły zmiany** (cel, kto gdzie ładuje i jeździ) **→ ③ Organizacja zmiany** "
+                "(godziny, przerwy, strzelanie, tankowanie) **→ ④ Kalibracja** (model dopasowany do rzeczywistej zmiany) "
+                "**→ ⑤ Jak było dziś** (odtworzenie zmiany – docelowo z telemetrii) **→ ⑥ Optymalizacja RL** – nauczone "
+                "decyzje i komunikaty "
                 "dla operatorów. Pełne parametry: **Tryb zaawansowany** (panel boczny).")
-    tabs = st.tabs(["① Kopalnia dziś", "② Organizacja zmiany", "③ Kalibracja", "④ Jak było dziś", "⑤ Optymalizacja RL"])
+    tabs = st.tabs(["① Kopalnia dziś", "② Reguły zmiany", "③ Organizacja zmiany", "④ Kalibracja", "⑤ Jak było dziś",
+                    "⑥ Optymalizacja RL"])
     with tabs[0]:
         render_map_tab(raw, set_raw, simple=True, schedule=False)
     with tabs[1]:
+        from app_rules import step_rules
+
+        step_rules(raw, set_raw)
+    with tabs[2]:
         from app_events import events_editor
 
         events_editor(raw, "ev", [e["id"] for e in (raw.get("site") or {}).get("excavators", [])]
-                      or [e["id"] for e in raw.get("excavators", [])], raw.get("site"), "② Organizacja zmiany")
-    with tabs[2]:
+                      or [e["id"] for e in raw.get("excavators", [])], raw.get("site"), "③ Organizacja zmiany")
+    with tabs[3]:
         from app_calibration import reliability_editor, step_calibration
 
         step_calibration(raw, sc, set_raw)
         if sc is not None:
             st.divider()
             reliability_editor(raw, sc, "rel_day")
-    with tabs[3]:
+    with tabs[4]:
         if sc is None:
             st.info(f"Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia** ({msg}) – albo wczytaj przykład.")
             _demo_button(set_raw, "demo_today")
         else:
             step_today(sc, yaml_text, seed, set_raw)
-    with tabs[4]:
+    with tabs[5]:
         step_optimize(raw, yaml_text, seed)

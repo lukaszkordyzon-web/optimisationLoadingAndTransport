@@ -63,6 +63,12 @@ class Excavator:
     start_delay_min: float = 0.0  # not loading at the start of the shift (driving to a new pile)
     # where it may work in the period: ids of extraction areas / planned blasts / piles (empty = anywhere)
     areas: list = field(default_factory=list)
+    # rule of the shift: when the pile is (almost) taken out, drive to another one and load there
+    then_blast: str = ""            # the next pile
+    then_route: str = ""            # route from its loading point to the main crusher
+    then_crusher_routes: dict = field(default_factory=dict)
+    then_move_min: float = 0.0      # driving time between the piles
+    then_below_t: float = 0.0       # move when less than this is left (the rest stays for the others)
 
     def may_work(self, pile_id: str) -> bool:
         return not self.areas or pile_id in self.areas or pile_id.split("/")[0] in self.areas
@@ -86,6 +92,9 @@ class TruckFleet:
     # two-pile trips: {excavator: share of the payload}, loaded in this order, e.g. {K-1: 0.5, K-2: 0.5}
     blend: dict = field(default_factory=dict)
     id: str = ""  # one particular truck (count 1), e.g. "WZ-03"; empty = a group of identical trucks
+    # the assignment to `excavators` is binding for every dispatch; False = only today's practice, the system /
+    # the learned policy may send the truck elsewhere when that is cheaper
+    assign_locked: bool = True
 
 
 def truck_units(trucks: list) -> list[tuple[str, "TruckFleet"]]:
@@ -402,6 +411,13 @@ class Scenario:
     crushers_extra: list = field(default_factory=list)  # second, third … crusher [Crusher]
     # extraction areas: the week / month run fires blasts in them automatically (see period.py)
     areas: list = field(default_factory=list)
+    # goal of the shift: {"kind": "feed" | "product", "t": goal in its unit, "item": product, "feed_t": feed it
+    # needs through the plant, "stop": haulage stops once it is reached}; empty = as much as possible
+    shift_goal: dict = field(default_factory=dict)
+
+    @property
+    def goal_t(self) -> float:
+        return float((self.shift_goal or {}).get("feed_t") or 0.0)
 
     @property
     def crushers(self) -> list:
@@ -474,8 +490,6 @@ class Scenario:
         for f in self.trucks:
             if f.count and f.blend and not any(all(c.takes(self.excavator(x).blast) for x in f.blend) for c in self.crushers):
                 raise ValueError(f"Wozidła {f.model}: żadna kruszarka nie przyjmuje mieszanki z {', '.join(f.blend)}")
-        if self.crusher.hopper_t < max(f.payload_t for f in self.trucks if f.count > 0):
-            raise ValueError("Kosz kruszarki mniejszy niż ładowność wozidła")
         for r in self.routes.values():
             if not r.segments:
                 raise ValueError(f"Trasa {r.id} nie ma odcinków")
@@ -564,6 +578,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         planned_blasts=[dict(p) for p in raw.get("planned_blasts") or []],
         crushers_extra=[_build(Crusher, c) for c in raw.get("crushers_extra") or []],
         areas=[dict(a) for a in raw.get("areas") or []],
+        shift_goal=dict(raw.get("shift_goal") or {}),
     )
     from .psd import fragmentation_index
 

@@ -90,6 +90,14 @@ class ExcavatorState:
     next_reloc_t: float = math.inf
     dig_step: int = 0
     relocations: int = 0
+    blast_id: str = ""          # pile it loads now (after a move to the next pile: that one)
+    cr_routes: dict | None = None  # routes to the other crushers from where it loads now
+    leaving: bool = False       # takes no more trucks: about to drive to the next pile
+    moved: bool = False
+
+    @property
+    def blast(self) -> str:
+        return self.blast_id or self.cfg.blast
 
 
 def _shift_tracks(frames: list, relocs: list, routes: dict, ex) -> list:
@@ -187,6 +195,8 @@ class Simulation:
         self.fuel_l = 0.0
         self.dumped_t = 0.0
         self.pit_t = 0.0  # tonnes planned by trucks still on their way to / at the excavators
+        self.excavator_moves_done: list[dict] = []
+        self.goal_reached_at: float | None = None
         self.truck_parked_s = 0.0
         self.decisions = 0
         # feed mix: what each pile should give (normalised targets) and what it has given so far
@@ -199,9 +209,10 @@ class Simulation:
         for f in sc.trucks:
             if f.count and f.blend:
                 self.pinned |= set(f.blend)
-            elif f.count and len(f.excavators) == 1:
+            elif f.count and len(f.excavators) == 1 and self._binding(f):
                 self.pinned.add(f.excavators[0])
-        self.flex_trucks = sum(f.count for f in sc.trucks if not f.blend and len(f.excavators) != 1)
+        self.flex_trucks = sum(f.count for f in sc.trucks
+                               if not f.blend and (len(f.excavators) != 1 or not self._binding(f)))
         self.yields, self.yield_s = 0, 0.0
         self.relocated_at: dict[str, list] = {}  # excavator -> [(time, new position, previous position)]
         self.sections: dict[str, dict] = {}  # single-lane stretches between passing bays
@@ -268,7 +279,7 @@ class Simulation:
         return m["in_s"] + (m["out_s"] if m["out_blocks"] else 0.0)
 
     def _expected_service(self, ex: ExcavatorState, fleet: TruckFleet) -> float:
-        blast = self.sc.blast(ex.cfg.blast)
+        blast = self.sc.blast(ex.blast)
         spot = sum(p * self._blocking_s(m) for p, m in ex.spot_modes)
         return spot + load_time_s(ex.cfg, fleet, blast, self.sc.loose_density_t_m3)
 
@@ -279,13 +290,14 @@ class Simulation:
         """Route between the excavator and a crusher (the main one follows the excavator along the face)."""
         if not crusher_id or crusher_id == self.sc.crusher.id:
             return self._route_of(ex)
-        return self.sc.routes[ex.cfg.crusher_routes[crusher_id]]
+        routes = ex.cr_routes if ex.cr_routes is not None else ex.cfg.crusher_routes
+        return self.sc.routes[routes[crusher_id]]
 
     def _pick_crusher(self, truck: TruckState, plan, last: ExcavatorState, tonnes: float) -> CrusherUnit:
         """Where to dump: a crusher taking all the material on board. Today's practice: the nearest one, unless
         the driver sees a clearly longer queue there than at another line (no knowledge of trucks on the way);
         with the system: the one where the truck is unloaded soonest (drive + expected wait, trucks on the way)."""
-        ok = [u for u in self.units.values() if all(u.cfg.takes(e.cfg.blast) for e, _ in plan)]
+        ok = [u for u in self.units.values() if all(u.cfg.takes(e.blast) for e, _ in plan)]
         if len(ok) <= 1:
             return ok[0] if ok else self.main
         fleet, rr = truck.fleet, self.sc.rolling_resistance_pct
@@ -324,11 +336,57 @@ class Simulation:
                 fr.append([round(env.now, 1), *new[0]])
                 self.relocated_at.setdefault(cfg.id, []).append((env.now, tuple(new[0]), tuple(old[0])))
 
+    def _maybe_move(self, ex: ExcavatorState) -> None:
+        """Rule of the shift: once the pile is (almost) taken out, the excavator drives to the next one. It takes no
+        more trucks, loads those already sent to it, then goes; what it leaves is loaded by the others there."""
+        cfg = ex.cfg
+        if ex.moved or not cfg.then_blast or cfg.then_blast not in self.loaded_by_blast:
+            return
+        if ex.remaining_t - ex.committed_t <= cfg.then_below_t + 1e-6:
+            ex.leaving = True
+        if ex.leaving and ex.committed_t <= 1e-6:
+            ex.moved = True
+            others = [o for o in self.excavators.values() if o is not ex and o.blast == ex.blast and not o.leaving]
+            for o in others:  # what is left on this pile goes to the excavators still working it
+                o.remaining_t += ex.remaining_t / len(others)
+            ex.remaining_t = 0.0
+            if ex.depleted_at is None:
+                ex.depleted_at = self.env.now
+            self.env.process(self._move_to_next(ex))
+
+    def _move_to_next(self, ex: ExcavatorState):
+        env, cfg, sc = self.env, ex.cfg, self.sc
+        a = env.now
+        old = self._route_of(ex).path
+        yield env.timeout(cfg.then_move_min * 60)
+        ex.down.append((a, env.now, "przejazd"))
+        nxt = cfg.then_blast
+        others = [o for o in self.excavators.values() if o is not ex and o.blast == nxt]
+        if others:  # shares the pile with the excavators already there
+            share = sum(max(0.0, o.remaining_t - o.committed_t) for o in others) / (len(others) + 1)
+            for o in others:
+                o.remaining_t -= share
+        else:
+            share = max(0.0, sc.blast(nxt).tonnage_t - self.loaded_by_blast[nxt])
+        ex.blast_id, ex.route_id, ex.cr_routes = nxt, cfg.then_route, dict(cfg.then_crusher_routes)
+        ex.remaining_t, ex.committed_t, ex.initial_t = share, 0.0, share
+        ex.depleted_at, ex.leaving, ex.next_reloc_t = None, False, math.inf
+        ex.last_end = env.now
+        ex.relocations += 1
+        new = self._route_of(ex).path
+        if old and new:
+            fr = self.excavator_tracks.setdefault(cfg.id, [[0.0, *old[0]]])
+            fr.append([round(a, 1), *old[0]])
+            fr.append([round(env.now, 1), *new[0]])
+            self.relocated_at.setdefault(cfg.id, []).append((env.now, tuple(new[0]), tuple(old[0])))
+        self.excavator_moves_done.append({"excavator": cfg.id, "from": cfg.blast, "to": nxt,
+                                          "start_h": round(a / 3600, 2), "end_h": round(env.now / 3600, 2)})
+
     def _queue_len(self, ex: ExcavatorState) -> int:
         return len(ex.bays.queue) + len(ex.resource.queue)
 
     def _active(self, ex: ExcavatorState) -> bool:
-        return ex.remaining_t - ex.committed_t > 1e-6
+        return not ex.leaving and ex.remaining_t - ex.committed_t > 1e-6
 
     def _crusher_rate(self, unit: CrusherUnit | None = None) -> float:
         u = unit or self.main
@@ -569,6 +627,10 @@ class Simulation:
             w = self._window(self.env.now, ex.down)
 
     # --------------------------------------------------------------- dispatcher
+    def _binding(self, fleet: TruckFleet) -> bool:
+        """Does the truck's assignment bind the dispatch in this run?"""
+        return fleet.assign_locked or self.sc.dispatch not in ("rl", "dynamic")
+
     def allowed_ids(self, fleet: TruckFleet) -> list[str]:
         ids = list(fleet.blend) or list(fleet.excavators)
         return ids or [e.id for e in self.sc.excavators]
@@ -588,11 +650,11 @@ class Simulation:
         haul = route_time_s(route, truck.fleet, True, sc.rolling_resistance_pct)
         service = self._expected_service(ex, truck.fleet)
         wait = self.predicted_finish(ex, self.env.now + travel, service) - (self.env.now + travel) - service
-        initial = max(sc.blast(ex.cfg.blast).tonnage_t, 1.0)
+        initial = max(sc.blast(ex.blast).tonnage_t, 1.0)
         deficit = 0.0
         if self.targets:  # how far this pile is behind its share of the feed, in truckloads
             total = sum(self.loaded_by_blast.values())
-            deficit = (self.targets.get(ex.cfg.blast, 0.0) * total - self.loaded_by_blast[ex.cfg.blast]) / truck.fleet.payload_t
+            deficit = (self.targets.get(ex.blast, 0.0) * total - self.loaded_by_blast[ex.blast]) / truck.fleet.payload_t
             deficit = float(np.clip(deficit, -10, 10))
         return [max(wait, 0.0) / 60, travel / 60, haul / 60, service / 60,
                 (ex.remaining_t - ex.committed_t) / initial, float(len(ex.pending)),
@@ -600,6 +662,8 @@ class Simulation:
 
     def dispatch(self, truck: TruckState) -> ExcavatorState | None:
         allowed = set(self.allowed_ids(truck.fleet))
+        if self.sc.dispatch in ("rl", "dynamic") and not truck.fleet.assign_locked:
+            allowed = set(self.excavators)  # today's assignment is not binding for the system
         candidates = [ex for ex in self.excavators.values() if ex.cfg.id in allowed and self._active(ex)]
         if not candidates:
             return None
@@ -779,7 +843,7 @@ class Simulation:
             pol = sc.excavator_policy
             if sc.dispatch == "rl" and pol.topup_min_fill < 0.999 and tonnes >= amount - 1e-6:
                 # learned: with trucks waiting, send this one without its last bucket
-                blast0 = sc.blast(ex.cfg.blast)
+                blast0 = sc.blast(ex.blast)
                 n_pass = passes_per_truck(ex.cfg, fleet, blast0.loose_density_t_m3 or sc.loose_density_t_m3)
                 if n_pass > 1 and (n_pass - 1) / n_pass >= pol.topup_min_fill and self._queue_len(ex) >= pol.topup_min_queue:
                     tonnes = amount * (n_pass - 1) / n_pass
@@ -812,7 +876,7 @@ class Simulation:
                     if env.now > t0:
                         self._log_state(truck, "postoj_koparki", t0, ex.cfg.id)
 
-                blast = sc.blast(ex.cfg.blast)
+                blast = sc.blast(ex.blast)
                 full_load = load_time_s(ex.cfg, fleet, blast, sc.loose_density_t_m3)
                 one_pass = ex.cfg.swing_cycle_s * (1.0 + 0.5 * blast.fragmentation)
                 load = full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd) * sc.calibration.load_factor
@@ -829,9 +893,11 @@ class Simulation:
                 self.loaded_by_blast[blast.id] += tonnes
                 self.loads.append({"truck": truck.id, "excavator": ex.cfg.id, "blast": blast.id,
                                    "material": blast.material, "tonnes": tonnes, "fragmentation": blast.fragmentation,
-                                   "loaded_at_s": env.now, "trip": truck.trip})
+                                   "loaded_at_s": env.now, "trip": truck.trip,
+                                   "off_rule": bool(fleet.excavators) and ex.cfg.id not in fleet.excavators})
                 if ex.remaining_t <= 1e-6 and ex.depleted_at is None:
                     ex.depleted_at = env.now
+                self._maybe_move(ex)
                 ex.loaded_t += tonnes
                 if ex.loaded_t >= ex.next_reloc_t and ex.remaining_t > 1e-6:
                     ex.next_reloc_t += ex.cfg.relocate_every_t
@@ -895,6 +961,13 @@ class Simulation:
             if now + cycle > self.work_end:
                 self._log_state(truck, "koniec_zmiany", now, end=self.shift_s)
                 return False
+            goal = self.sc.goal_t
+            if goal and self.sc.shift_goal.get("stop", True):
+                on_way = sum(u.inbound_t + u.queued_dump_t for u in self.units.values()) + self.pit_t
+                if self.dumped_t + on_way >= goal:  # the goal of the shift is covered: no more trips
+                    self._log_state(truck, "cel_osiagniety", now, end=self.shift_s)
+                    self.truck_parked_s += self.shift_s - now  # engine off until the end of the shift
+                    return False
             return True
 
     def _crusher_backlog_s(self, truck: TruckState) -> float:
@@ -968,8 +1041,8 @@ class Simulation:
             self.pit_t -= planned_t
             if tonnes <= 1e-6:
                 continue  # material ran out while driving there
-            blast = sc.blast(last.cfg.blast)
-            frag = float(np.mean([sc.blast(e.cfg.blast).fragmentation for e, _ in plan]))
+            blast = sc.blast(last.blast)
+            frag = float(np.mean([sc.blast(e.blast).fragmentation for e, _ in plan]))
 
             # which crusher takes this load
             unit = self._pick_crusher(truck, plan, last, tonnes)
@@ -1000,15 +1073,28 @@ class Simulation:
                 unit.queued_dump_t += tonnes
                 with unit.dump_point.request() as req:
                     yield req
-                    yield unit.hopper.put(tonnes)  # waits while the hopper is full
+                    if tonnes <= unit.hopper.capacity:
+                        yield unit.hopper.put(tonnes)  # waits while the hopper is full
+                        self._mix_into_hopper(tonnes, frag, unit)
+                    else:  # a small hopper (mobile unit): tipped in portions, as the crusher takes the material
+                        left = tonnes
+                        while left > 1e-9:
+                            part = min(left, unit.hopper.capacity - unit.hopper.level)
+                            if part < min(left, 1.0):
+                                yield env.timeout(CRUSHER_TICK_S)
+                                continue
+                            yield unit.hopper.put(part)
+                            self._mix_into_hopper(part, frag, unit)
+                            left -= part
                     unit.queued_dump_t -= tonnes
                     self._log_state(truck, "kolejka_kruszarka", t0)
-                    self._mix_into_hopper(tonnes, frag, unit)
                     t0 = env.now
                     yield env.timeout(unit.cfg.dump_time_s * self._noise(0.15))
                     self._log_state(truck, "wyladunek", t0)
                 self._mark_dumped(truck, env.now, "kosz", unit.cfg.id)
             self.dumped_t += tonnes
+            if self.sc.goal_t and self.goal_reached_at is None and self.dumped_t >= self.sc.goal_t - 1e-6:
+                self.goal_reached_at = env.now
             if sc.calibration.delay_min_per_trip > 0:  # losses measured on site that the model has no cause for
                 t0 = env.now
                 yield env.timeout(sc.calibration.delay_min_per_trip * 60 * self._noise(0.5))
@@ -1245,7 +1331,7 @@ class SimResult:
                 dev += 0.5 * np.abs(share - 100 * target)
         drill = dumped * (c.drill_blast_per_t + c.drill_blast_fine_extra_per_t * (1 - frag))
         parked_share = np.clip(t / sim.shift_s, 0, 1) * parked_s / 3600 * (1 - c.excavator_idle_share)
-        tp = self.states[self.states["state"] == "parking"]
+        tp = self.states[self.states["state"].isin(["parking", "cel_osiagniety"])]
         truck_parked_h = np.array([float(np.clip(np.minimum(tp["end_s"], x) - tp["start_s"], 0, None).sum()) / 3600
                                    for x in t]) if len(tp) else np.zeros(len(t))
         h["cost"] = (fixed_per_h * t / 3600 - c.excavator_per_h * parked_share
@@ -1310,7 +1396,18 @@ class SimResult:
             "odchylka_skladu": dumped * c.blend_penalty_per_t_pp * feed_dev_pp,
         }
         total = sum(cost.values())
+        goal = sc.goal_t
+        off = done[done["off_rule"]] if "off_rule" in done and len(done) else done.iloc[0:0]
         return {
+            "goal_t": goal,
+            "goal_pct": round(100 * dumped / goal, 1) if goal else None,
+            "goal_reached_h": round(sim.goal_reached_at / 3600, 2) if sim.goal_reached_at is not None else None,
+            # what the learned policy is judged on: cost per tonne, much worse when the goal of the shift is missed
+            "objective": round((total / dumped) * (1 + 3 * max(0.0, goal - dumped) / goal if goal else 1.0), 2)
+            if dumped else None,
+            "off_rule_trips": {t: {e: int(n) for e, n in g.groupby("excavator").size().items()}
+                               for t, g in off.groupby("truck")} if len(off) else {},
+            "excavator_moves": list(sim.excavator_moves_done),
             "trucks": sc.truck_count,
             "dispatch": sc.dispatch,
             "rain": sim.rain,

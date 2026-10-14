@@ -348,6 +348,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 ex_pile[e.id], ex_route[e.id] = target, pile_route[target]
                 ex_croutes[e.id] = pile_croutes.get(target, {})
         v = copy.deepcopy(sc)
+        v.shift_goal = {}  # the period has its own goal; every shift hauls what it can
         for b in v.blasts:
             b.tonnage_t = max(left[b.id], 0.0)
         for pid, p in planned.items():
@@ -385,6 +386,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             moved = ex_pile[e.id] != e.blast
             e.blast, e.route, e.crusher_routes = ex_pile[e.id], ex_route[e.id], ex_croutes[e.id]
             e.start_delay_min = delay.get(e.id, 0.0)
+            e.then_blast = ""  # the period moves the excavators between shifts itself
             if moved:  # on another pile: no digging line there
                 e.dig_routes, e.dig_path = [], None
             elif e.dig_routes:  # continue along the face where the excavator stopped

@@ -10,6 +10,7 @@ import streamlit as st
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
+from kruszyk import catalog
 from kruszyk.config import PRODUCTS, SPOT_MODES
 from kruszyk.psd import DEFAULT_PRESET, PRESETS, SIEVES_MM, clean, preset_of, rosin_rammler, summary
 from kruszyk.site import (SNAP_M, along_m, level_elev, analyze_site, normalize_roads, centroid, haversine_m, parse_coords,
@@ -345,7 +346,8 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
             site["crushers"].append({"id": cid, "lat": lat, "lon": lon, "capacity_tph": attrs.get("capacity_tph", 800.0),
                                      "hopper_t": attrs.get("hopper_t", 150.0), "accepts": attrs.get("accepts", []),
                                      "product": attrs.get("product", ""), "target_t": attrs.get("target_t", 0.0),
-                                     "kwh_per_t": attrs.get("kwh_per_t")})
+                                     "kwh_per_t": attrs.get("kwh_per_t"),
+                                     **{k: attrs[k] for k in ("model", "max_feed_mm", "dump_time_s") if attrs.get(k)}})
             ensure_uids(site)
             return f"✅ Dodano kruszarkę {cid} – zbuduj trasy (zapisz kopalnię), żeby wozidła do niej jeździły"
         old = site.get("crusher") or {}
@@ -700,8 +702,9 @@ SITE_LIST = {"road": "roads", "pile": "piles", "planned": "planned_piles", "exca
 
 def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
     pile_ids = [p["id"] for p in site.get("piles", [])] + [p["id"] for p in site.get("planned_piles", [])]
-    crusher = [("id", "nazwa", "text", None), ("capacity_tph", "wydajność [t/h]", "num", (50.0, 50.0)),
-               ("hopper_t", "kosz [t]", "num", (10.0, 10.0)), ("product", "co produkuje", "sel", [""] + list(PRODUCTS)),
+    crusher = [("id", "nazwa", "text", None), ("model", "model (katalog)", "sel", [""] + catalog.names("crusher")),
+               ("capacity_tph", "wydajność [t/h]", "num", (50.0, 50.0)),
+               ("hopper_t", "kosz [t]", "num", (5.0, 5.0)), ("product", "co produkuje", "sel", [""] + list(PRODUCTS)),
                ("kwh_per_t", "energia [kWh/t]", "num", (0.1, 0.1)), ("target_t", "plan na zmianę [t]", "num", (0.0, 500.0)),
                ("accepts", "przyjmuje z (puste = wszystkie)", "multi", _pile_ids(site))]
     return {
@@ -727,6 +730,7 @@ def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
                  ("target_share", "udział w nadawie [%]", "opt", (0.0, 5.0)), ("t_per_m", "t/mb", "num", (5.0, 5.0)),
                  ("first_drilled", "pierwszy pas nawiercony", "bool", None), *_TIMES],
         "excavator": [("id", "nazwa", "text", None), ("pile", "ładuje z usypu", "sel", pile_ids),
+                      ("model", "model (katalog)", "sel", [""] + catalog.names("excavator")),
                       ("bucket_m3", "łyżka [m³]", "num", (0.5, 0.5)), ("swing_cycle_s", "cykl łyżki [s]", "num", (10.0, 1.0)),
                       ("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
                       ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0)),
@@ -813,6 +817,12 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
             machines[mid] = {"count": float(fails[0]), "hours": float(fails[1])}
     if "product" in new and new["product"] != (o.get("product") or "") and new["product"] in PRODUCTS:
         new["kwh_per_t"] = PRODUCTS[new["product"]]  # another product -> its typical energy
+    if new.get("model") and new["model"] != o.get("model"):  # another model from the catalogue -> its parameters
+        cat_kind = "excavator" if kind == "excavator" else "crusher"
+        new.update(catalog.params(cat_kind, new["model"]))
+        if kind == "crusher":
+            for k_ in ("max_feed_mm", "dump_time_s"):
+                cr[k_] = new.pop(k_)
     for key, val in new.items():
         if isinstance(val, str):
             val = val.strip()
@@ -1148,6 +1158,22 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
     ex_ids = {e["id"] for e in site.get("excavators", [])} | {e["id"] for e in raw.get("excavators", [])}
     rel_raw = raw.setdefault("reliability", {})
     rel = Reliability(**{k_: v_ for k_, v_ in rel_raw.items() if k_ in Reliability.__dataclass_fields__})
+    with st.container(border=True):
+        c = st.columns([3, 1, 1])
+        model = c[0].selectbox("➕ Dodaj wozidła z katalogu", catalog.names("truck"), key="fleet_cat_model")
+        n_add = c[1].number_input("ile", 1, 30, 1, key="fleet_cat_n")
+        if c[2].button("Dodaj", key="fleet_cat_add", width="stretch"):
+            trucks = expand_trucks(raw.get("trucks", []))
+            used = {t["id"] for t in trucks}
+            for _ in range(int(n_add)):
+                tid = next(f"WZ-{i:02d}" for i in range(1, 1000) if f"WZ-{i:02d}" not in used)
+                used.add(tid)
+                trucks.append(catalog.apply("truck", {"id": tid, "count": 1, "excavators": []}, model))
+            raw["trucks"] = trucks
+            st.session_state.ver += 1
+            st.rerun()
+        st.caption("Zmiana **typu** w tabeli na model z katalogu wpisuje jego parametry (ładowność, masa, moc, paliwo, "
+                   "zbiornik). Parametry orientacyjne – kalibracja dopasuje je do Waszej zmiany.")
 
     def fail(t: dict) -> tuple:
         key = t["id"] if t["id"] in rel.machines else f"truck:{t.get('model', '')}"
@@ -1163,9 +1189,11 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
               "fail_n": fail(t)[0], "fail_h": fail(t)[1]}
              for t in trucks], columns=["id", "model", "w_pracy", *TRUCK_NUM, "excavators", "fail_n", "fail_h"]))
     old, start = st.session_state[base_key]
+    models = list(dict.fromkeys(catalog.names("truck") + [m for m in start["model"] if m]))
     ed = st.data_editor(start, num_rows="dynamic", key=f"qfleet_{base_key}", hide_index=True,
-                        width="stretch", column_config={k_: v_ for k_, v_ in TRUCK_COLS.items() if v_ is not None})
-    trucks, used = [], set()
+                        width="stretch", column_config={**{k_: v_ for k_, v_ in TRUCK_COLS.items() if v_ is not None},
+                                                        "model": st.column_config.SelectboxColumn("typ", options=models)})
+    trucks, used, retyped = [], set(), False
     for i, r in ed.reset_index(drop=True).iterrows():
         prev = trucks[-1] if trucks else (old[-1] if old else {
             "model": "wozidło 40 t", "payload_t": 40.0, "empty_mass_t": 30.0, "power_kw": 380, "max_speed_kmh": 45,
@@ -1177,6 +1205,11 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
             tid, n = f"WZ-{n:02d}", n + 1
         used.add(tid)
         row = {c: (float(r[c]) if not pd.isna(r[c]) else float(base.get(c) or 0)) for c in TRUCK_NUM}
+        new_model = "" if pd.isna(r["model"]) else str(r["model"] or "")
+        if new_model in catalog.TRUCKS and new_model != str(base.get("model", "")):  # a catalogue model chosen
+            row.update({k_: float(v_) for k_, v_ in catalog.params("truck", new_model).items() if k_ in TRUCK_NUM})
+            base["drive_efficiency"] = catalog.TRUCKS[new_model]["drive_efficiency"]
+            retyped = True
         if i < len(old) and abs(float(old[i].get("payload_t", row["payload_t"])) - row["payload_t"]) > 1e-6 \
                 and row["empty_mass_t"] == float(old[i].get("empty_mass_t", 0)):  # payload changed alone: scale the truck
             scale = row["payload_t"] / float(old[i]["payload_t"])
@@ -1188,6 +1221,9 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
                        "count": 1 if bool(r["w_pracy"]) or pd.isna(r["w_pracy"]) else 0, "excavators": excs,
                        **({"blend": base["blend"]} if base.get("blend") else {})})
     raw["trucks"] = trucks
+    if retyped:  # show the model's parameters in the table
+        st.session_state.ver += 1
+        st.rerun()
     machines = rel_raw.setdefault("machines", {})
     for i, (t, (_, r)) in enumerate(zip(trucks, ed.reset_index(drop=True).iterrows())):
         n_, h_ = (float(r[c]) if not pd.isna(r[c]) else None for c in ("fail_n", "fail_h"))
@@ -1442,10 +1478,15 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                         key=f"ex_id_{cat.get('id', '')}")
             piles = [p["id"] for p in site["piles"]]
             attrs["pile"] = st.selectbox("Ładuje z usypu", piles or ["(najbliższy)"])
+            model = st.selectbox("Model (katalog)", ["— własne parametry —"] + catalog.names("excavator"), key="ex_model",
+                                 help="wybór modelu wpisuje typową łyżkę skalną i cykl – możesz je poprawić")
+            if model in catalog.EXCAVATORS:
+                cat = {**cat, **catalog.params("excavator", model)}
+                attrs["model"] = model
             attrs["bucket_m3"] = st.number_input("Łyżka [m³]", 0.5, 30.0, float(cat.get("bucket_m3", 5.0)), 0.5,
-                                                 key=f"ex_b_{cat.get('id', '')}")
+                                                 key=f"ex_b_{cat.get('id', '')}_{model}")
             attrs["swing_cycle_s"] = st.number_input("Cykl łyżki [s]", 10.0, 90.0, float(cat.get("swing_cycle_s", 30.0)),
-                                                     1.0, key=f"ex_c_{cat.get('id', '')}")
+                                                     1.0, key=f"ex_c_{cat.get('id', '')}_{model}")
             if cat.get("fill_factor"):
                 attrs["fill_factor"] = float(cat["fill_factor"])
             st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu pracy koparki.")
@@ -1472,10 +1513,15 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             if attrs.get("new_crusher"):
                 n_cr = len(site.get("crushers", []))
                 attrs["id"] = st.text_input("Oznaczenie", cat.get("id", f"C-{n_cr + 2}"), key=f"cr_id_{cat.get('id', '')}")
+                model = st.selectbox("Model (katalog)", ["— własne parametry —"] + catalog.names("crusher"),
+                                     key="cr_model", help="stacjonarne i mobilne; wpisuje wydajność, kosz i wlot")
+                if model in catalog.CRUSHERS:
+                    cat = {**cat, **catalog.params("crusher", model)}
+                    attrs.update(model=model, max_feed_mm=cat["max_feed_mm"], dump_time_s=cat["dump_time_s"])
                 attrs["capacity_tph"] = st.number_input("Wydajność [t/h]", 50.0, 10_000.0, float(cat.get("capacity_tph", 800.0)),
-                                                        50.0, key=f"cr_cap_{cat.get('id', '')}")
-                attrs["hopper_t"] = st.number_input("Kosz [t]", 10.0, 2000.0, float(cat.get("hopper_t", 150.0)), 10.0,
-                                                    key=f"cr_hop_{cat.get('id', '')}")
+                                                        50.0, key=f"cr_cap_{cat.get('id', '')}_{model}")
+                attrs["hopper_t"] = st.number_input("Kosz [t]", 5.0, 2000.0, float(cat.get("hopper_t", 150.0)), 5.0,
+                                                    key=f"cr_hop_{cat.get('id', '')}_{model}")
                 attrs["accepts"] = st.multiselect(
                     "Przyjmuje urobek z (puste = ze wszystkich)", _pile_ids(site), key="cr_acc")
                 attrs["product"] = st.selectbox("Co produkuje", list(PRODUCTS), key=f"cr_prod_{cat.get('id', '')}",
@@ -1792,7 +1838,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         except ValueError as e:
             c2.error(str(e))
     if st.session_state.pop("map_msg", None):
-        st.success("✅ Kopalnia zapisana. Dalej: **② Organizacja zmiany** i **③ Kalibracja**." if simple else
+        st.success("✅ Kopalnia zapisana. Dalej: **② Reguły zmiany**, **③ Organizacja zmiany** i **④ Kalibracja**." if simple else
                    "Scenariusz zaktualizowany z mapy – zobacz zakładki „Scenariusz” i „Wyniki zmiany”.")
     if raw_for_build.get("site") and any("path" in r for r in raw_for_build["routes"].values()):
         from kruszyk.physics import curve_speed_kmh

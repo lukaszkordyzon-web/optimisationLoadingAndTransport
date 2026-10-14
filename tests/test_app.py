@@ -78,7 +78,7 @@ def test_simple_mode_every_preset():
     at = AppTest.from_file(APP, default_timeout=180).run()
     assert not at.exception, at.exception
     labels = [t.label for t in at.tabs]
-    for step in ["① Kopalnia dziś", "② Organizacja zmiany", "③ Kalibracja", "④ Jak było dziś", "⑤ Optymalizacja RL",
+    for step in ["① Kopalnia dziś", "② Reguły zmiany", "③ Organizacja zmiany", "④ Kalibracja", "⑤ Jak było dziś", "⑥ Optymalizacja RL",
                  "🧨 Strzelanie", "👷 Objazd sztygara", "⛽ Tankowanie"]:
         assert step in labels
     for name in at.sidebar.selectbox[0].options:

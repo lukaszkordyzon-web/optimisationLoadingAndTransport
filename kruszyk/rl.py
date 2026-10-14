@@ -92,6 +92,8 @@ def _episode_scenario(sc: Scenario, policy: str, theta=None, shift_hours: float 
     else:
         v.rl_weights = None
     if shift_hours:
+        if v.goal_t:  # training on shorter shifts: the goal shrinks with them
+            v.shift_goal = {**v.shift_goal, "feed_t": v.goal_t * shift_hours / sc.shift_hours}
         v.shift_hours = shift_hours
     return v
 
@@ -104,6 +106,7 @@ def evaluate(sc: Scenario, policy: str, seeds: list[int], theta=None, shift_hour
     df = pd.DataFrame(rows)
     out = df.mean(numeric_only=True).to_dict()
     out["cost_per_t"] = float(df["cost_per_t"].fillna(1e6).mean())  # a policy that hauls nothing is the worst
+    out["objective"] = float(df["objective"].fillna(1e6).mean())  # cost per tonne, worse when the goal is missed
     return out
 
 
@@ -169,7 +172,7 @@ def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: 
         scores = []
         for k, w in enumerate(cand):
             r = evaluate(sc, "rl", seeds, w, shift_hours, **kw)
-            scores.append((r["cost_per_t"], k, r))
+            scores.append((r["objective"], k, r))
         scores.sort(key=lambda x: x[0])
         elite = np.array([cand[k] for _, k, _ in scores[:n_elite]])
         mu = elite.mean(axis=0)

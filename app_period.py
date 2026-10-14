@@ -67,7 +67,7 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                         "module „Analiza zmiany” – widać, ile ton i złotych na okres daje wdrożenie.")
         else:
             compare_rl = False
-            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **Analiza zmiany → ⑤ Optymalizacja RL**, "
+            st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **Analiza zmiany → ⑥ Optymalizacja RL**, "
                        "a tu zobaczysz, ile daje na cały okres.")
     st.caption("Baza harmonogramu: obecny sposób przydziału (wozidło wraca do przypisanej koparki)"
                + (" – obok to samo z systemem RL." if compare_rl else "."))
