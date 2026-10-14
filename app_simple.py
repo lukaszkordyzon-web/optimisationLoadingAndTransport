@@ -363,21 +363,45 @@ def step_variant(base_raw: dict, base_yaml: str | None, seed: int):
     except Exception:  # noqa: BLE001 – the map can't be rebuilt: compare with the stored routes
         cmp_base = base_yaml
     _variant_compare(cmp_base, vyaml, seed)
+    _variant_show(cmp_base, vyaml, vsc, seed)
     _fleet_section(cmp_base, vyaml, seed)
-    with st.expander("🎬 Jedna zmiana z bliska – animacja i straty wariantu"):
-        st.caption("Pojedyncza zmiana pokazuje, CO się dzieje (kolejki, przestoje). Czy wariant jest lepszy, mówi "
-                   "porównanie na wielu zmianach powyżej – jedna zmiana może być przypadkiem (awaria, deszcz).")
-        k = run_policy(vyaml, seed, "natural").kpi
-        _tiles(k, run_policy(base_yaml, seed, "natural").kpi)
-        _crushers_summary(k)
-        st.markdown("**Gdzie tracimy w wariancie:**  \n" + "  \n".join(_losses(k)))
+
+
+def _variant_show(base_yaml: str, vyaml: str, vsc, seed: int) -> None:
+    """The comparison as a film: one of the compared shifts on the map, today and the variant side by side."""
+    from ui import card
+
+    with card("var_show"):
+        st.markdown("#### 🎬 Zobacz różnicę na mapie")
+        st.caption("Animacja pokazuje, **dlaczego** wariant wychodzi lepiej albo gorzej: gdzie wozidła stoją w kolejce, "
+                   "gdzie czekają na mijankach, kiedy kruszarka czeka na urobek – obok liczniki ton i kosztów na żywo. "
+                   "Do pokazania kierownictwu, sztygarom, kierowcom. O tym, czy wariant jest lepszy, decyduje porównanie "
+                   "na wielu zmianach powyżej.")
+        got = st.session_state.get("vcmp")
+        options = {"zmiana przykładowa": seed}
+        if got:
+            ps = got[1]["per_shift"].copy()
+            ps["d"] = ps["wariant_zl_t"] - ps["dzis_zl_t"]
+            typical = ps.iloc[(ps["d"] - ps["d"].median()).abs().argsort().iloc[0]]
+            options = {f"typowa (zmiana {int(typical['zmiana'])} z porównania)": int(typical["seed"]),
+                       f"największa przewaga wariantu (zmiana {int(ps.loc[ps['d'].idxmin(), 'zmiana'])})":
+                           int(ps.loc[ps["d"].idxmin(), "seed"]),
+                       f"najgorsza dla wariantu (zmiana {int(ps.loc[ps['d'].idxmax(), 'zmiana'])})":
+                           int(ps.loc[ps["d"].idxmax(), "seed"])}
+        which = st.selectbox("Którą zmianę pokazać", list(options), key="vshow_which")
+        s_ = options[which]
+        k = run_policy(vyaml, s_, "natural").kpi
+        _tiles(k, run_policy(base_yaml, s_, "natural").kpi)
+        with st.expander("Gdzie tracimy w wariancie na tej zmianie"):
+            _crushers_summary(k)
+            st.markdown("  \n".join(_losses(k)))
         if _has_map_routes(vsc):
-            components.html(compare_page(vyaml, "natural", base_yaml, seed, "Wariant (przydział jak dziś)"),
+            components.html(compare_page(vyaml, "natural", base_yaml, s_, "Wariant (przydział jak dziś)"),
                             height=760, scrolling=False)
 
 
-def _pct(x: float) -> str:
-    return f"{x:+.1f} %".replace(".", ",")
+def _pct(x: float) -> str | None:
+    return None if abs(x) < 0.05 else f"{x:+.1f} %".replace(".", ",")  # no arrow for "no change"
 
 
 def _variant_compare(base_yaml: str, vyaml: str, seed: int) -> None:
@@ -407,13 +431,15 @@ def _variant_compare(base_yaml: str, vyaml: str, seed: int) -> None:
         r = got[1]
         a, b = r["base"], r["variant"]
         m = st.columns(4)
-        m[0].metric("Tony na zmianę (średnio)", f"{b['t']:,.0f} t".replace(",", " "), _pct(r["d_t_pct"]) + " vs dziś")
-        m[1].metric("Koszt na tonę", f"{b['zl_t']:.2f} zł/t".replace(".", ","), _pct(r["d_cost_pct"]) + " vs dziś",
+        d_t, d_cost = _pct(r["d_t_pct"]), _pct(r["d_cost_pct"])
+        m[0].metric("Tony na zmianę (średnio)", f"{b['t']:,.0f} t".replace(",", " "), d_t and d_t + " vs dziś")
+        m[1].metric("Koszt na tonę", f"{b['zl_t']:.2f} zł/t".replace(".", ","), d_cost and d_cost + " vs dziś",
                     delta_color="inverse")
         m[2].metric("Paliwo na tonę", f"{b['paliwo_l_t']:.3f} l/t".replace(".", ","),
                     _pct(100 * (b["paliwo_l_t"] / a["paliwo_l_t"] - 1)) if a["paliwo_l_t"] else None, delta_color="inverse")
         m[3].metric("Kolejka pod kruszarką", f"{b['kolejka_kruszarka_h']:.1f} h".replace(".", ","),
-                    f"{b['kolejka_kruszarka_h'] - a['kolejka_kruszarka_h']:+.1f} h".replace(".", ","),
+                    f"{b['kolejka_kruszarka_h'] - a['kolejka_kruszarka_h']:+.1f} h".replace(".", ",")
+                    if abs(b["kolejka_kruszarka_h"] - a["kolejka_kruszarka_h"]) >= 0.05 else None,
                     delta_color="inverse")
         lines = []
         for what, verdict, win, lose, unit in (("koszt na tonę", r["cost_verdict"], r["cost_better"], r["cost_worse"],

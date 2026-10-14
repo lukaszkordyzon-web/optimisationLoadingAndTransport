@@ -50,7 +50,9 @@ def test_variant_screen_compares_and_sizes_the_fleet():
     verdicts = [m.value for m in at.markdown if "koszt na tonę:" in m.value]
     assert verdicts and "bez pewnej różnicy" in verdicts[0]  # an unchanged copy = no difference at all
     assert "wariant gorszy" not in verdicts[0] and "wariant lepszy" not in verdicts[0]
-    assert any("+0,0 %" in (mt.value or "") or "0,0" in str(mt.delta) for mt in at.metric)
+    shows = at.selectbox(key="vshow_which")
+    shows.set_value(shows.options[1]).run()  # the shift where the variant gains most: on the map
+    assert not at.exception, at.exception
     at.slider(key="vfleet_range").set_value((3, 6)).run()
     at.button(key="vfleet_go").click().run()
     assert not at.exception, at.exception

@@ -72,7 +72,7 @@ def compare(base: Scenario, variant: Scenario, n: int = 20, seed: int = 0, dispa
 
     def verdict(better: int, worse: int) -> str:
         return "lepiej" if better >= need else "gorzej" if worse >= need else "bez pewnej różnicy"
-    per_shift = pd.DataFrame({"zmiana": range(1, n + 1), "dzis_t": da["t"], "wariant_t": db["t"],
+    per_shift = pd.DataFrame({"zmiana": range(1, n + 1), "seed": seeds, "dzis_t": da["t"], "wariant_t": db["t"],
                               "dzis_zl_t": da["zl_t"], "wariant_zl_t": db["zl_t"], "deszcz": da["deszcz"]})
     return {"n": n, "base": sa, "variant": sb, "d_cost_pct": d_cost, "d_t_pct": d_t,
             "cost_better": int(cost_better), "cost_worse": int(cost_worse), "t_more": int(t_more), "t_less": int(t_less),
