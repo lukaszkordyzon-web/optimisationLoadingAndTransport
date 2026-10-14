@@ -119,16 +119,27 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
     share = {b.id: b.target_share for b in sc.blasts}
     share |= {b.pile: b.share for b in plan.blasts if b.pile in share}
     share |= {pid: p.get("target_share") for pid, p in planned.items()}
+    cap_t = sc.blasting.max_blast_t()  # explosive limit per blast
+
+    def blast_t(area: dict) -> float:
+        """Size of one blast in an area: its own maximum, but never more than the explosive limit allows."""
+        return min(float(area.get("blast_max_t") or 20000), cap_t)
+
     # extraction areas: blasts are fired automatically, strip after strip, when the area runs short of material
     areas = []
     for a in sc.areas:
         reserve = float(a.get("reserves_t") or 0)
-        size = max(float(a.get("blast_max_t") or 0), 1.0)
+        size = max(blast_t(a), 1.0)
         n = min(60, max(1, math.ceil(reserve / size))) if reserve > 0 else 0
         strips = area_strips(sc.site or {}, a["polygon"], n) if sc.site and n else []
         areas.append({"cfg": a, "reserve": reserve, "strips": strips, "next": 0, "last_day": -10_000})
     blast_log: list[dict] = []
     warnings: list[str] = []
+    for p in planned.values():
+        if float(p.get("tonnage_t") or 0) > cap_t + 1:
+            warnings.append(f"Strzał {p['id']}: {float(p['tonnage_t']):,.0f} t wymaga ok. "
+                            f"{float(p['tonnage_t']) * sc.blasting.powder_factor_kg_t:,.0f} kg MW – więcej niż limit "
+                            f"{sc.blasting.max_explosive_kg:,.0f} kg na strzał; podziel go.".replace(",", " "))
     waits: dict[str, str] = {}  # blast -> why it is held back by the bench order (latest reason)
     # drilling jobs: blast id -> metres to drill / drilled; rigs move between them
     rig_cfg = [dict(r) for r in plan.rigs] or [{"id": f"W-{i + 1}", "m_per_shift": plan.drill_m_per_shift,
@@ -168,7 +179,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             prev = f"{a['id']}/{ar['next']}"
             if prev not in planned or left.get(prev, 0.0) > plan.clear_pct / 100 * float(planned[prev]["tonnage_t"]):
                 return None  # previous blast not taken out yet – no access for the rigs
-        m = min(float(a["blast_max_t"]), ar["reserve"]) / tpm(a)
+        m = min(blast_t(a), ar["reserve"]) / tpm(a)
         first_ready = ar["next"] == 0 and a.get("first_drilled", True)
         jobs[pid] = {"m": m, "done": m if not drilling or first_ready else 0.0, "poly": ar["strips"][ar["next"]],
                      "prio": (1, ar["next"])}
@@ -241,7 +252,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             pid = f"{a['id']}/{ar['next'] + 1}"
             poly = ar["strips"][ar["next"]]
             ar["next"] += 1
-            t = min(float(a["blast_max_t"]), ar["reserve"])
+            t = min(blast_t(a), ar["reserve"])
             load_at = loading_point(sc.site, poly)
             try:
                 sc.routes[f"P-{pid}"] = _routes({"r": build_route(sc.site, load_at, f"P-{pid}")})["r"]
@@ -262,7 +273,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             taken[pid] = any(c.takes(pid) for c in sc.crushers)
             share[pid] = a.get("target_share")
             blasted[pid] = t
-            blast_log.append({"strzal": pid, "obszar": a["id"], "data": day, "t": t, "polygon": poly, "auto": True})
+            blast_log.append({"strzal": pid, "obszar": a["id"], "data": day, "t": t, "polygon": poly, "auto": True,
+                              "mw_kg": round(t * sc.blasting.powder_factor_kg_t)})
 
         if shift_no == 1:  # blasts are fired on the first shift of a working day
             for pid, b in blasts.items():
@@ -281,7 +293,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 blasted[pid] = float(p["tonnage_t"])
                 late = wd - int(p.get("blast_day") or 1)
                 blast_log.append({"strzal": pid, "obszar": "", "data": day, "t": float(p["tonnage_t"]),
-                                  "polygon": p.get("polygon"), "auto": False, "opoznienie_dni": late})
+                                  "polygon": p.get("polygon"), "auto": False, "opoznienie_dni": late,
+                                  "mw_kg": round(float(p["tonnage_t"]) * sc.blasting.powder_factor_kg_t)})
             # excavators without material and no free pile to go to = blasts needed now
             idle = [x for x in ex_pile if left[ex_pile[x]] < MIN_PILE_T]
             busy_piles = {ex_pile[x] for x in ex_pile if left[ex_pile[x]] >= MIN_PILE_T}

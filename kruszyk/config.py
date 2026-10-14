@@ -201,6 +201,15 @@ class Blasting:
     crew_leave: str = "11:40"
     retreat_m: float = 200.0       # without a parking marker the excavator backs off this far along its route
     place: str = ""                # where today's blast is: id of a pile / area / planned blast on the map
+    # explosives: the permit limits one blast (in Poland typically 3 000 kg); powder factor of the rock
+    max_explosive_kg: float = 0.0  # 0 = no limit
+    powder_factor_kg_t: float = 0.145  # limestone ≈ 0.35–0.40 kg/m³ in situ ≈ 0.13–0.15 kg/t
+
+    def max_blast_t(self) -> float:
+        """The biggest blast the explosive limit allows [t] (inf = no limit)."""
+        if self.max_explosive_kg > 0 and self.powder_factor_kg_t > 0:
+            return self.max_explosive_kg / self.powder_factor_kg_t
+        return float("inf")
 
 
 @dataclass

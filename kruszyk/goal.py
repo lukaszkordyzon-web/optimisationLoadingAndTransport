@@ -116,7 +116,7 @@ def sources_of(sc: Scenario, pile_reblast_t: dict | None = None, t_per_m: float 
     for a in sc.areas:
         t = float(a.get("reserves_t") or 0)
         out.append(Source(a["id"], "obszar", t, t, float(a.get("t_per_m") or t_per_m),
-                          blast_max_t=float(a.get("blast_max_t") or 20000),
+                          blast_max_t=min(float(a.get("blast_max_t") or 20000), sc.blasting.max_blast_t()),
                           pos=centroid(a["polygon"]) if a.get("polygon") else None))
     return [s for s in out if s.supply_t > 0]
 

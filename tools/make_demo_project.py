@@ -4,7 +4,8 @@ Design basis (typical values for a mid-size Polish limestone quarry):
   * 1.5 Mt of run-of-quarry rock a year; 2 shifts × 8 h, Mon–Fri + some Saturdays ≈ 500 shifts → ~3 000 t a shift,
     ~430 t/h of hauling in the ~7 productive hours of a shift;
   * blasted limestone: P50 240 mm, P80 450 mm (Rosin–Rammler n ≈ 1.34), loose 1.70 t/m³, in situ 2.65 t/m³;
-    15 m benches, Ø 102–115 mm holes on a 3.5 × 4.0 m pattern → ~33 t per metre drilled, blasts of ~30 kt;
+    15 m benches, Ø 102–115 mm holes on a 3.5 × 4.0 m pattern → ~33 t per metre drilled; at most 3 000 kg of
+    explosives a blast (usual Polish permit) at ~0.145 kg/t → blasts of ≤ 20 kt, ~75 a year;
   * plant with two lines fed by dump trucks: line I (jaw + cone + VSI) for chippings, line II (impact) for
     16–31.5, mixes and road base; product split from typical limestone yields;
   * fleet a few years old: two 70 t crawler excavators with 4.5 m³ rock buckets, a 45 t wheel loader as reserve,
@@ -44,7 +45,8 @@ raw["costs"] = {"truck_per_h": 260.0, "excavator_per_h": 520.0, "crusher_per_h":
 raw["shift_plan"] = {"start_time": "06:00", "startup_min": 15.0, "end_early_min": 10.0,
                      "breaks": [{"start": "10:00", "min": 20.0}, {"start": "18:00", "min": 20.0}]}
 raw["blasting"] = {"enabled": False, "crew_arrive": "11:00", "fire_from": "13:00", "fire_to": "13:20",
-                   "evacuation_min": 15.0, "crew_leave": "13:40", "retreat_m": 200.0, "place": ""}
+                   "evacuation_min": 15.0, "crew_leave": "13:40", "retreat_m": 200.0, "place": "",
+                   "max_explosive_kg": 3000.0, "powder_factor_kg_t": 0.145}
 raw["refueling"] = {**raw.get("refueling", {}), "truck_reserve_pct": 15.0, "truck_refuel_min": 10.0}
 raw["variability"] = {**raw.get("variability", {}), "rain_probability": 0.25}
 raw["loose_density_t_m3"] = 1.70
@@ -71,8 +73,8 @@ raw["production"] = {"total_t": 110_000.0, "yields": YIELDS,
 # catalogue: what the drawing forms fill in when machines / piles / areas are placed on the map
 raw["defaults"] = {
     "material": "wapień", "psd_preset": "średnio-grube (P50 240, P80 450 mm)", "loose_density_t_m3": 1.70,
-    "solid_density_t_m3": 2.65, "bench_m": 15.0, "t_per_m": 33.0, "blast_max_t": 30_000.0,
-    "reblast_below_t": 12_000.0, "min_gap_days": 3,
+    "solid_density_t_m3": 2.65, "bench_m": 15.0, "t_per_m": 33.0, "blast_max_t": 20_000.0,
+    "reblast_below_t": 8_000.0, "min_gap_days": 2,
     "excavators": [
         {"id": "K-1", "type": "koparka gąsienicowa 70 t, łyżka skalna 4,5 m³", "bucket_m3": 4.5, "swing_cycle_s": 27.0,
          "fill_factor": 0.85},

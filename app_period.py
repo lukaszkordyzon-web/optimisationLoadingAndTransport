@@ -120,6 +120,18 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                            "udzial": st.column_config.NumberColumn("udział w nadawie [%]", min_value=0.0,
                                                                                    max_value=100.0, step=5.0)})
     with t_new:
+        bl = base_raw.setdefault("blasting", {})
+        c = st.columns(3)
+        bl["max_explosive_kg"] = c[0].number_input(
+            "Limit MW na strzał [kg] (0 = bez limitu)", 0.0, 50_000.0, float(bl.get("max_explosive_kg") or 0.0), 100.0,
+            key="per_mw", help="z pozwolenia / projektu robót strzałowych – w Polsce zwykle 3 000 kg")
+        bl["powder_factor_kg_t"] = c[1].number_input(
+            "Zużycie MW [kg/t]", 0.02, 1.0, float(bl.get("powder_factor_kg_t") or 0.145), 0.005, format="%.3f",
+            key="per_pf", help="wapień ok. 0,35–0,40 kg/m³ calizny ≈ 0,13–0,15 kg/t")
+        sc.blasting.max_explosive_kg, sc.blasting.powder_factor_kg_t = bl["max_explosive_kg"], bl["powder_factor_kg_t"]
+        cap = sc.blasting.max_blast_t()
+        c[2].metric("Największy strzał", f"{cap:,.0f} t".replace(",", " ") if cap < float("inf") else "bez limitu",
+                    help="limit MW ÷ zużycie MW; obszary nie strzelają więcej, niż pozwala ten limit")
         st.markdown("**🟧 Obszary wydobycia – strzały ustala program**")
         if sc.areas:
             akey = f"per_areas__{hashlib.md5(repr([(a['id'], a.get('reserves_t'), a.get('blast_max_t')) for a in sc.areas]).encode()).hexdigest()}"
@@ -575,7 +587,7 @@ def _blast_schedule(meta: dict, sc) -> None:
     for b in blasts:
         src = times.get(b["obszar"] or b["strzal"], {})
         rows.append({"data": b["data"].strftime("%d.%m"), "dzień": WEEKDAYS[b["data"].weekday()], "strzał": b["strzal"],
-                     "obszar": b["obszar"] or "–", "ile [t]": round(b["t"]),
+                     "obszar": b["obszar"] or "–", "ile [t]": round(b["t"]), "MW [kg]": b.get("mw_kg"),
                      "skąd": "program (obszar)" if b["auto"] else "plan z mapy",
                      "nawiercony": (f"{drilled[b['strzal']]['data'].strftime('%d.%m')} z{drilled[b['strzal']]['zmiana']} "
                                     f"({drilled[b['strzal']]['wiertnica']})") if b["strzal"] in drilled else "wcześniej",

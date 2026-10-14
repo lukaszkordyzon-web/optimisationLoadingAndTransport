@@ -164,3 +164,20 @@ def test_particular_rigs_drill_at_their_own_pace():
                       seed=1)
     assert {d["wiertnica"] for d in fast.attrs["drilling"]} == {"W-7"}
     assert len(fast.attrs["drilling"]) > len(slow.attrs["drilling"])
+
+
+def test_explosive_limit_caps_the_blasts():
+    import yaml
+
+    from kruszyk.config import scenario_from_dict
+
+    raw = yaml.safe_load((Path(__file__).parent.parent / "scenarios" / "kruszyk_kopalnia.yaml").read_text(encoding="utf-8"))
+    raw["blasting"] = {**(raw.get("blasting") or {}), "max_explosive_kg": 3000.0, "powder_factor_kg_t": 0.15}
+    for a in raw["areas"]:
+        a["blast_max_t"] = 50_000.0  # more than the explosives allow
+    sc = scenario_from_dict(raw)
+    sc.dispatch = "natural"
+    assert sc.blasting.max_blast_t() == 20_000.0
+    df = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=12, drills=2), seed=1)
+    blasts = df.attrs["blasts"]
+    assert blasts and all(b["t"] <= 20_000.0 + 1 and b["mw_kg"] <= 3000 + 1 for b in blasts)

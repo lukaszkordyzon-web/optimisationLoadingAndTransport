@@ -158,6 +158,8 @@ blasting:
   crew_leave: '13:40'
   retreat_m: 200.0
   place: ''
+  max_explosive_kg: 3000.0
+  powder_factor_kg_t: 0.145
 drills:
 - id: W-1
   in_work: true
@@ -248,9 +250,9 @@ defaults:
   solid_density_t_m3: 2.65
   bench_m: 15.0
   t_per_m: 33.0
-  blast_max_t: 30000.0
-  reblast_below_t: 12000.0
-  min_gap_days: 3
+  blast_max_t: 20000.0
+  reblast_below_t: 8000.0
+  min_gap_days: 2
   excavators:
   - id: K-1
     type: koparka gąsienicowa 70 t, łyżka skalna 4,5 m³
