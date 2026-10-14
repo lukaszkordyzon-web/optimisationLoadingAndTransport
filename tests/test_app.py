@@ -299,3 +299,17 @@ def test_breakdowns_set_on_the_clicked_machine():
     next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
     assert not at.exception, at.exception
     assert at.session_state["raw"]["reliability"]["machines"][ex["id"]] == {"count": 7.0, "hours": 21.0}
+
+
+def test_new_project_starts_an_empty_mine():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    at.sidebar.text_input(key="new_project_name").set_value("Kopalnia Testowa").run()
+    next(b for b in at.sidebar.button if b.label == "Załóż nowy projekt").click().run()
+    assert not at.exception, at.exception
+    raw = at.session_state["raw"]
+    assert raw["name"] == "Kopalnia Testowa" and not raw["excavators"] and not raw["trucks"]
+    assert not at.session_state["site"]["roads"] and not at.session_state["site"]["piles"]
+    at.radio(key="work_kind").set_value("Planowanie produkcji").run()
+    assert not at.exception, at.exception
+    at.toggle(key="advanced").set_value(True).run()
+    assert not at.exception, at.exception

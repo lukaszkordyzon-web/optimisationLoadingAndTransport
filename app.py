@@ -51,9 +51,35 @@ def set_raw(raw: dict, new_mine: bool = False):
     st.session_state.raw = raw
     st.session_state.ver = st.session_state.get("ver", 0) + 1  # new widget keys -> widgets reload
     st.session_state.pop("res", None)
-    if new_mine:  # another mine loaded: the variant and learned policies belong to the previous one
-        for key in ("variant_raw", "variant_yaml", "rl_by_target", "rl_result"):
+    if new_mine:  # another mine loaded: variant, policies, plans and results belong to the previous one
+        for key in ("variant_raw", "variant_yaml", "rl_by_target", "rl_result", "period", "prod_gp", "prod_applied",
+                    "cal_result", "mc_res", "goal_res", "info_sel", "prod_mix_df", "prod_y_ids", "prod_y_df"):
             st.session_state.pop(key, None)
+
+
+# what a new project keeps from the default mine: settings, not the mine itself
+NEW_PROJECT_KEEP = ("shift_hours", "seed", "loose_density_t_m3", "rolling_resistance_pct", "variability", "costs",
+                    "shift_plan", "traffic", "inspection", "refueling", "spotting", "pacing")
+
+
+def new_project(name: str) -> dict:
+    """An empty mine: no map objects, no machines – only the usual settings (shift, costs, variability)."""
+    from app_map import empty_site
+
+    base = yaml.safe_load(presets_by_stem()[DEFAULT_SCENARIO].read_text(encoding="utf-8"))
+    raw = {k_: copy.deepcopy(base[k_]) for k_ in NEW_PROJECT_KEEP if k_ in base}
+    raw.update({"name": name.strip() or "Nowa kopalnia", "dispatch": "natural", "blasts": [], "excavators": [],
+                "trucks": [], "routes": {}, "links": {}, "planned_blasts": [], "areas": [], "crushers_extra": [],
+                "crusher": {"capacity_tph": 800.0, "hopper_t": 150.0, "dump_time_s": 60.0},
+                "stockpile": {"enabled": False}, "blasting": {"enabled": False}, "drills": [],
+                "site": empty_site()})
+    raw["refueling"] = {k_: v_ for k_, v_ in (raw.get("refueling") or {}).items() if k_ != "tanker_times"}
+    raw["inspection"] = {"enabled": False}
+    return raw
+
+
+def presets_by_stem() -> dict[str, Path]:
+    return {p.stem: p for p in sorted(SCEN_DIR.glob("*.yaml"))}
 
 
 def slug(name: str) -> str:
@@ -157,6 +183,14 @@ with st.sidebar:
     if st.button("Wczytaj scenariusz", width="stretch"):
         set_raw(yaml.safe_load(p[choice].read_text(encoding="utf-8")), new_mine=True)
         st.rerun()
+    with st.expander("🆕 Nowy projekt"):
+        st.caption("Pusta kopalnia: mapę, drogi, usypy, maszyny i kruszarki opisujesz od zera (krok ① Kopalnia dziś). "
+                   "Ustawienia zmiany, kosztów i losowości są typowe – do poprawienia. **Bieżąca kopalnia zostanie "
+                   "zamknięta** – zapisz ją wcześniej do pliku.")
+        new_name = st.text_input("Nazwa kopalni", "", key="new_project_name", placeholder="np. Kopalnia Wapienia Zawada")
+        if st.button("Załóż nowy projekt", width="stretch", disabled=not new_name.strip(), key="new_project_go"):
+            set_raw(new_project(new_name), new_mine=True)
+            st.rerun()
     st.divider()
     st.markdown("**📁 Mój scenariusz**")
     st.caption("Zapisz ustawioną kopalnię do pliku i wczytaj ją następnym razem – bez wyklikiwania od nowa. "
@@ -245,10 +279,12 @@ def editor() -> dict:
     st.caption("**Koparki** – do których koparek grupa może jeździć, np. `K-1, K-2` (puste = wszystkie). "
                "**Dwa usypy w kursie** – np. `K-1:0.5, K-2:0.5` = pół ładunku z K-1, potem przejazd i pół z K-2 "
                "(wymaga tras z mapy).")
-    tr_df = pd.DataFrame(raw["trucks"])
-    tr_df["excavators"] = [", ".join(x) if isinstance(x, list) else "" for x in tr_df.get("excavators", [None] * len(tr_df))]
-    tr_df["blend"] = [", ".join(f"{a}:{b:g}" for a, b in x.items()) if isinstance(x, dict) else ""
-                      for x in tr_df.get("blend", [None] * len(tr_df))]
+    tr_df = pd.DataFrame(raw["trucks"]) if raw["trucks"] else pd.DataFrame(
+        columns=["id", "model", "count", "payload_t", "empty_mass_t", "power_kw", "max_speed_kmh"])
+    tr_df["excavators"] = pd.Series([", ".join(x) if isinstance(x, list) else ""
+                                     for x in tr_df.get("excavators", [None] * len(tr_df))], dtype="object")
+    tr_df["blend"] = pd.Series([", ".join(f"{a}:{b:g}" for a, b in x.items()) if isinstance(x, dict) else ""
+                                for x in tr_df.get("blend", [None] * len(tr_df))], dtype="object")
     new["trucks"] = records(st.data_editor(tr_df, num_rows="dynamic", key=k("trucks"), width="stretch",
         column_config={"model": "Model", "count": st.column_config.NumberColumn("Liczba", min_value=0, step=1),
                        "excavators": st.column_config.TextColumn("Koparki (dozwolone)"),
