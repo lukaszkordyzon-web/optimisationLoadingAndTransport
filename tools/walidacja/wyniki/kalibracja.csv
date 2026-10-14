@@ -1,0 +1,25 @@
+prawda,kalibracja,prognoza_t,prognoza_p10,prognoza_p90,przyszlosc_t,przyszlosc_p10,przyszlosc_p90,blad_sredniej_pct
+"przestoje 6 min/kurs, zmienność 12 %",tabela 20 zmian,2454.0,2217.6,2664.0,2477.7,2264.4,2664.0,-0.9565322678290245
+"przestoje 6 min/kurs, zmienność 12 %",jedna zmiana (2592 t),2446.8,2170.8,2628.0,2477.7,2264.4,2664.0,-1.2471243491948059
+"przestoje 6 min/kurs, zmienność 12 %",jedna zmiana (2592 t),2446.8,2170.8,2628.0,2477.7,2264.4,2664.0,-1.2471243491948059
+"przestoje 6 min/kurs, zmienność 12 %",jedna zmiana (2304 t),2187.6,1890.0,2376.0,2477.7,2264.4,2664.0,-11.708439278362992
+"przestoje 6 min/kurs, zmienność 12 %",jedna zmiana (2664 t),2546.4,2332.8,2667.6,2477.7,2264.4,2664.0,2.7727327763651832
+"przestoje 6 min/kurs, zmienność 12 %",jedna zmiana (2232 t),2139.6,1922.4,2311.2000000000003,2477.7,2264.4,2664.0,-13.645719820801549
+"przestoje 3 min/kurs, bez zmienności",tabela 20 zmian,2605.2,2588.4,2700.0,2641.5,2592.0,2700.0,-1.3742191936399806
+"przestoje 3 min/kurs, bez zmienności",jedna zmiana (2628 t),2503.2,2322.0,2664.0,2641.5,2592.0,2700.0,-5.235661555934135
+"przestoje 3 min/kurs, bez zmienności",jedna zmiana (2664 t),2546.4,2332.8,2667.6,2641.5,2592.0,2700.0,-3.6002271436683664
+"przestoje 3 min/kurs, bez zmienności",jedna zmiana (2664 t),2546.4,2332.8,2667.6,2641.5,2592.0,2700.0,-3.6002271436683664
+"przestoje 3 min/kurs, bez zmienności",jedna zmiana (2664 t),2546.4,2332.8,2667.6,2641.5,2592.0,2700.0,-3.6002271436683664
+"przestoje 3 min/kurs, bez zmienności",jedna zmiana (2484 t),2356.8,2109.6,2523.6,2641.5,2592.0,2700.0,-10.777967064168081
+"przestoje 4 min/kurs, zmienność 20 %",tabela 20 zmian,2563.2,2487.6,2700.0,2580.3,2437.2,2700.0,-0.6627136379490861
+"przestoje 4 min/kurs, zmienność 20 %",jedna zmiana (2700 t),2605.2,2588.4,2700.0,2580.3,2437.2,2700.0,0.9650040692942508
+"przestoje 4 min/kurs, zmienność 20 %",jedna zmiana (2664 t),2546.4,2332.8,2667.6,2580.3,2437.2,2700.0,-1.3138007208464142
+"przestoje 4 min/kurs, zmienność 20 %",jedna zmiana (2520 t),2406.0,2109.6,2595.6,2580.3,2437.2,2700.0,-6.7550284850598885
+"przestoje 4 min/kurs, zmienność 20 %",jedna zmiana (2700 t),2605.2,2588.4,2700.0,2580.3,2437.2,2700.0,0.9650040692942508
+"przestoje 4 min/kurs, zmienność 20 %",jedna zmiana (2484 t),2356.8,2109.6,2523.6,2580.3,2437.2,2700.0,-8.66178351354494
+"jazda wolniej o 15 %, przestoje 8 min, zmienność 10 %",tabela 20 zmian,2139.6,1922.4,2311.2000000000003,2141.1,1940.4,2343.6,-0.07005744710663064
+"jazda wolniej o 15 %, przestoje 8 min, zmienność 10 %",jedna zmiana (2268 t),2174.4,1900.8,2379.6,2141.1,1940.4,2343.6,1.555275325767136
+"jazda wolniej o 15 %, przestoje 8 min, zmienność 10 %",jedna zmiana (2268 t),2174.4,1900.8,2379.6,2141.1,1940.4,2343.6,1.555275325767136
+"jazda wolniej o 15 %, przestoje 8 min, zmienność 10 %",jedna zmiana (2016 t),1878.0,1684.8,2016.0,2141.1,1940.4,2343.6,-12.288076222502454
+"jazda wolniej o 15 %, przestoje 8 min, zmienność 10 %",jedna zmiana (2232 t),2139.6,1922.4,2311.2000000000003,2141.1,1940.4,2343.6,-0.07005744710663064
+"jazda wolniej o 15 %, przestoje 8 min, zmienność 10 %",jedna zmiana (1980 t),1890.0,1720.8,2055.6,2141.1,1940.4,2343.6,-11.72761664564943

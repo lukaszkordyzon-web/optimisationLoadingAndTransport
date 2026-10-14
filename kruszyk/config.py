@@ -363,8 +363,14 @@ class Calibration:
     delay_min_per_trip: float = 0.0  # losses the model doesn't know (waiting for orders, cleaning, talks…) per trip
     fuel_factor: float = 1.0
     kwh_factor: float = 1.0
-    measured: dict = field(default_factory=dict)  # what was measured on the real shift
+    measured: dict = field(default_factory=dict)  # what was measured (one shift, or the mean of several)
     date: str = ""                  # when it was calibrated
+    # several shifts: how much they differ (standard deviations) and how many there were
+    measured_sd: dict = field(default_factory=dict)
+    n_shifts: int = 0
+    # shift-to-shift variation the model has no cause for (crew, material, organisation of the day): every shift
+    # gets one random pace factor for driving and loading with this spread (0 = none)
+    shift_sd: float = 0.0
 
 
 @dataclass

@@ -226,6 +226,7 @@ def test_production_goal_backwards_and_applied():
 def test_calibration_screen_fits_and_saves():
     at = AppTest.from_file(APP, default_timeout=300).run()  # the default mine, shift module
     assert any("nieskalibrowany" in w.value for w in at.warning)
+    at.radio(key="cal_mode").set_value("Jedna typowa zmiana").run()
     at.number_input(key="cal_tonnes_t").set_value(2200).run()
     at.number_input(key="cal_trips").set_value(60).run()
     next(b for b in at.button if "Dopasuj model" in b.label).click().run()
@@ -347,3 +348,24 @@ def test_rl_training_in_the_app():
     before, after = entry["test"]
     assert ("rl_weights" in at.session_state["raw"]) == (not entry["no_gain"])  # saved only when it is cheaper
     assert any("Wynik:" in m.value for m in at.markdown)
+
+
+def test_calibration_on_a_table_of_shifts():
+    import pandas as pd
+
+    at = AppTest.from_file(APP, default_timeout=600).run()
+    ver = at.session_state["ver"]
+    tonnes = [2150, 2230, 2080, 2310, 2190, 1650, 2260, 2120, 2200, 2240, 2170, 2090]
+    at.session_state[f"cal_tab_{ver}__base"] = pd.DataFrame(
+        [{"data": f"z{i + 1}", "tonnes_t": float(t), "trips": round(t / 36.0), "trucks": 6.0, "load_min": None,
+          "travel_min": None, "fuel_l": None, "kwh": None} for i, t in enumerate(tonnes)])
+    at.run()
+    assert not at.exception, at.exception
+    at.button(key="cal_many_go").click().run()
+    assert not at.exception, at.exception
+    assert any("Model po kalibracji: średnio" in s.value for s in at.success)
+    at.button(key="cal_many_save").click().run()
+    assert not at.exception, at.exception
+    cal = at.session_state["raw"]["calibration"]
+    assert cal["n_shifts"] == 12 and abs(cal["measured"]["tonnes_t"] - sum(tonnes) / 12) < 0.01
+    assert any("na **12 zmianach**" in c.value for c in at.caption)

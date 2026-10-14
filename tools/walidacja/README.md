@@ -17,6 +17,7 @@ PYTHONPATH=. python tools/walidacja/czulosc.py     # 1 400 zmian: 10 parametrów
 PYTHONPATH=. python tools/walidacja/polityki.py    # 4 sytuacje × nauka RL + 4 polityki × 30 tych samych zmian
 PYTHONPATH=. python tools/walidacja/kolejki.py     # rampy jednopasowe, kolejki pod koparkami: 4 polityki × 30 zmian
 PYTHONPATH=. python tools/walidacja/warianty.py    # porównanie wariantów: 1 zmiana vs 20 zmian, 5 pytań × 40 powtórzeń
+PYTHONPATH=. python tools/walidacja/kalibracja.py   # kalibracja z tabeli 20 zmian vs z jednej zmiany: prognoza 40 kolejnych
 PYTHONPATH=. python tools/walidacja/harmonogram.py # miesiąc: flota, wyczerpanie usypów, strzały, szansa realizacji, cel od kruszarek
 ```
 
@@ -134,6 +135,25 @@ Wnioski: porównanie na tych samych zmianach (ta sama pogoda, awarie, kierowcy) 
 wskazuje dobry kierunek, ale myli się w kilku procentach przypadków i podaje wielkość efektu z rozrzutem kilku
 punktów procentowych. 20 zmian: w 200 próbach ani jednej złej odpowiedzi, wielkość efektu z dokładnością ~±0,3 pp,
 a efekt pomijalny (łyżka +0,1 %) uczciwie nazwany „bez pewnej różnicy” zamiast „lepiej”.
+
+## Kalibracja: tabela zmian vs jedna zmiana (`kalibracja.py`)
+
+„Ukryta prawda” = kopalnia testowa z parametrami, których kalibracja nie zna (przestoje na kurs, zmienność tempa
+między zmianami, wolniejsza jazda). Z niej 20 „zmierzonych” zmian (tony, kursy, paliwo), potem 40 przyszłych.
+Model bazowy kalibrowany (a) na tabeli 20 zmian – średnia z awariami + typowy rozrzut, (b) na pojedynczych
+zmianach (stary sposób) – i prognozuje przyszłe 40 zmian.
+
+| ukryta prawda | przyszłe 40 zmian | tabela 20 zmian | jedna zmiana (5 prób) |
+|---|---|---|---|
+| przestoje 6 min, zmienność 12 % | 2 478 t | −1,0 % | −13,6 … +2,8 % |
+| przestoje 3 min, bez zmienności | 2 642 t | −1,4 % | −10,8 … −3,6 % |
+| przestoje 4 min, zmienność 20 % | 2 580 t | −0,7 % | −8,7 … +1,0 % |
+| jazda wolniej o 15 %, przestoje 8 min, zmienność 10 % | 2 141 t | −0,1 % | −12,3 … +1,6 % |
+
+Średni błąd prognozy: **tabela 0,8 % (maks. 1,4 %)**, jedna zmiana 5,2 % (maks. 13,6 %) – zależy od tego, którą
+zmianę ktoś wpisał. Zakres P10–P90 z tabeli trafia w zakres przyszłych zmian (zmienność 20 % – nieco węższy).
+Rozrzut liczony odpornie (rozstęp ćwiartkowy / 1,349): odchylenie standardowe 20 zmian potrafi się podwoić od
+jednej zmiany z długą awarią kruszarki.
 
 ## Harmonogram
 

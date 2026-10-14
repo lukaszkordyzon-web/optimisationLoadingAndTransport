@@ -136,6 +136,9 @@ class Simulation:
         self.shift_s = sc.shift_hours * 3600
         v = sc.variability
         self.rain = bool(self.rng.random() < v.rain_probability)
+        sd = sc.calibration.shift_sd  # the pace of this whole shift (own stream: no effect on the rest when 0)
+        self.day_factor = (float(np.random.default_rng((sc.seed if seed is None else seed) + 313_131)
+                                 .lognormal(-sd * sd / 2, sd)) if sd > 0 else 1.0)
         self.weather_factor = 1 + (v.rain_slowdown if self.rain else 0.0)
 
         self.excavators = {
@@ -875,7 +878,7 @@ class Simulation:
                 mean_drv = mean
             natural = mean_drv * truck.driver_factor * self.weather_factor * self._noise(v.trip_sd)
             natural = max(natural, seg.length_m / (seg.speed_limit_kmh * over / 3.6))
-            natural *= self.sc.calibration.travel_factor  # measured on site: real roads, real drivers
+            natural *= self.sc.calibration.travel_factor * self.day_factor  # measured on site: real roads, drivers
             dur = natural * pace
             start = self.env.now
             grade = seg.grade_pct if forward else -seg.grade_pct
@@ -973,7 +976,8 @@ class Simulation:
                 blast = sc.blast(ex.blast)
                 full_load = load_time_s(ex.cfg, fleet, blast, sc.loose_density_t_m3)
                 one_pass = ex.cfg.swing_cycle_s * (1.0 + 0.5 * blast.fragmentation)
-                load = full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd) * sc.calibration.load_factor
+                load = (full_load * (tonnes / fleet.payload_t) * self._noise(sc.variability.load_sd)
+                        * sc.calibration.load_factor * self.day_factor)
                 # a bucket filled while the truck was still coming saves one pass – if the operator knew it was coming
                 p_prefill = 1.0 if self.advice else PREFILL_NATURAL_P
                 if idle_before >= one_pass and load > 1.5 * one_pass and self.rng.random() < p_prefill:

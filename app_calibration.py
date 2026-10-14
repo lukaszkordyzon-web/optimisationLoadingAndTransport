@@ -4,7 +4,10 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from kruszyk.calibrate import apply_to_raw, calibrate
+import plotly.graph_objects as go
+
+from kruszyk.calibrate import FIELDS as SHIFT_FIELDS
+from kruszyk.calibrate import apply_to_raw, calibrate, calibrate_shifts, shift_stats
 from kruszyk.config import RELIABILITY_KINDS, Reliability
 from ui import card
 
@@ -24,7 +27,11 @@ COMPARE = [("tonnes_t", "produkcja [t]"), ("trips", "kursy"), ("load_min", "zał
 def status_line(sc) -> None:
     """One line for the other screens: is the model tuned to reality?"""
     cal = sc.calibration
-    if cal.measured.get("tonnes_t"):
+    if cal.measured.get("tonnes_t") and cal.n_shifts > 1:
+        st.caption(f"⚖️ Model skalibrowany {cal.date} na **{cal.n_shifts} zmianach** (średnio "
+                   f"**{cal.measured['tonnes_t']:,.0f} t**, typowy rozrzut ±{cal.measured_sd.get('tonnes_t', 0):,.0f} t)."
+                   .replace(",", " "))
+    elif cal.measured.get("tonnes_t"):
         st.caption(f"⚖️ Model skalibrowany {cal.date} na zmianie z produkcją **{cal.measured['tonnes_t']:,.0f} t**."
                    .replace(",", " "))
     else:
@@ -32,15 +39,26 @@ def status_line(sc) -> None:
                    "poglądowe. Wpisz dane z prawdziwej zmiany: moduł **Analiza zmiany → ④ Kalibracja**.")
 
 
+ONE, MANY = "Jedna typowa zmiana", "📅 Kilka zmian – tabela (zalecane)"
+
+
 def step_calibration(raw: dict, sc, set_raw) -> None:
-    st.markdown("### ④ Kalibracja – model dopasowany do prawdziwej zmiany")
-    st.markdown("Dziś model opiera się na **założeniach**. Wpisz, co zmierzyliście na jednej typowej zmianie. Program "
+    st.markdown("### ④ Kalibracja – model dopasowany do prawdziwych zmian")
+    st.markdown("Dziś model opiera się na **założeniach**. Wpisz, co zmierzyliście na prawdziwych zmianach – program "
                 "dopasuje model tak, żeby „jak było dziś” dawało **te same tony i kursy**. Wtedy optymalizacja RL i "
-                "harmonogram liczą na **Waszej** kopalni, a nie na przykładzie. Wymagana jest tylko produkcja na "
-                "zmianę; każda kolejna liczba poprawia dokładność.")
+                "harmonogram liczą na **Waszej** kopalni, a nie na przykładzie. Najlepiej **tabela zmian** z tygodnia "
+                "albo miesiąca: model dopasowuje się do średniej i do tego, jak bardzo zmiany się różnią.")
     if sc is None:
         st.info("Najpierw opisz i zapisz kopalnię w kroku **① Stan wyjściowy kopalni**.")
         return
+    mode = st.radio("Dane", [MANY, ONE], horizontal=True, key="cal_mode", label_visibility="collapsed")
+    if mode == MANY:
+        _many_shifts(raw, sc, set_raw)
+    else:
+        _one_shift(raw, sc, set_raw)
+
+
+def _one_shift(raw: dict, sc, set_raw) -> None:
     old = dict(sc.calibration.measured)
     with card("cal_in"):
         st.markdown("#### 📋 Pomiary z jednej zmiany")
@@ -92,6 +110,84 @@ def step_calibration(raw: dict, sc, set_raw) -> None:
         st.caption("Po zapisaniu warto ponownie nauczyć politykę RL (krok ⑥) – uczyła się na modelu z założeń.")
 
 
+SHIFT_COLS = {"data": "data / zmiana", "tonnes_t": "tony", "trips": "kursy", "trucks": "wozideł w pracy",
+              "load_min": "załadunek [min]", "travel_min": "jazda na kurs [min]", "fuel_l": "paliwo [l]",
+              "kwh": "energia [kWh]"}
+LABELS = dict(COMPARE) | {"trucks": "wozidła w pracy"}
+
+
+def _many_shifts(raw: dict, sc, set_raw) -> None:
+    with card("cal_many"):
+        st.markdown("#### 📅 Zmiany z tygodnia / miesiąca")
+        st.caption("Jeden wiersz = jedna zmiana. Wymagane tylko **tony**; reszta – jeśli macie. Możesz wkleić kolumny z "
+                   "Excela (zaznacz komórkę i Ctrl+V). Puste komórki są pomijane. Zmiany z awariami **zostaw** – "
+                   "należą do rzeczywistości; model uwzględnia awarie z tabeli awaryjności. Najlepiej 10–30 zmian.")
+        key = f"cal_tab_{st.session_state.get('ver', 0)}"
+        if f"{key}__base" not in st.session_state:
+            st.session_state[f"{key}__base"] = pd.DataFrame(
+                [{"data": "", **{k: None for k in SHIFT_FIELDS}} for _ in range(10)])
+        df = st.data_editor(st.session_state[f"{key}__base"], key=key, num_rows="dynamic", hide_index=True,
+                            width="stretch",
+                            column_config={"data": st.column_config.TextColumn(SHIFT_COLS["data"]),
+                                           **{k: st.column_config.NumberColumn(SHIFT_COLS[k], min_value=0.0)
+                                              for k in SHIFT_FIELDS}})
+        stats = shift_stats(df)
+        n = stats.get("tonnes_t", {}).get("n", 0)
+        if n:
+            st.dataframe(pd.DataFrame([{"wielkość": LABELS.get(k, k), "zmian": v["n"], "średnio": round(v["mean"], 1),
+                                        "typowy rozrzut ±": round(v["rsd"], 1), "odchylenie std": round(v["sd"], 1),
+                                        "P10–P90": f"{v['p10']:.0f}–{v['p90']:.0f}"} for k, v in stats.items()]),
+                         hide_index=True, width="stretch")
+            st.caption("Typowy rozrzut = rozstęp ćwiartkowy / 1,349 – nie zawyża go jedna zmiana z długą awarią "
+                       "(odchylenie standardowe tak).")
+        if 0 < n < 10:
+            st.warning(f"Tylko {n} zmian – średnia jest niepewna, a rozrzut prawie niewiadomy. Dodaj zmiany (10+).")
+        go_ = st.button(f"⚖️ Dopasuj model do {n} zmian", type="primary", disabled=n < 2, key="cal_many_go")
+    if go_:
+        bar = st.progress(0.0, "liczę…")
+        st.session_state.cal_many = calibrate_shifts(sc, df, progress=lambda f, t: bar.progress(min(f, 1.0), t))
+        bar.empty()
+    res = st.session_state.get("cal_many")
+    if not res:
+        if sc.calibration.n_shifts > 1:
+            _explain(sc.calibration)
+        return
+    fitted, stats, before, after = res
+    rows = []
+    for k, label in COMPARE:
+        if k in stats:
+            m = stats[k]
+            rows.append({"wielkość": label, "zmierzone (średnio ± rozrzut)": f"{m['mean']:,.1f} ± {m['rsd']:,.1f}",
+                         "model przed": f"{before[k]['mean']:,.1f} ± {before[k]['rsd']:,.1f}",
+                         "model po kalibracji": f"{after[k]['mean']:,.1f} ± {after[k]['rsd']:,.1f}",
+                         "P10–P90 zmierzone": f"{m['p10']:,.0f}–{m['p90']:,.0f}",
+                         "P10–P90 model": f"{after[k]['p10']:,.0f}–{after[k]['p90']:,.0f}"})
+    st.dataframe(pd.DataFrame(rows).replace(",", " ", regex=True), hide_index=True, width="stretch")
+    m, a = stats["tonnes_t"], after["tonnes_t"]
+    gap = 100 * abs(a["mean"] - m["mean"]) / m["mean"]
+    (st.success if gap <= 3 else st.warning)(
+        f"Model po kalibracji: średnio **{a['mean']:,.0f} t** na zmianę, typowo ±{a['rsd']:,.0f} t (zmierzone "
+        f"{m['mean']:,.0f} ± {m['rsd']:,.0f} t; różnica średnich {gap:.1f} %).".replace(",", " "))
+    if m["rsd"] and a["rsd"] < 0.6 * m["rsd"]:
+        st.info("Zmiany w kopalni różnią się bardziej niż w modelu – sprawdź awaryjność (tabela poniżej) i czy w "
+                "tabeli zmian nie ma zmian nietypowych (krótsza zmiana, postój zakładu).")
+    elif m["rsd"] and a["rsd"] > 1.6 * m["rsd"]:
+        st.info("Model ma większy rozrzut niż kopalnia – możliwe, że awaryjność w tabeli jest zawyżona.")
+    fig = go.Figure()
+    fig.add_box(y=[float(x) for x in df["tonnes_t"] if x == x and x], name="zmierzone", marker_color="#2f4156",
+                boxpoints="all", jitter=0.4)
+    fig.add_box(y=a["values"], name="model po kalibracji", marker_color="#c8102e", boxpoints="all", jitter=0.4)
+    fig.update_layout(height=300, margin=dict(t=30, b=10), title="Tony na zmianę: zmierzone i z modelu",
+                      yaxis_title="t / zmianę", showlegend=False)
+    st.plotly_chart(fig, width="stretch")
+    _explain(fitted.calibration, [f.payload_t for f in fitted.trucks], [f.payload_t for f in sc.trucks])
+    if st.button("✅ Zapisz kalibrację w kopalni", key="cal_many_save"):
+        apply_to_raw(raw, fitted)
+        st.session_state.pop("cal_many")
+        set_raw(raw)
+        st.rerun()
+
+
 def _explain(cal, payload_after=None, payload_before=None) -> None:
     lines = []
     if payload_after and payload_before and payload_after != payload_before:
@@ -107,6 +203,9 @@ def _explain(cal, payload_after=None, payload_before=None) -> None:
         if cal.delay_min_per_trip > 10:
             lines.append("🔎 To dużo – sprawdź, czy liczba wozideł w pracy, przerwy i czasy jazdy są wpisane zgodnie "
                          "z rzeczywistością. Jeśli tak, ta strata czasu to największa rezerwa kopalni.")
+    if cal.shift_sd:
+        lines.append(f"📅 Zmiany różnią się między sobą bardziej, niż wyjaśniają awarie i pogoda: każda zmiana dostaje "
+                     f"własne tempo jazdy i załadunku, typowo ±{100 * cal.shift_sd:.0f} % (załoga, urobek, organizacja dnia).")
     if cal.fuel_factor != 1.0:
         lines.append(f"⛽ Zużycie paliwa **×{cal.fuel_factor:.2f}** względem założeń.")
     if cal.kwh_factor != 1.0:
