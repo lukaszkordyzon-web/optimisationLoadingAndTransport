@@ -650,6 +650,8 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
                     ex[key] = float(e[key])
         if e.get("spotting"):
             ex["spotting"] = {k: float(v) for k, v in e["spotting"].items() if v}
+        if e.get("areas"):
+            ex["areas"] = list(e["areas"])
         cr = _crusher_routes(site, pos, rid, new["routes"])
         if cr:
             ex["crusher_routes"] = cr

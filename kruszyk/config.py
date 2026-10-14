@@ -61,6 +61,11 @@ class Excavator:
     relocate_min: float = 4.0
     crusher_routes: dict = field(default_factory=dict)  # other crushers: crusher id -> route id from here
     start_delay_min: float = 0.0  # not loading at the start of the shift (driving to a new pile)
+    # where it may work in the period: ids of extraction areas / planned blasts / piles (empty = anywhere)
+    areas: list = field(default_factory=list)
+
+    def may_work(self, pile_id: str) -> bool:
+        return not self.areas or pile_id in self.areas or pile_id.split("/")[0] in self.areas
 
 
 @dataclass

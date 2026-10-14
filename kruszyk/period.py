@@ -109,6 +109,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
     ex_croutes = {e.id: dict(e.crusher_routes) for e in sc.excavators}
     taken = {p: any(c.takes(p) for c in sc.crushers) for p in left}  # some crusher accepts this material
     ex_pile = {e.id: e.blast for e in sc.excavators}
+    by_id = {e.id: e for e in sc.excavators}
     ex_route = {e.id: e.route for e in sc.excavators}
     stock = float(sc.stockpile.initial_t)
     dig_step = {e.id: 0 for e in sc.excavators}
@@ -295,16 +296,17 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 blast_log.append({"strzal": pid, "obszar": "", "data": day, "t": float(p["tonnage_t"]),
                                   "polygon": p.get("polygon"), "auto": False, "opoznienie_dni": late,
                                   "mw_kg": round(float(p["tonnage_t"]) * sc.blasting.powder_factor_kg_t)})
-            # excavators without material and no free pile to go to = blasts needed now
+            # excavators without material and no free pile they may go to = blasts needed now, in their areas
             idle = [x for x in ex_pile if left[ex_pile[x]] < MIN_PILE_T]
             busy_piles = {ex_pile[x] for x in ex_pile if left[ex_pile[x]] >= MIN_PILE_T}
             free_piles = [p for p in left if left[p] >= MIN_PILE_T and p not in busy_piles and taken.get(p)]
-            need = max(0, len(idle) - len(free_piles)) if plan.move_excavators else 0
+            waiting = [x for x in idle if not any(by_id[x].may_work(p) for p in free_piles)] if plan.move_excavators else []
             for ar in areas:
                 a = ar["cfg"]
                 open_t = sum(t for pid, t in left.items() if pid.startswith(f"{a['id']}/"))
                 if ar["reserve"] <= 1 or wd - ar["last_day"] < int(a.get("min_gap_days") or 1):
                     continue
+                need = sum(1 for x in waiting if by_id[x].may_work(a["id"]))
                 n_blasts = max(1 if open_t < float(a.get("reblast_below_t") or 0) else 0, need)
                 n_blasts = min(n_blasts, int(a.get("max_per_day") or 1), len(ar["strips"]) - ar["next"])
                 for _ in range(n_blasts):
@@ -318,7 +320,9 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                         waits[pid] = (f"{day.strftime('%d.%m')}: strzał {pid} czeka na wyprzedzenie frontu – najpierw "
                                       f"{blocker} na wyższym poziomie (min. {plan.lead_m:.0f} m)")
                         break
-                    need = max(0, need - 1)
+                    taker = next((x for x in waiting if by_id[x].may_work(a["id"])), None)
+                    if taker:
+                        waiting.remove(taker)  # this blast gives it material
                     fired.add(pid)
                     self_blast(ar, a)
 
@@ -330,7 +334,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                     continue
                 busy = {ex_pile[x] for x in ex_pile if x != e.id and left[ex_pile[x]] >= MIN_PILE_T}
                 free = [p for p in left if left[p] >= MIN_PILE_T and p not in busy and p in pile_route and taken[p]
-                        and _blends_ok(sc, ex_pile, e.id, p)]
+                        and e.may_work(p) and _blends_ok(sc, ex_pile, e.id, p)]
                 if not free:
                     continue
                 here = sc.routes[ex_route[e.id]].path

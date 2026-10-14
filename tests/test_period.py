@@ -181,3 +181,25 @@ def test_explosive_limit_caps_the_blasts():
     df = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=12, drills=2), seed=1)
     blasts = df.attrs["blasts"]
     assert blasts and all(b["t"] <= 20_000.0 + 1 and b["mw_kg"] <= 3000 + 1 for b in blasts)
+
+
+def test_excavators_work_only_in_their_areas():
+    import yaml
+
+    from kruszyk.config import scenario_from_dict
+
+    raw = yaml.safe_load((Path(__file__).parent.parent / "scenarios" / "kruszyk_kopalnia.yaml").read_text(encoding="utf-8"))
+    raw["reliability"] = {"enabled": False}
+    sc = scenario_from_dict(raw)
+    sc.dispatch = "natural"
+    areas = [a["id"] for a in sc.areas]
+    k1, k2 = sc.excavators[0], sc.excavators[1]
+    k1.areas = [k1.blast, areas[0]]
+    k2.areas = [k2.blast, areas[1]]
+    df = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=20, drills=2), seed=1)
+    for _, r in df.iterrows():  # where every excavator stood at every shift
+        for part in r["koparki_na"].split(", "):
+            ex, pile = part.split(":")
+            allowed = {"K-1": k1.areas, "K-2": k2.areas}.get(ex)
+            if allowed:
+                assert pile in allowed or pile.split("/")[0] in allowed, (ex, pile)

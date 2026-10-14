@@ -729,7 +729,8 @@ def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
         "excavator": [("id", "nazwa", "text", None), ("pile", "ładuje z usypu", "sel", pile_ids),
                       ("bucket_m3", "łyżka [m³]", "num", (0.5, 0.5)), ("swing_cycle_s", "cykl łyżki [s]", "num", (10.0, 1.0)),
                       ("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
-                      ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0)), *_FAIL],
+                      ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0)),
+                      ("areas", "pracuje w (harmonogram; puste = wszędzie)", "multi", _pile_ids(site)), *_FAIL],
         "crusher": crusher + _FAIL, "crusher2": crusher + _FAIL,
         "parking": [("excavator", "koparka", "sel", [e["id"] for e in site.get("excavators", [])])],
         "bay": [("id", "nazwa", "text", None)],
@@ -1877,7 +1878,14 @@ def crushers_table(site: dict, raw: dict) -> None:
               "kwh_per_t": float(c.get("kwh_per_t") or cr.get("kwh_per_t", 1.1)),
               "target_t": float(c.get("target_t") or 0.0), "accepts": list(c.get("accepts") or [])}
              for c in site.get("crushers", [])]
-    snap = f"crush_tbl_{st.session_state.obj_ver}_{st.session_state.get('ver', 0)}"
+    from kruszyk.config import Reliability
+
+    rel_raw = st.session_state.raw.setdefault("reliability", {})
+    rel = Reliability(**{k_: v_ for k_, v_ in rel_raw.items() if k_ in Reliability.__dataclass_fields__})
+    for r in rows:
+        r["fail_n"], r["fail_h"] = rel.values(r["id"], "crusher")[:2]
+    sig = abs(hash(repr(sorted((k_, tuple(sorted(v_.items()))) for k_, v_ in rel.machines.items())))) % 10**8
+    snap = f"crush_tbl_{st.session_state.obj_ver}_{st.session_state.get('ver', 0)}_{sig}"
     if snap not in st.session_state:
         st.session_state[snap] = pd.DataFrame(rows)
     ed = st.data_editor(st.session_state[snap], key=snap + "_ed", hide_index=True, width="stretch", disabled=["rola"],
@@ -1893,7 +1901,15 @@ def crushers_table(site: dict, raw: dict) -> None:
                                 help="zużycie energii na tonę przy dobrym rozdrobnieniu; grube bryły podnoszą je"),
                             "target_t": st.column_config.NumberColumn("plan na zmianę [t]", min_value=0.0),
                             "accepts": st.column_config.MultiselectColumn(
-                                "przyjmuje z usypów (puste = wszystkie)", options=_pile_ids(site))})
+                                "przyjmuje z usypów (puste = wszystkie)", options=_pile_ids(site)),
+                            "fail_n": st.column_config.NumberColumn("awarii / mies.", min_value=0.0,
+                                                                    help="średnio z 3–6 miesięcy, postoje > 15 min"),
+                            "fail_h": st.column_config.NumberColumn("godzin awarii / mies.", min_value=0.0)})
+    start = st.session_state[snap]
+    for i, r in ed.iterrows():  # breakdowns: only cells changed here (other tables keep what they set)
+        if i < len(start) and not pd.isna(r["fail_n"]) and not pd.isna(r["fail_h"]):
+            if (float(r["fail_n"]), float(r["fail_h"])) != (float(start["fail_n"].iloc[i]), float(start["fail_h"].iloc[i])):
+                rel_raw.setdefault("machines", {})[str(r["id"])] = {"count": float(r["fail_n"]), "hours": float(r["fail_h"])}
     refresh = False
     for i, r in ed.iterrows():
         tgt = main if i == 0 else (site["crushers"][i - 1] if i - 1 < len(site.get("crushers", [])) else None)

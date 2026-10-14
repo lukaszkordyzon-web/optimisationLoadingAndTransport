@@ -204,6 +204,7 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         st.markdown("**🔩 Wiertnice** – strzał w nowym miejscu trzeba najpierw nawiercić. Metry = tony strzału / t/mb "
                     "(ustawiasz przy obszarze / strzale), czas = metry / wydajność. Następny pas obszaru można wiercić "
                     "dopiero po odebraniu poprzedniego strzału.")
+        _excavator_areas(base_raw, sc)
         rigs = _rigs_table(base_raw, sc)
         drills = len(rigs)
         c = st.columns(2)
@@ -338,6 +339,34 @@ def _chance_results(r: dict) -> None:
                 "**zawyżona** – awarie kruszarek i koparek zmieniłyby obraz.")
 
 
+def _excavator_areas(base_raw: dict, sc) -> None:
+    """Which excavator works where in the period (areas, planned blasts, piles); empty = anywhere."""
+    st.markdown("**⛏️ Gdzie pracują koparki** – w których obszarach, strzałach i usypach (puste = wszędzie). "
+                "Koparka bez urobku przejeżdża tylko w swoje miejsca, a obszar strzela, gdy jego koparce brakuje "
+                "urobku.")
+    places = [b.id for b in sc.blasts] + [p["id"] for p in sc.planned_blasts] + [a["id"] for a in sc.areas]
+    sig = abs(hash(repr([(e.id, e.areas) for e in sc.excavators]) + repr(places) + str(st.session_state.get("ver", 0))))
+    key = f"per_exareas_{sig % 10**8}"
+    if key not in st.session_state:
+        st.session_state[key] = pd.DataFrame([{"koparka": e.id, "gdzie": [x for x in e.areas if x in places]}
+                                              for e in sc.excavators])
+    ed = st.data_editor(st.session_state[key], key=key + "_ed", hide_index=True, width="stretch", disabled=["koparka"],
+                        column_config={"gdzie": st.column_config.MultiselectColumn(
+                            "pracuje w (puste = wszędzie)", options=places)})
+    chosen = {r["koparka"]: [x for x in (r["gdzie"] if isinstance(r["gdzie"], list) else []) if x]
+              for _, r in ed.iterrows()}
+    for e in sc.excavators:
+        e.areas = chosen.get(e.id, [])
+    editing = (st.session_state.get("site") or {}).get("excavators") or []  # the map being edited
+    for src in [base_raw.get("excavators") or [], (base_raw.get("site") or {}).get("excavators") or [], editing]:
+        for e in src:  # kept in the mine (the map keeps it too, so saving the map doesn't lose it)
+            if e.get("id") in chosen:
+                if chosen[e["id"]]:
+                    e["areas"] = chosen[e["id"]]
+                else:
+                    e.pop("areas", None)
+
+
 RIG_DEFAULT = {"m_per_shift": 250.0, "speed_kmh": 2.0}
 
 
@@ -461,7 +490,13 @@ def _production_tab(base_raw: dict, sc, plan: PeriodPlan, n_shifts: int) -> None
         tot = sum(yields[c.id].values())
         if tot > 100.5:
             st.warning(f"{c.id}: uzyski sumują się do {tot:.0f} % – więcej niż nadawa.")
-    prod.update({"total_t": float(total), "mix": {k_: round(v_, 2) for k_, v_ in mix.items()}, "yields": yields})
+    missing = [cid for cid in stored if cid not in ids]
+    if missing:
+        st.info(f"🏭 Uzyski są zapisane też dla: **{', '.join(missing)}**, ale tych kruszarek nie ma na mapie – plan liczy "
+                "tylko kruszarki postawione na mapie. Postaw je (krok ① → Kruszarka → „Dodaj kolejną”) i zapisz kopalnię.")
+    # keep the yields of crushers that are not on the map yet (e.g. from the project catalogue)
+    prod.update({"total_t": float(total), "mix": {k_: round(v_, 2) for k_, v_ in mix.items()},
+                 "yields": {**stored, **yields}})
 
     drills = plan.drills
     key = repr((total, mix, yields, n_shifts, dump_key(sc), plan))
