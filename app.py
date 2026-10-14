@@ -37,6 +37,9 @@ STATE_COLORS = {
 BASE_TS = pd.Timestamp("2026-01-01 06:00")
 
 st.set_page_config(page_title="Kruszyk – załadunek, transport, kruszenie", page_icon="⛏️", layout="wide")
+from ui import style  # noqa: E402
+
+style()
 
 
 # ------------------------------------------------------------------ state

@@ -7,4 +7,20 @@ maxUploadSize = 20
 
 [theme]
 base = "light"
-primaryColor = "#d62828"
+primaryColor = "#c8102e"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f7f9fb"
+textColor = "#1d2733"
+borderColor = "#cdd4dd"
+showWidgetBorder = true
+baseRadius = "0.5rem"
+dataframeHeaderBackgroundColor = "#2f4156"
+dataframeHeaderTextColor = "#ffffff"
+dataframeBorderColor = "#cdd4dd"
+headingFontWeights = [700, 700, 650, 650, 600, 600]
+
+[theme.sidebar]
+backgroundColor = "#1f2d3d"
+secondaryBackgroundColor = "#2c3e52"
+textColor = "#e9eef3"
+borderColor = "#3d5269"

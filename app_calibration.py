@@ -6,6 +6,7 @@ import streamlit as st
 
 from kruszyk.calibrate import apply_to_raw, calibrate
 from kruszyk.config import RELIABILITY_KINDS, Reliability
+from ui import card
 
 FIELDS = [  # key, label, unit, help
     ("tonnes_t", "Produkcja na zmianę", "t", "waga przy kruszarce albo raport dyspozytora – **wymagane**"),
@@ -41,15 +42,18 @@ def step_calibration(raw: dict, sc, set_raw) -> None:
         st.info("Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia dziś**.")
         return
     old = dict(sc.calibration.measured)
-    c = st.columns(4)
-    measured = {}
-    for i, (key, label, unit, help_) in enumerate(FIELDS):
-        default = float(old.get(key) or (sc.truck_count if key == "trucks" else 0.0))
-        measured[key] = c[i % 4].number_input(f"{label} [{unit}]", 0.0, 1_000_000.0, default,
-                                              1.0 if key in ("trips", "trucks") else 10.0, key=f"cal_{key}",
-                                              help=help_, format="%.0f" if key != "load_min" and key != "travel_min"
-                                              else "%.1f")
-    if st.button("⚖️ Dopasuj model", type="primary", disabled=not measured["tonnes_t"], key="cal_go"):
+    with card("cal_in"):
+        st.markdown("#### 📋 Pomiary z jednej zmiany")
+        c = st.columns(4)
+        measured = {}
+        for i, (key, label, unit, help_) in enumerate(FIELDS):
+            default = float(old.get(key) or (sc.truck_count if key == "trucks" else 0.0))
+            measured[key] = c[i % 4].number_input(f"{label} [{unit}]", 0.0, 1_000_000.0, default,
+                                                  1.0 if key in ("trips", "trucks") else 10.0, key=f"cal_{key}",
+                                                  help=help_, format="%.0f" if key != "load_min" and key != "travel_min"
+                                                  else "%.1f")
+        go = st.button("⚖️ Dopasuj model", type="primary", disabled=not measured["tonnes_t"], key="cal_go")
+    if go:
         bar = st.progress(0.0, "liczę…")
         fitted, before, after = calibrate(sc, measured, progress=lambda f, t: bar.progress(f, t))
         bar.empty()
@@ -113,6 +117,11 @@ def _explain(cal, payload_after=None, payload_before=None) -> None:
 
 def reliability_editor(raw: dict, sc, key: str) -> None:
     """Breakdowns per machine: failures per month and their total hours (from the maintenance records)."""
+    with card(f"rel_{key}"):
+        _reliability_editor(raw, sc, key)
+
+
+def _reliability_editor(raw: dict, sc, key: str) -> None:
     st.markdown("#### 🔧 Awaryjność urządzeń")
     st.caption("Dla każdego urządzenia: **ile awarii w miesiącu** i **ile godzin łącznie** trwały – średnio z ostatnich "
                "3–6 miesięcy, z dziennika napraw. Tylko postoje dłuższe niż ok. 15 min, **bez przeglądów planowych** "

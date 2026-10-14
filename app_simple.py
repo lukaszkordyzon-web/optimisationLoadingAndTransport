@@ -398,7 +398,7 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     plain.advisor = Advisor(enabled=advise)  # learned advice settings stored in the mine don't make it "another mine"
     plain.excavator_policy = ExcavatorPolicy()
     mine_key = dump_scenario(plain)  # the mine itself, without a learned policy stored in it
-    if st.button("🚀 Optymalizuj przydział wozideł", type="primary"):
+    if st.button("🚀 Optymalizuj decyzje zmiany (nauka RL)", type="primary"):
         bar = st.progress(0.0, "Uczenie…")
         chart = st.empty()
         rows: list[dict] = []
@@ -566,10 +566,8 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
         sc, yaml_text = None, None
         msg = str(e)
     if schedule:
-        st.markdown("**① Kopalnia i plan strzałów** (obszary wydobycia, planowane strzały – grupa "
-                    "„📅 Plan strzałów” na mapie) → **② Wariant „co jeśli”** (np. więcej wozideł, nowa droga) → "
-                    "**③ Harmonogram**: kalendarz, cel produkcji i dobór planu o najniższym koszcie. Bazą jest obecny "
-                    "sposób przydziału; obok efekt przydziału RL, jeśli polityka jest nauczona.")
+        st.caption("Kolejno: kopalnia i plan strzałów → wariant „co jeśli” → harmonogram (cel produkcji, kalendarz, "
+                   "dobór floty, szansa realizacji).")
         tabs = st.tabs(["① Kopalnia i plan strzałów", "② Wariant – co jeśli", "③ Harmonogram"])
         with tabs[0]:
             render_map_tab(raw, set_raw, simple=True, schedule=True)
@@ -580,11 +578,8 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
 
             step_period(raw, yaml_text, seed)
         return
-    st.markdown("**① Kopalnia dziś → ② Reguły zmiany** (cel, kto gdzie ładuje i jeździ) **→ ③ Organizacja zmiany** "
-                "(godziny, przerwy, strzelanie, tankowanie) **→ ④ Kalibracja** (model dopasowany do rzeczywistej zmiany) "
-                "**→ ⑤ Jak było dziś** (odtworzenie zmiany – docelowo z telemetrii) **→ ⑥ Optymalizacja RL** – nauczone "
-                "decyzje i komunikaty "
-                "dla operatorów. Pełne parametry: **Tryb zaawansowany** (panel boczny).")
+    st.caption("Kolejno: kopalnia → reguły → organizacja zmiany → kalibracja → odtworzenie zmiany → optymalizacja RL. "
+               "Wszystkie parametry: **Tryb zaawansowany** (panel boczny).")
     tabs = st.tabs(["① Kopalnia dziś", "② Reguły zmiany", "③ Organizacja zmiany", "④ Kalibracja", "⑤ Jak było dziś",
                     "⑥ Optymalizacja RL"])
     with tabs[0]:

@@ -9,6 +9,8 @@ import copy
 
 import streamlit as st
 
+from ui import card
+
 from kruszyk.goal import GOAL_ITEMS, default_yields, members
 
 NO_GOAL, FEED, PRODUCT = "Ile się da (bez celu)", "Tony przez zakład", "Tony produktu"
@@ -50,7 +52,7 @@ def step_rules(raw: dict, set_raw) -> None:
     k = lambda name: f"rules_{name}_{ver}"  # noqa: E731
 
     # ---------------------------------------------------------------- goal
-    with st.container(border=True):
+    with card("rules_goal"):
         st.markdown("#### 🎯 Cel zmiany")
         g = raw.get("shift_goal") or {}
         kinds = [NO_GOAL, FEED, PRODUCT]
@@ -82,7 +84,7 @@ def step_rules(raw: dict, set_raw) -> None:
             st.caption("Bez celu: zmiana wozi, ile zdąży; optymalizacja szuka najniższego kosztu na tonę.")
 
     # ---------------------------------------------------------------- excavators
-    with st.container(border=True):
+    with card("rules_ex"):
         st.markdown("#### ⛏️ Koparki – gdzie ładują i dokąd przejeżdżają")
         st.caption("Gdy usyp się kończy (albo zostanie na nim mniej niż próg), koparka **w trakcie zmiany** "
                    "przejeżdża na wskazany usyp; resztę ładuje koparka, która została na starym.")
@@ -106,7 +108,7 @@ def step_rules(raw: dict, set_raw) -> None:
     # ---------------------------------------------------------------- trucks
     trucks = expand_trucks(raw.get("trucks", []))
     tids = [t["id"] for t in trucks]
-    with st.container(border=True):
+    with card("rules_trucks"):
         st.markdown("#### 🚚 Wozidła – kto dokąd jeździ")
         st.caption("Przypisz wozidła do koparek. Nieprzypisane są **wolne** – jeżdżą tam, gdzie trzeba. "
                    "🔒 = przydział sztywny (np. decyzja sztygara, osobny materiał); bez 🔒 RL może przesunąć wozidło, "
@@ -127,7 +129,7 @@ def step_rules(raw: dict, set_raw) -> None:
                                 "wraca do „swojej” koparki")
 
     # ---------------------------------------------------------------- feed mix
-    with st.container(border=True):
+    with card("rules_feed"):
         st.markdown("#### 🧪 Skład nadawy – udział usypów")
         st.caption("Ile procent nadawy ma iść z danego usypu (puste / 0 = bez wymogu). Liczą się proporcje.")
         c = st.columns(max(len(piles), 1))

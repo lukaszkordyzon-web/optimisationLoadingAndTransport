@@ -341,7 +341,7 @@ def test_rl_without_gain_is_not_used():
 
 def test_rl_training_in_the_app():
     at = AppTest.from_file(APP, default_timeout=600).run()
-    next(b for b in at.button if "Optymalizuj przydział" in b.label).click().run()
+    next(b for b in at.button if "Optymalizuj decyzje" in b.label).click().run()
     assert not at.exception, at.exception
     entry = at.session_state["rl_by_target"]["stan obecny"]
     before, after = entry["test"]

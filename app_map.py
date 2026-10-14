@@ -1299,7 +1299,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
     site = get_site(raw_for_build)
     checklist(site, raw_for_build)
 
-    st.subheader("1. Kalibracja – gdzie jest kopalnia")
+    st.subheader("1. Lokalizacja kopalni")
     c1, c2, c3 = st.columns([4, 1, 1])
     link = c1.text_input("Wklej link z Google Maps albo współrzędne „szer., dł.” (np. 50.8712, 20.6283)",
                          key="calib_link")
