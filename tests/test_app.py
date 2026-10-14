@@ -326,3 +326,23 @@ def test_demo_project_on_zakrzowek():
     site = at.session_state["site"]
     assert tuple(site["center"]) == DEMO_CENTER and site["zoom"] == 16
     assert not site["roads"] and not at.session_state["raw"]["excavators"]  # empty: ready to draw the demo mine
+
+
+def test_rl_without_gain_is_not_used():
+    import app_simple
+
+    k = {"cycles": 50, "trucks": 6, "truck_queue_crusher_h": 20.0, "other_delay_h": 0.0,
+         "crushers": [{"crusher": "C-1", "utilization": 0.02}, {"crusher": "C-2", "utilization": 0.95}],
+         "excavators": [{"utilization": 0.3}]}
+    lines = app_simple.bottleneck(k)
+    assert "C-2" in lines[0] and "24 min" in lines[0] and "C-1" in lines[1]
+
+
+def test_rl_training_in_the_app():
+    at = AppTest.from_file(APP, default_timeout=600).run()
+    next(b for b in at.button if "Optymalizuj przydział" in b.label).click().run()
+    assert not at.exception, at.exception
+    entry = at.session_state["rl_by_target"]["stan obecny"]
+    before, after = entry["test"]
+    assert ("rl_weights" in at.session_state["raw"]) == (not entry["no_gain"])  # saved only when it is cheaper
+    assert any("Wynik:" in m.value for m in at.markdown)

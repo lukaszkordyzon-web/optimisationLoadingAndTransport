@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -381,8 +382,16 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
                        eval_episodes=3, callback=cb, advisor=advise, learn_advisor=True, learn_excavators=True)
         bar.empty()
         chart.empty()
-        store[which] = {"result": res, "key": mine_key}
-        if which == "stan obecny":
+        # the policy is used only if it really beats today's practice on full shifts (not just in training)
+        trial = _with_policy(sc, res)
+        seeds = [seed + 101 + i for i in range(4)]
+        before = np.mean([run_policy(base_yaml, s_, "natural").kpi["cost_per_t"] for s_ in seeds])
+        after = np.mean([run_policy(dump_scenario(trial), s_, "rl").kpi["cost_per_t"] for s_ in seeds])
+        no_gain = after > before * (1 - RL_MIN_GAIN)
+        store[which] = {"result": res, "key": mine_key, "no_gain": no_gain, "test": (before, after)}
+        if which == "stan obecny" and no_gain:
+            base_raw.pop("rl_weights", None)  # keep today's practice – nothing to gain here
+        elif which == "stan obecny":
             base_raw["rl_weights"] = res.weights
             if res.advisor:
                 base_raw.setdefault("advisor", {}).update(res.advisor)
@@ -401,22 +410,22 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
                 "podstawienia skraca załadunek o jeden cykl; „brak wozideł przez 5 min → przegarnij front”.  \n"
                 "Te komunikaty widać na żywo w panelu animacji poniżej (📱 Ekrany operatorów koparek).")
     res = entry["result"]
-    sc.rl_weights, sc.dispatch = res.weights, "rl"
-    if res.advisor:  # the advice settings the agent learned together with the dispatch
-        for key, val in res.advisor.items():
-            setattr(sc.advisor, key, val)
-    if res.excavators:  # …and how to run the excavators
-        for key, val in res.excavators.items():
-            setattr(sc.excavator_policy, key, val)
+    sc = _with_policy(sc, res)
     rl_yaml = dump_scenario(sc)
     today = run_policy(base_yaml, seed, "natural").kpi
     best = run_policy(rl_yaml, seed, "rl").kpi
+    if entry.get("no_gain"):
+        before, after = entry["test"]
+        st.warning(f"**Nauczony przydział nie obniża kosztu tej kopalni** ({after:.2f} zł/t wobec {before:.2f} zł/t dziś, "
+                   "średnio z 4 pełnych zmian) – zostaje przydział jak dziś, a polityka RL **nie jest zapisywana**.  \n"
+                   + "  \n".join(bottleneck(today)))
     st.markdown(f"#### Wynik: {which} + nauczony przydział vs dziś (ta sama zmiana)")
     _tiles(best, today)
     saving = (today["cost_per_t"] - best["cost_per_t"]) * best["hauled_t"]
-    st.success(f"**{best['cost_per_t']:.2f} zł/t** zamiast {today['cost_per_t']:.2f} zł/t i "
-               f"**{best['hauled_t'] - today['hauled_t']:+,.0f} t** urobku na zmianę – ok. **{saving:,.0f} zł** "
-               "oszczędności na zmianę.".replace(",", " "))
+    if not entry.get("no_gain"):
+        st.success(f"**{best['cost_per_t']:.2f} zł/t** zamiast {today['cost_per_t']:.2f} zł/t i "
+                   f"**{best['hauled_t'] - today['hauled_t']:+,.0f} t** urobku na zmianę – ok. **{saving:,.0f} zł** "
+                   "oszczędności na zmianę.".replace(",", " "))
     lessons = (explain_excavators(res.excavators) if res.excavators else []) + \
         (explain_advisor(res.advisor) if res.advisor else [])
     if lessons:
@@ -445,6 +454,42 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
 
 
 DAY, SCHEDULE = "Analiza zmiany", "Planowanie produkcji"
+
+
+RL_MIN_GAIN = 0.005  # the learned policy must be at least 0.5 % cheaper than today to be used
+
+
+def _with_policy(sc, res):
+    """The scenario with the learned dispatch, advice and excavator management."""
+    out = copy.deepcopy(sc)
+    out.rl_weights, out.dispatch = res.weights, "rl"
+    for key, val in (res.advisor or {}).items():
+        setattr(out.advisor, key, val)
+    for key, val in (res.excavators or {}).items():
+        setattr(out.excavator_policy, key, val)
+    return out
+
+
+def bottleneck(k: dict) -> list[str]:
+    """Why the dispatch has no room to improve: what limits the shift."""
+    out = []
+    cycles = max(k.get("cycles") or 1, 1)
+    busy = max(k.get("crushers") or [{}], key=lambda c: c.get("utilization", 0))
+    if busy.get("utilization", 0) >= 0.85:
+        out.append(f"🏭 Ogranicza **kruszarka {busy['crusher']}** – pracuje na {100 * busy['utilization']:.0f} %, wozidła "
+                   f"stoją pod koszem średnio **{60 * k['truck_queue_crusher_h'] / cycles:.0f} min na kurs**. Przydział "
+                   "wozideł nie przerobi więcej, niż przyjmie kruszarka.")
+        idle = [c["crusher"] for c in k.get("crushers", []) if c.get("utilization", 0) < 0.1]
+        if idle:
+            out.append(f"↪️ {', '.join(idle)} prawie stoi – sprawdź, z których usypów przyjmuje urobek.")
+    if k.get("other_delay_h", 0) > 0.3 * (k.get("trucks", 1) * 8):
+        out.append(f"⏸️ Dużą część czasu wozideł zajmują **przestoje z kalibracji** ({60 * k['other_delay_h'] / cycles:.0f} min "
+                   "na kurs) – ich przydział tego nie zmieni.")
+    if max((e.get("utilization", 0) for e in k.get("excavators", [])), default=0) >= 0.85:
+        out.append("⛏️ Koparki ładują prawie bez przerwy – ogranicza załadunek.")
+    out.append("💡 Realne dźwignie: **mniej wozideł** (ten sam urobek taniej – Planowanie produkcji → dobór floty), "
+               "druga linia kruszenia przyjmująca ten urobek, większa wydajność wąskiego gardła.")
+    return out
 
 
 def render_simple(raw: dict, set_raw, render_map_tab) -> None:

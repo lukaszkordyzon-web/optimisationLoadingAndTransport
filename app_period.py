@@ -715,6 +715,9 @@ def _goal_results(res: pd.DataFrame, goal: str, target_t: float, deadline) -> No
                 f"{r['koszt_na_t']:.2f} zł/t ({r['koszt_na_t'] - best['koszt_na_t']:+.2f} zł/t)").replace(",", " ")
         if goal == "deadline" and r["cel_osiagniety"] is not None:
             line += f", cel osiągnięty {r['cel_osiagniety'].strftime('%d.%m')}"
+        if r["koszt_na_t"] >= best["koszt_na_t"]:
+            line += (" – przy tym planie przydział wozideł nie ma pola manewru (zwykle ogranicza kruszarka albo "
+                     "przestoje), więc RL nic nie daje; różnica to losowość zmian.")
         st.info(line)
     # what limits production: if very different fleets give (almost) the same tonnes, it's the material
     top = res[(res["zmian_na_dobe"] == best["zmian_na_dobe"]) & (res["soboty"] == best["soboty"])]
