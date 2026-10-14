@@ -15,6 +15,7 @@ Dobór „jak inżynier” (`kopalnia_testowa.human_sizing`): kruszarka 400 t/h 
 ```
 PYTHONPATH=. python tools/walidacja/czulosc.py     # 1 400 zmian: 10 parametrów po kolei + siatka wozidła × kruszarka × odległość
 PYTHONPATH=. python tools/walidacja/polityki.py    # 4 sytuacje × nauka RL + 4 polityki × 30 tych samych zmian
+PYTHONPATH=. python tools/walidacja/kolejki.py     # rampy jednopasowe, kolejki pod koparkami: 4 polityki × 30 zmian
 PYTHONPATH=. python tools/walidacja/harmonogram.py # miesiąc: flota, wyczerpanie usypów, strzały, szansa realizacji, cel od kruszarek
 ```
 
@@ -67,6 +68,23 @@ Wniosek: RL robi to, za co go nagradzamy. Bez reguł (skład nadawy, przydział 
 których kopalnia nie może zrobić (porzucić poziom). Z regułami trzyma się ich; gdy kruszarka jest wąskim gardłem,
 realny zysk daje parkowanie wozideł, sam przydział przy dwóch koparkach – niewiele (w aplikacji taka polityka nie
 jest zapisywana, bo zysk < 0,5 %).
+
+## Kolejki pod koparkami i na mijankach (`kolejki.py`)
+
+Rampy jednopasowe z mijanką w połowie, kruszarka 800 t/h (nie jest gardłem), koparki z łyżką 3 m³, 6 wozideł, skład
+nadawy 50/50. Średnio z tych samych 30 zmian:
+
+| | jak dziś | system (heurystyka) | RL – przydział | RL + zalecenia prędkości |
+|---|---|---|---|---|
+| tony na zmianę | 4 138 | 4 451 | 4 442 | 4 384 |
+| zł/t | 19,33 | −0,56 | −0,58 | **−1,07** (28/30 zmian) |
+| wozidła w kolejce pod koparkami [h] | **7,4** | 4,2 | 4,0 | **3,7** |
+| czekanie na mijankach [h] / zatrzymań | 2,6 / 140 | 3,0 / 163 | 3,1 / 174 | 2,9 / 177 |
+| łyżka nabrana przed podstawieniem | 8 | 8 | 9 | **36** |
+
+Kolejki pod koparkami (2–3 wozidła pod jedną, gdy druga czeka) system i RL zmniejszają o połowę. Czekanie na
+mijankach **nie maleje** – więcej kursów to więcej spotkań na rampie, a żadna polityka nie bierze pod uwagę ruchu
+z naprzeciwka (to następny krok: cecha „kto jest na rampie” i zalecenie, kiedy ruszyć).
 
 ## Harmonogram
 
