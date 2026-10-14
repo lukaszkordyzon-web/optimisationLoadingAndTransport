@@ -72,19 +72,30 @@ jest zapisywana, bo zysk < 0,5 %).
 ## Kolejki pod koparkami i na mijankach (`kolejki.py`)
 
 Rampy jednopasowe z mijanką w połowie, kruszarka 800 t/h (nie jest gardłem), koparki z łyżką 3 m³, 6 wozideł, skład
-nadawy 50/50. Średnio z tych samych 30 zmian:
+nadawy 50/50. Zatrzymanie na mijance kosztuje też ruszenie (rozpędzanie). Średnio z tych samych 30 zmian:
 
 | | jak dziś | system (heurystyka) | RL – przydział | RL + zalecenia prędkości |
 |---|---|---|---|---|
-| tony na zmianę | 4 138 | 4 451 | 4 442 | 4 384 |
-| zł/t | 19,33 | −0,56 | −0,58 | **−1,07** (28/30 zmian) |
-| wozidła w kolejce pod koparkami [h] | **7,4** | 4,2 | 4,0 | **3,7** |
-| czekanie na mijankach [h] / zatrzymań | 2,6 / 140 | 3,0 / 163 | 3,1 / 174 | 2,9 / 177 |
-| łyżka nabrana przed podstawieniem | 8 | 8 | 9 | **36** |
+| tony na zmianę | 4 122 | 4 438 | 4 379 | 4 406 |
+| zł/t | 19,99 | −1,20 | **−1,33** (28/30 zmian) | −1,14 |
+| wozidła w kolejce pod koparkami [h] | **7,4** | 4,2 | 4,1 | **3,8** |
+| czekanie na mijankach [h] / zatrzymań | 2,8 / 146 | 3,2 / 171 | 3,3 / 173 | 3,3 / 182 |
 
-Kolejki pod koparkami (2–3 wozidła pod jedną, gdy druga czeka) system i RL zmniejszają o połowę. Czekanie na
-mijankach **nie maleje** – więcej kursów to więcej spotkań na rampie, a żadna polityka nie bierze pod uwagę ruchu
-z naprzeciwka (to następny krok: cecha „kto jest na rampie” i zalecenie, kiedy ruszyć).
+Kolejki pod koparkami (2–3 wozidła pod jedną, gdy druga czeka) system i RL zmniejszają o połowę. RL zna ruch na
+rampach (z planów jazdy wszystkich wozideł – w kopalni z GPS) i bierze go pod uwagę przy wyborze koparki.
+Zalecenie „zjedź wolniej, miniesz się bez zatrzymania” sprawdzone i **odrzucone**: przy stałym strumieniu pełnych
+wozideł pod górę liczbę spotkań wyznacza ruch i liczba mijanek, a wolniej jadący pusty dłużej blokuje odcinek.
+
+Infrastruktura (te same 30 zmian):
+
+| rampa | jak dziś: t / zł/t | system: t / zł/t |
+|---|---|---|
+| 1 pas, 1 mijanka | 4 122 / 19,99 | 4 438 / 18,78 |
+| 1 pas, 2 mijanki | 4 165 / 19,30 | 4 531 / 18,63 |
+| 1 pas, 3 mijanki | 4 218 / 19,23 | 4 568 / 18,56 |
+| 2 pasy | 4 307 / 19,68 | 4 637 / 18,43 |
+
+Przydział z informacją na rampie jednopasowej (4 438 t) daje więcej niż poszerzenie rampy przy pracy jak dziś (4 307 t).
 
 ## Harmonogram
 

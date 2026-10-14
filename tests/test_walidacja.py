@@ -75,3 +75,42 @@ def test_a_broken_excavator_is_known_from_the_radio():
     assert len(early) and (early["excavator"] == "K-2").all()
     waits = r.states[(r.states["state"] == "postoj_koparki") & (r.states["excavator"] == "K-1")]["duration_s"].sum()
     assert waits < 1800  # nobody stands for hours at the broken excavator
+
+
+def test_ramp_traffic_is_known_to_the_system():
+    """Plans of the trucks on single-lane ramps: an empty truck sent down meets the loaded one coming up."""
+    sc = make(single_lane=True, trucks=6, crusher_tph=800, bucket_m3=3.0, swing_s=30)
+    sc.dispatch, sc.rl_weights = "rl", [1.0] + [0.0] * 7 + [1.0]  # the learned policy reads the ramp traffic
+    sim = Simulation(sc, 3)
+    seen = []
+    orig = sim._ramp_wait_s
+
+    def spy(plan, me=None):
+        out = orig(plan, me)
+        seen.append(out[0])
+        return out
+    sim._ramp_wait_s = spy
+    sim.env.process(sim.crusher_process(sim.main))
+    for i, t in enumerate(sim.trucks):
+        sim.env.process(sim._delayed_start(t, sim.t_start + i * 30.0))
+    sim.env.run(until=3 * 3600)
+    assert seen and max(seen) > 0  # the dispatch saw a meeting on the ramp
+
+
+def test_a_stop_at_a_passing_bay_costs_pulling_away():
+    sc = make(single_lane=True, trucks=6, crusher_tph=800)
+    sc.dispatch = "natural"
+    r = simulate(sc, seed=5)
+    bays = r.states[r.states["state"] == "mijanka"]["duration_s"]
+    assert len(bays) and bays.min() >= 25 / 3.6 / (2 * 0.5) - 1e-6  # at least the time to pull away (empty)
+
+
+def test_loaded_truck_waits_only_for_one_already_on_the_stretch():
+    """Uphill (loaded) has priority; it stops at a bay only when an empty truck has already passed it."""
+    sc = make(single_lane=True, trucks=6, crusher_tph=800, bucket_m3=3.0, swing_s=30)
+    sc.dispatch = "natural"
+    st = simulate(sc, seed=5).states.sort_values(["truck", "start_s"])
+    st["prev"] = st.groupby("truck")["state"].shift(1)
+    bays = st[st["state"] == "mijanka"].groupby("prev")["duration_s"].agg(["count", "mean"])
+    assert bays.loc["jazda_pusty", "count"] > 4 * bays.loc["jazda_pelny", "count"]
+    assert bays.loc["jazda_pusty", "mean"] > bays.loc["jazda_pelny", "mean"]

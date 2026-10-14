@@ -16,7 +16,7 @@ import simpy
 
 from .config import REPAIR_SIGMA, Excavator, Scenario, TruckFleet, clock_to_s, truck_units
 from .site import blast_point, haversine_m
-from .physics import (crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_t, load_time_s, passes_per_truck,
+from .physics import (ACCEL_MS2, crusher_kwh_per_t, crusher_rate_tph, drill_blast_cost_per_t, load_time_s, passes_per_truck,
                       route_time_s, segment_time_s)
 
 CRUSHER_TICK_S = 10.0
@@ -202,6 +202,8 @@ class Simulation:
         self.dumped_t = 0.0
         self.pit_t = 0.0  # tonnes planned by trucks still on their way to / at the excavators
         self.excavator_moves_done: list[dict] = []
+        # when every truck now driving will be on which single-lane stretch (what GPS gives the system)
+        self.ramp_plans: dict[str, list] = {}
         self.goal_reached_at: float | None = None
         self.truck_parked_s = 0.0
         self.decisions = 0
@@ -666,9 +668,12 @@ class Simulation:
             total = sum(self.loaded_by_blast.values())
             deficit = (self.targets.get(ex.blast, 0.0) * total - self.loaded_by_blast[ex.blast]) / truck.fleet.payload_t
             deficit = float(np.clip(deficit, -10, 10))
+        ramp = 0.0
+        if self.ramp_plans and any(s_.section for s_ in route.segments):  # oncoming traffic on single-lane ramps
+            ramp = self._ramp_wait_s(self._ramp_plan(route, False, 0.0, truck.fleet, self.env.now), truck.id)[0]
         return [max(wait, 0.0) / 60, travel / 60, haul / 60, service / 60,
                 (ex.remaining_t - ex.committed_t) / initial, float(len(ex.pending)),
-                float(ex.cfg.id == truck.home_excavator), deficit]
+                float(ex.cfg.id == truck.home_excavator), deficit, ramp / 60]
 
     def dispatch(self, truck: TruckState) -> ExcavatorState | None:
         allowed = set(self.allowed_ids(truck.fleet))
@@ -723,6 +728,39 @@ class Simulation:
         grade = seg.grade_pct if forward else -seg.grade_pct
         return d, (1 if grade > 0.5 else -1 if grade < -0.5 else 0)
 
+    def _ramp_plan(self, route, forward: bool, load_t: float, fleet: TruckFleet, t0: float,
+                   pace: float = 1.0) -> list[tuple]:
+        """When a drive will be on each single-lane stretch: [(stretch, direction, slope, t_in, t_out)]."""
+        out, t = [], t0
+        rr, sc = self.sc.rolling_resistance_pct, self.sc
+        idx = range(len(route.segments)) if forward else reversed(range(len(route.segments)))
+        for k in idx:
+            seg = route.segments[k]
+            dur = (segment_time_s(seg, fleet, load_t > 0, rr, forward, load_t) * self.weather_factor
+                   * sc.calibration.travel_factor * pace)
+            if seg.section:
+                d, slope = self._dirs(seg, forward)
+                out.append((seg.section, d, slope, t, t + dur))
+            t += dur
+        return out
+
+    def _ramp_wait_s(self, plan: list[tuple], me: str | None = None) -> tuple[float, float | None]:
+        """Expected stops at passing bays on a planned drive (trucks coming up have priority):
+        (total wait, time from now until the first stop)."""
+        wait, first = 0.0, None
+        for key, d, slope, t_in, t_out in plan:
+            if slope > 0:
+                continue  # going up: the others give way
+            t_in, t_out = t_in + wait, t_out + wait
+            block = max((o_out for tid, other in self.ramp_plans.items() if tid != me
+                         for k2, d2, _s2, o_in, o_out in other
+                         if k2 == key and d2 == -d and o_in < t_out and o_out > t_in), default=None)
+            if block is not None and block > t_in:
+                if first is None:
+                    first = t_in - self.env.now
+                wait += block - t_in
+        return wait, first
+
     def _approach(self, truck: TruckState, seg, forward: bool, eta: float) -> None:
         d, slope = self._dirs(seg, forward)
         s = self._section(seg.section)
@@ -774,12 +812,15 @@ class Simulation:
         fuel_rate = (f.fuel_lph_empty + (f.fuel_lph_loaded - f.fuel_lph_empty) * share) * self.sc.calibration.fuel_factor
         start_state = self.env.now
         v = self.sc.variability
+        self.ramp_plans[truck.id] = self._ramp_plan(route, forward, load_t, f, self.env.now, pace)
         for pos, k in enumerate(idx):
             seg = route.segments[k]
             if seg.section:  # single-lane stretch: wait at the passing bay until the way is free
                 t_wait = self.env.now
                 yield from self._enter_section(truck, seg, forward, route, k, load_t)
                 if self.env.now > t_wait:
+                    # stopped at the bay: it has to pull away again (lost time against driving through)
+                    yield self.env.timeout(seg.speed_limit_kmh / 3.6 / (2 * ACCEL_MS2[load_t > 0]))
                     self._log_state(truck, {"pusty": "jazda_pusty", "miedzy": "przejazd_miedzy_usypami",
                                             "pelny": "jazda_pelny"}[leg], start_state, ex_id, end=t_wait)
                     self._log_state(truck, "mijanka", t_wait, ex_id)
@@ -826,6 +867,7 @@ class Simulation:
                 "hour_of_shift": start / 3600, "pace": pace, "start_s": start, "duration_s": dur + delay,
                 "physics_s": mean, "v_kmh": round(v_kmh, 1), "yield_s": delay,
             })
+        self.ramp_plans.pop(truck.id, None)
         state = {"pusty": "jazda_pusty", "miedzy": "przejazd_miedzy_usypami", "pelny": "jazda_pelny"}[leg]
         self._log_state(truck, state, start_state, ex_id)
 
@@ -1040,6 +1082,8 @@ class Simulation:
                 wait = self.predicted_finish(first, env.now + travel, service) - service - (env.now + travel)
                 wait -= sc.advisor.arrival_margin_s  # learned safety margin: better a bit early than late
                 pace_empty = 1 + min(sc.advisor.max_slowdown, max(0.0, wait) / travel)
+                # (driving down slower to pass oncoming trucks without a stop was tested: no gain with a steady
+                # stream of loaded trucks – stops at bays are set by the traffic and the number of bays)
             first.pending[truck.id] = (env.now + travel * pace_empty, service)
             cycle_start = env.now
 

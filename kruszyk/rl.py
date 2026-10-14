@@ -31,6 +31,7 @@ FEATURE_NAMES = [
     "wozidła już wysłane do koparki",
     "„własna” koparka kierowcy",
     "niedobór usypu względem udziału w nadawie [kursy]",
+    "przewidywane czekanie na mijankach [min]",
 ]
 EXCAVATOR_PARAMS = ["min. wozideł na koparkę", "ostatnia łyżka: min. wypełnienie", "ostatnia łyżka: min. kolejka",
                     "parking wozidła: próg kolejki [min]", "parking wozidła: min. udział floty w pracy"]

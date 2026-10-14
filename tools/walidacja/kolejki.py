@@ -71,3 +71,17 @@ if __name__ == "__main__":
     for _, name, lessons in out:
         if lessons:
             print(name, "\n  " + "\n  ".join(lessons))
+    # infrastructure instead of dispatch: how much one more passing bay / a second lane is worth
+    rows = []
+    for label, kw in (("1 pas, 1 mijanka", {}), ("1 pas, 2 mijanki", {"bays": 2}), ("1 pas, 3 mijanki", {"bays": 3}),
+                      ("2 pasy", {"single_lane": False})):
+        for disp in ("natural", "dynamic"):
+            for s_ in EVAL:
+                sc = make(**{**MINE, **kw})
+                sc.dispatch = disp
+                k = simulate(sc, seed=s_).kpi
+                rows.append({"rampa": label, "przydzial": disp, "t": k["hauled_t"], "zl_t": k["cost_per_t"],
+                             "mijanki_h": k["bay_wait_h"]})
+    infra = pd.DataFrame(rows).groupby(["rampa", "przydzial"], sort=False).mean(numeric_only=True).round(2)
+    infra.to_csv(OUT / "mijanki.csv")
+    print(infra.to_string())

@@ -19,7 +19,8 @@ BASE = {
     "grade_pct": 8.0, "flat_m": 400.0, "ramp1_m": 600.0, "ramp2_m": 500.0, "bench_m": 250.0,
     "frag": 0.3, "b1_t": 15_000.0, "b2_t": 15_000.0, "rain": 0.2, "breakdowns": True, "delay_min": 0.0,
     "shift_h": 8.0, "excavators": 2, "share_b1": 0.0,
-    "single_lane": False,  # ramps one lane wide, a passing bay in the middle of each
+    "single_lane": False,  # ramps one lane wide, with passing bays between equal stretches
+    "bays": 1,             # passing bays on each single-lane ramp
 }
 
 TRUCK = {"model": "CAT 770G (sztywnoramowe 36 t)", "payload_t": 36.0, "empty_mass_t": 33.6, "power_kw": 382,
@@ -39,7 +40,8 @@ def make_raw(**changes) -> dict:
         if not p["single_lane"]:
             return [_seg(name, length, g, 25)]
         # two single-lane stretches with a passing bay between them (uphill = loaded trucks have priority)
-        return [{**_seg(name, length / 2, g, 25), "section": f"{name}#{i}", "section_dir": 1} for i in (0, 1)]
+        n = int(p["bays"]) + 1
+        return [{**_seg(name, length / n, g, 25), "section": f"{name}#{i}", "section_dir": 1} for i in range(n)]
 
     lvl1 = [_seg("front", 30, 0, 15), _seg("poziom 1", p["bench_m"], 0, 30), *ramp("rampa 1", p["ramp1_m"]),
             _seg("droga do zakładu", p["flat_m"], 0, 40), _seg("plac_kruszarki", 30, 0, 15)]
