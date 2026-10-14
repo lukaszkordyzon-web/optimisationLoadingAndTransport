@@ -17,6 +17,8 @@ def kpi_row(k: dict) -> dict:
         "crushed_tph": k["crushed_tph"],
         "hauled_t": k["hauled_t"],
         "cost_per_t": k["cost_per_t"],
+        "cost_total": k["cost_total"],
+        "goal_t": k.get("goal_t") or 0.0,
         "objective": k.get("objective", k["cost_per_t"]),
         "goal_pct": k.get("goal_pct"),
         "excavator_utilization": sum(e["utilization"] for e in ex) / len(ex),

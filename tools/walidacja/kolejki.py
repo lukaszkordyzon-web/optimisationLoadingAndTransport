@@ -63,11 +63,14 @@ if __name__ == "__main__":
         out = list(ex.map(job, ["natural", "dynamic", False, True]))
     df = pd.DataFrame([r for rows, _, _ in out for r in rows])
     df.to_csv(OUT / "kolejki.csv", index=False)
-    print(df.groupby("polityka", sort=False).mean(numeric_only=True).drop(columns="seed").round(2).to_string())
+    df["koszt"] = df["zl_t"] * df["t"]
+    tab = df.groupby("polityka", sort=False).mean(numeric_only=True).drop(columns=["seed", "koszt"])
+    tab["zl_t"] = df.groupby("polityka", sort=False)["koszt"].sum() / df.groupby("polityka", sort=False)["t"].sum()
+    print(tab.round(2).to_string())
     base = df[df.polityka == "jak dziś (ludzie)"].set_index("seed")["zl_t"]
     for name in df.polityka.unique()[1:]:
         d = df[df.polityka == name].set_index("seed")["zl_t"] - base
-        print(f"{name}: {d.mean():+.2f} zł/t vs jak dziś, lepiej na {(d < 0).sum()}/30 zmianach")
+        print(f"{name}: mediana {d.median():+.2f} zł/t vs jak dziś, lepiej na {(d < 0).sum()}/30 zmianach")
     for _, name, lessons in out:
         if lessons:
             print(name, "\n  " + "\n  ".join(lessons))
@@ -82,6 +85,11 @@ if __name__ == "__main__":
                 k = simulate(sc, seed=s_).kpi
                 rows.append({"rampa": label, "przydzial": disp, "t": k["hauled_t"], "zl_t": k["cost_per_t"],
                              "mijanki_h": k["bay_wait_h"]})
-    infra = pd.DataFrame(rows).groupby(["rampa", "przydzial"], sort=False).mean(numeric_only=True).round(2)
+    inf = pd.DataFrame(rows)
+    inf["koszt"] = inf["zl_t"] * inf["t"]
+    infra = inf.groupby(["rampa", "przydzial"], sort=False).agg(t=("t", "mean"), koszt=("koszt", "sum"),
+                                                                 suma_t=("t", "sum"), mijanki_h=("mijanki_h", "mean"))
+    infra["zl_t"] = infra.pop("koszt") / infra.pop("suma_t")  # all costs / all tonnes (not a mean of shifts)
+    infra = infra.round(2)
     infra.to_csv(OUT / "mijanki.csv")
     print(infra.to_string())

@@ -57,14 +57,18 @@ def test_today_practice_has_no_system_knowledge():
     assert (r.segments["pace"] == 1.0).all()  # nobody slows down on advice
 
 
-def test_drivers_mostly_go_back_to_their_own_excavator():
+def test_drivers_keep_to_the_excavator_the_foreman_gave_them():
     sc = _natural(trucks=4, breakdowns=False)
     sim = Simulation(sc, 2)
     home = {t.id: t.home_excavator for t in sim.trucks}
     loads = sim.run().loads
-    share = (loads["excavator"] == loads["truck"].map(home)).mean()
-    # natural_switch_prob 25 %, half of the switches land on the own excavator again -> ~87 %
-    assert 0.78 < share < 0.95
+    assert (loads["excavator"] == loads["truck"].map(home)).all()
+    sc = _natural(trucks=4, breakdowns=False)
+    sc.natural_switch_prob = 0.25  # a mine where drivers do switch on their own
+    sim = Simulation(sc, 2)
+    loads = sim.run().loads
+    share = (loads["excavator"] == loads["truck"].map({t.id: t.home_excavator for t in sim.trucks})).mean()
+    assert 0.78 < share < 0.95  # 25 % switches, half of them land on the own excavator again
 
 
 def test_a_broken_excavator_is_known_from_the_radio():

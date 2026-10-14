@@ -417,8 +417,11 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
         # the policy is used only if it really beats today's practice on full shifts (not just in training)
         trial = _with_policy(sc, res)
         seeds = [seed + 101 + i for i in range(4)]
-        before = np.mean([run_policy(base_yaml, s_, "natural").kpi["objective"] for s_ in seeds])
-        after = np.mean([run_policy(dump_scenario(trial), s_, "rl").kpi["objective"] for s_ in seeds])
+        from kruszyk.optimize import kpi_row
+        from kruszyk.rl import aggregate
+
+        before = aggregate([kpi_row(run_policy(base_yaml, s_, "natural").kpi) for s_ in seeds])["objective"]
+        after = aggregate([kpi_row(run_policy(dump_scenario(trial), s_, "rl").kpi) for s_ in seeds])["objective"]
         no_gain = after > before * (1 - RL_MIN_GAIN)
         store[which] = {"result": res, "key": mine_key, "no_gain": no_gain, "test": (before, after)}
         if which == "stan obecny" and no_gain:

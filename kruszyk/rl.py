@@ -106,9 +106,22 @@ def evaluate(sc: Scenario, policy: str, seeds: list[int], theta=None, shift_hour
     rows = [kpi_row(simulate(v, seed=s).kpi) for s in seeds]
     df = pd.DataFrame(rows)
     out = df.mean(numeric_only=True).to_dict()
-    out["cost_per_t"] = float(df["cost_per_t"].fillna(1e6).mean())  # a policy that hauls nothing is the worst
-    out["objective"] = float(df["objective"].fillna(1e6).mean())  # cost per tonne, worse when the goal is missed
+    out.update(aggregate(rows))
     return out
+
+
+def aggregate(rows: list[dict]) -> dict:
+    """Cost per tonne over several shifts = all costs / all tonnes (one shift with a long crusher breakdown and
+    a few hundred tonnes must not outweigh the rest, as a mean of per-shift zł/t would); the objective is that,
+    made worse by the share of the shift goal not reached."""
+    t = sum(r["hauled_t"] for r in rows)
+    cost = sum(r["cost_total"] for r in rows)
+    if t <= 0:
+        return {"cost_per_t": 1e6, "objective": 1e6}  # a policy that hauls nothing is the worst
+    goal = sum(r.get("goal_t") or 0.0 for r in rows)
+    short = max(0.0, goal - t) / goal if goal else 0.0
+    return {"cost_per_t": cost / t, "objective": cost / t * (1 + 3 * short)}
+
 
 
 @dataclass

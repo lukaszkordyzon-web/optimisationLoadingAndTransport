@@ -667,12 +667,22 @@ class Simulation:
         ids = list(fleet.blend) or list(fleet.excavators)
         return ids or [e.id for e in self.sc.excavators]
 
+    def _after_windows(self, ex: ExcavatorState, t: float) -> float:
+        """The excavator's planned stops (breaks, blasting, refuelling, moves) push a loading past them."""
+        moved = True
+        while moved:
+            moved = False
+            for a, b, r in ex.down:
+                if r != "awaria" and a <= t < b:
+                    t, moved = b, True
+        return t
+
     def predicted_finish(self, ex: ExcavatorState, arrival: float, service: float) -> float:
         """When would a truck arriving at `arrival` be loaded, given the trucks already sent there."""
-        t = max(self.env.now, ex.busy_until)
+        t = self._after_windows(ex, max(self.env.now, ex.busy_until))
         for arr, srv in sorted(ex.pending.values()):
-            t = max(t, arr) + srv
-        return max(t, arrival) + service
+            t = self._after_windows(ex, max(t, arr)) + srv
+        return self._after_windows(ex, max(t, arrival)) + service
 
     def features(self, truck: TruckState, ex: ExcavatorState) -> list[float]:
         """What the dispatcher knows about sending `truck` to `ex` now (RL state for one action)."""
@@ -704,14 +714,17 @@ class Simulation:
             return None
         # parked excavators are skipped – unless they are the only ones this truck may serve
         active = [ex for ex in candidates if not ex.parked] or candidates
+        # a breakdown is known to everybody (radio) – the system too: no truck is sent to a broken excavator
+        active = [ex for ex in active if not self._broken(ex)] or active
         self.decisions += 1
         mode = self.sc.dispatch
         home = self.excavators.get(truck.home_excavator)
         if mode in ("fixed", "natural"):
-            # a breakdown is reported on the radio: drivers go elsewhere (they don't know where it is better)
+            # a breakdown or a finished pile is reported on the radio: the foreman sends the trucks to another
+            # excavator (without knowing where they would be loaded sooner)
             working = [ex for ex in active if not self._broken(ex)] or active
             if home in working:
-                # natural: drivers mostly go back to "their" excavator, sometimes elsewhere, without information
+                # drivers go back to the excavator the foreman gave them (natural_switch_prob: switching on their own)
                 if mode == "fixed" or self.rng.random() >= self.sc.natural_switch_prob:
                     return home
             return working[int(self.rng.integers(len(working)))]

@@ -110,7 +110,8 @@ def step_rules(raw: dict, set_raw) -> None:
     tids = [t["id"] for t in trucks]
     with card("rules_trucks"):
         st.markdown("#### 🚚 Wozidła – kto dokąd jeździ")
-        st.caption("Przypisz wozidła do koparek. Nieprzypisane są **wolne** – jeżdżą tam, gdzie trzeba. "
+        st.caption("Przypisz wozidła do koparek tak, jak robi to sztygar. Nieprzypisane sztygar dzieli po równo "
+                   "między koparki. "
                    "🔒 = przydział sztywny (np. decyzja sztygara, osobny materiał); bez 🔒 RL może przesunąć wozidło, "
                    "gdy pod jedną koparką robi się kolejka, a druga czeka.")
         assign, locks = {}, {}
@@ -122,11 +123,12 @@ def step_rules(raw: dict, set_raw) -> None:
             locked = any(t.get("assign_locked", True) for t in trucks if t["id"] in now) if now else False
             locks[e["id"]] = c[1].toggle("🔒", locked, key=k(f"lock_{e['id']}"), help="przydział sztywny")
         free = [t for t in tids if not any(t in v for v in assign.values())]
-        st.caption(("Wolne: **" + ", ".join(free) + "**") if free else "Wszystkie wozidła są przypisane.")
-        switch = st.slider("Jak często kierowca dziś sam jedzie do innej koparki [%]", 0, 100,
-                           int(round(100 * float(raw.get("natural_switch_prob", 0.25)))), 5, key=k("switch"),
-                           help="dotyczy wozideł z kilkoma koparkami do wyboru i wolnych; bez systemu kierowca zwykle "
-                                "wraca do „swojej” koparki")
+        st.caption(("Bez przypisania (podział po równo): **" + ", ".join(free) + "**") if free
+                   else "Wszystkie wozidła są przypisane.")
+        switch = st.slider("Czy kierowcy sami (bez polecenia sztygara) jeżdżą do innej koparki? [% kursów]", 0, 100,
+                           int(round(100 * float(raw.get("natural_switch_prob", 0.0)))), 5, key=k("switch"),
+                           help="zwykle 0: kierowca jeździ tam, gdzie przypisał go sztygar; zmienia miejsce przy awarii "
+                                "koparki albo gdy usyp się skończy (polecenie przez radio)")
 
     # ---------------------------------------------------------------- feed mix
     with card("rules_feed"):

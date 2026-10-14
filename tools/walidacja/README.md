@@ -46,56 +46,62 @@ zawsze w trybie `natural`. Kierowca i operator wiedzą tylko to, co widzą i sł
 
 | wiedzą | nie wiedzą |
 |---|---|
-| swoja koparka (przydział sztygara), z którą wracają po wyładunku | gdzie jest kolejka pod koparkami |
-| czasem (25 %) sami jadą do innej – losowo | ile wozideł jest w drodze i kiedy koparka będzie wolna |
-| awaria koparki (radio) – jadą do innej, losowo | prognozy, zalecane prędkości, kiedy parkować |
+| swoja koparka (przydział sztygara), do której wracają po wyładunku | gdzie jest kolejka pod koparkami |
+| nie zmieniają koparki sami – tylko na polecenie sztygara | ile wozideł jest w drodze i kiedy koparka będzie wolna |
+| awaria koparki, koniec usypu (radio) – sztygar kieruje do innej | prognozy, zalecane prędkości, kiedy parkować |
 | usyp się skończył, przerwa, strzelanie, koniec zmiany | ile ton jest w drodze (cel zmiany – dopiero gdy waga go pokaże) |
 | przy kilku kruszarkach: najbliższa, chyba że widać wyraźnie dłuższą kolejkę | |
 
 Zalecenia, parkowanie, pomijanie łyżki i odstawianie koparek działają tylko w trybie systemu (`dynamic`) i RL – nawet
 jeśli w pliku kopalni zapisano nauczoną politykę (testy w `tests/test_walidacja.py`).
 
-## Polityki na tych samych 30 zmianach (zł/t; różnica do „jak dziś”)
+## Polityki na tych samych 30 zmianach
 
-| sytuacja | jak dziś | system (heurystyka) | RL | czego RL się nauczył |
-|---|---|---|---|---|
-| A – kruszarka gardłem (6 wozideł) | 19,57 | −0,12 | **−1,08** (29/30 zmian) | parkowanie: paliwo/t −38 %, kolejka 26 h → 7 h |
-| B – transport gardłem | 19,43 | −1,08 | **−1,15** (29/30) | wszystkie wozidła na bliższy poziom |
-| C – zrównoważona | 16,15 | −0,87 | **−0,91** (29/30) | jw. – poziom 2 porzucony |
-| D – jak C + skład nadawy 50/50 | 16,46 | **+0,85** (łamie skład: 91 % z B1) | **−0,05** (27/30; skład 51/49) | trzyma regułę; zysk z przydziału mały |
+„Jak dziś” = przydział sztygara (kierowca nie zmienia koparki sam). Koszt na tonę liczony jako **wszystkie koszty /
+wszystkie tony** z 30 zmian – średnia z zł/t pojedynczych zmian jest fałszywa, bo jedna zmiana z wielogodzinną
+awarią kruszarki (250 t, ponad 100 zł/t) przeważa resztę.
+
+| sytuacja | jak dziś | system (heurystyka) | RL | lepiej na | czego RL się nauczył |
+|---|---|---|---|---|---|
+| A – kruszarka gardłem (6 wozideł) | 19,54 | −0,8 % | **−6,6 %** | 30/30 | parkowanie: paliwo/t −38 %, kolejka pod koszem 26 h → 7 h |
+| B – transport gardłem | 19,09 | −4,9 % | **−4,9 %** | 29/30 | wszystkie wozidła na bliższy poziom |
+| C – zrównoważona | 15,86 | −4,2 % | **−4,9 %** | 29/30 | jw. – poziom 2 porzucony |
+| D – jak C + skład nadawy 50/50 | 16,30 | **+5,5 %** (łamie skład: 90 % z B1) | **−0,8 %** | 28/30 | trzyma regułę (51/49) |
 
 Wniosek: RL robi to, za co go nagradzamy. Bez reguł (skład nadawy, przydział 🔒, cel zmiany) „optymalizuje” rzeczy,
 których kopalnia nie może zrobić (porzucić poziom). Z regułami trzyma się ich; gdy kruszarka jest wąskim gardłem,
-realny zysk daje parkowanie wozideł, sam przydział przy dwóch koparkach – niewiele (w aplikacji taka polityka nie
-jest zapisywana, bo zysk < 0,5 %).
+realny zysk daje parkowanie wozideł, sam przydział przy dwóch koparkach i dobrym przydziale sztygara – niewiele.
 
 ## Kolejki pod koparkami i na mijankach (`kolejki.py`)
 
 Rampy jednopasowe z mijanką w połowie, kruszarka 800 t/h (nie jest gardłem), koparki z łyżką 3 m³, 6 wozideł, skład
-nadawy 50/50. Zatrzymanie na mijance kosztuje też ruszenie (rozpędzanie). Średnio z tych samych 30 zmian:
+nadawy 50/50. Zatrzymanie na mijance kosztuje też ruszenie (rozpędzanie). Te same 30 zmian:
 
-| | jak dziś | system (heurystyka) | RL – przydział | RL + zalecenia prędkości |
+| | jak dziś (sztygar) | system (heurystyka) | RL – przydział | RL + zalecenia prędkości |
 |---|---|---|---|---|
-| tony na zmianę | 4 122 | 4 438 | 4 379 | 4 406 |
-| zł/t | 19,99 | −1,20 | **−1,33** (28/30 zmian) | −1,14 |
-| wozidła w kolejce pod koparkami [h] | **7,4** | 4,2 | 4,1 | **3,8** |
-| czekanie na mijankach [h] / zatrzymań | 2,8 / 146 | 3,2 / 171 | 3,3 / 173 | 3,3 / 182 |
+| tony na zmianę | 4 399 | 4 442 | 4 400 | **4 476 (+1,7 %)** |
+| zł/t (koszty / tony) | 15,22 | −1,0 % | −1,3 % | **−2,1 %** (27/30 zmian) |
+| wozidła w kolejce pod koparkami [h] | 4,9 | 4,3 | 4,4 | **3,6** |
+| czekanie na mijankach [h] | 3,2 | 3,3 | 3,3 | 3,4 |
+| łyżka nabrana przed podstawieniem | 7 | 8 | 8 | **32** |
 
-Kolejki pod koparkami (2–3 wozidła pod jedną, gdy druga czeka) system i RL zmniejszają o połowę. RL zna ruch na
-rampach (z planów jazdy wszystkich wozideł – w kopalni z GPS) i bierze go pod uwagę przy wyborze koparki.
-Zalecenie „zjedź wolniej, miniesz się bez zatrzymania” sprawdzone i **odrzucone**: przy stałym strumieniu pełnych
-wozideł pod górę liczbę spotkań wyznacza ruch i liczba mijanek, a wolniej jadący pusty dłużej blokuje odcinek.
+Przy stałym przydziale sztygara kolejki pod koparkami są umiarkowane; system i RL skracają je o 10–25 %, najwięcej
+daje zapowiedź dla operatora (łyżka gotowa, gdy wozidło podjeżdża). Losowe zmiany koparki przez kierowców (założenie
+z pierwszej wersji) robiły kolejki 7,4 h – w rzeczywistości kierowcy jeżdżą tam, gdzie każe sztygar.
+RL zna ruch na rampach (z planów jazdy wszystkich wozideł – w kopalni z GPS) i bierze go pod uwagę przy wyborze
+koparki. Zalecenie „zjedź wolniej, miniesz się bez zatrzymania” sprawdzone i **odrzucone**: przy stałym strumieniu
+pełnych wozideł pod górę liczbę spotkań wyznacza ruch i liczba mijanek.
 
-Infrastruktura (te same 30 zmian):
+Infrastruktura (te same 30 zmian, koszty / tony):
 
 | rampa | jak dziś: t / zł/t | system: t / zł/t |
 |---|---|---|
-| 1 pas, 1 mijanka | 4 122 / 19,99 | 4 438 / 18,78 |
-| 1 pas, 2 mijanki | 4 165 / 19,30 | 4 531 / 18,63 |
-| 1 pas, 3 mijanki | 4 218 / 19,23 | 4 568 / 18,56 |
-| 2 pasy | 4 307 / 19,68 | 4 637 / 18,43 |
+| 1 pas, 1 mijanka | 4 399 / 15,22 | 4 442 / 15,07 |
+| 1 pas, 2 mijanki | 4 470 / 15,09 | 4 531 / 14,91 |
+| 1 pas, 3 mijanki | 4 508 / 15,01 | 4 586 / 14,81 |
+| 2 pasy | 4 610 / 14,81 | 4 639 / 14,71 |
 
-Przydział z informacją na rampie jednopasowej (4 438 t) daje więcej niż poszerzenie rampy przy pracy jak dziś (4 307 t).
+Druga mijanka: +1,6 % ton; drugi pas: +4,8 %. Przy jednym pasie więcej daje infrastruktura niż sam przydział.
 
 Zasady na odcinkach jednopasowych – takie same dla wozideł i aut osobowych (sztygar, ekipa strzałowa, cysterna):
 jadący pod górę ma pierwszeństwo; kto już minął mijankę i jest na odcinku, jedzie pierwszy (jadący pod górę czeka na
@@ -123,3 +129,9 @@ Zatrzymanie kosztuje ruszenie. Test: nigdy dwa pojazdy w przeciwnych kierunkach 
    teraz wiedza systemu działa tylko w trybie systemu i RL.
 5. Przy awarii „swojej” koparki kierowcy czekali pod nią godzinami – teraz (radio) jadą do innej. Baza „jak dziś”
    jest przez to lepsza o ~2 %, a przewaga RL mniejsza – i uczciwa.
+6. Kierowcy w „jak dziś” zmieniali koparkę sami w 25 % kursów – nierealne; teraz jeżdżą tylko tam, gdzie przypisał
+   ich sztygar (zmiana na polecenie: awaria, koniec usypu). Da się to zmienić w kroku „Plan zmiany”.
+7. System i RL nie wiedziały o awarii koparki (przewidywały, że jest wolna) – wysyłały tam wozidła; teraz wiedzą
+   (co najmniej tyle, co ludzie z radia), a planowane postoje (przerwy, strzelanie, tankowanie) są w prognozie.
+8. Koszt na tonę z wielu zmian (uczenie RL, sprawdzenie przed zapisem polityki, raporty) – wszystkie koszty / wszystkie
+   tony zamiast średniej z zł/t zmian.

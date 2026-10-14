@@ -384,7 +384,7 @@ class Scenario:
     #   dynamic – system heuristic: where the truck will be loaded soonest
     #   rl      – policy learned by reinforcement learning (rl_weights)
     dispatch: str = "dynamic"
-    natural_switch_prob: float = 0.25
+    natural_switch_prob: float = 0.0  # drivers keep to the excavator the foreman gave them (raise if they switch on their own)
     rl_weights: list | None = None
     seed: int = 42
     variability: Variability = field(default_factory=Variability)
@@ -573,7 +573,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         excavator_policy=_build(ExcavatorPolicy, raw.get("excavator_policy", {})),
         site=raw.get("site"),
         links=_routes(raw.get("links")),
-        natural_switch_prob=raw.get("natural_switch_prob", 0.25),
+        natural_switch_prob=raw.get("natural_switch_prob", 0.0),
         rl_weights=raw.get("rl_weights"),
         planned_blasts=[dict(p) for p in raw.get("planned_blasts") or []],
         crushers_extra=[_build(Crusher, c) for c in raw.get("crushers_extra") or []],
