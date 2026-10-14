@@ -39,7 +39,7 @@ def step_calibration(raw: dict, sc, set_raw) -> None:
                 "harmonogram liczą na **Waszej** kopalni, a nie na przykładzie. Wymagana jest tylko produkcja na "
                 "zmianę; każda kolejna liczba poprawia dokładność.")
     if sc is None:
-        st.info("Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia dziś**.")
+        st.info("Najpierw opisz i zapisz kopalnię w kroku **① Stan wyjściowy kopalni**.")
         return
     old = dict(sc.calibration.measured)
     with card("cal_in"):

@@ -508,7 +508,7 @@ def _decisions(k: dict, today: dict, sc) -> None:
         st.markdown("**🔀 Zmiany przydziału względem reguł** (wozidła bez 🔒, kursy do innej koparki niż przypisana):  \n"
                     + "  \n".join(lines))
     elif any(f.excavators and not f.assign_locked for f in sc.trucks):
-        st.caption("🔀 Polityka nie zmieniła przydziału wozideł – reguły zmiany są tu dobre.")
+        st.caption("🔀 Polityka nie zmieniła przydziału wozideł – plan zmiany jest tu dobry.")
 
 
 DAY, SCHEDULE = "Analiza zmiany", "Planowanie produkcji"
@@ -578,9 +578,9 @@ def render_simple(raw: dict, set_raw, render_map_tab) -> None:
 
             step_period(raw, yaml_text, seed)
         return
-    st.caption("Kolejno: kopalnia → reguły → organizacja zmiany → kalibracja → odtworzenie zmiany → optymalizacja RL. "
+    st.caption("Kolejno: stan wyjściowy kopalni → plan zmiany → organizacja zmiany → kalibracja → odtworzenie zmiany → optymalizacja RL. "
                "Wszystkie parametry: **Tryb zaawansowany** (panel boczny).")
-    tabs = st.tabs(["① Kopalnia dziś", "② Reguły zmiany", "③ Organizacja zmiany", "④ Kalibracja", "⑤ Jak było dziś",
+    tabs = st.tabs(["① Stan wyjściowy kopalni", "② Plan zmiany (reguły)", "③ Organizacja zmiany", "④ Kalibracja", "⑤ Jak było dziś",
                     "⑥ Optymalizacja RL"])
     with tabs[0]:
         render_map_tab(raw, set_raw, simple=True, schedule=False)

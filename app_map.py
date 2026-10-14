@@ -1838,7 +1838,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         except ValueError as e:
             c2.error(str(e))
     if st.session_state.pop("map_msg", None):
-        st.success("✅ Kopalnia zapisana. Dalej: **② Reguły zmiany**, **③ Organizacja zmiany** i **④ Kalibracja**." if simple else
+        st.success("✅ Kopalnia zapisana. Dalej: **② Plan zmiany (reguły)**, **③ Organizacja zmiany** i **④ Kalibracja**." if simple else
                    "Scenariusz zaktualizowany z mapy – zobacz zakładki „Scenariusz” i „Wyniki zmiany”.")
     if raw_for_build.get("site") and any("path" in r for r in raw_for_build["routes"].values()):
         from kruszyk.physics import curve_speed_kmh

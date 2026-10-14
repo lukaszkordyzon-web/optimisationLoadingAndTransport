@@ -38,7 +38,7 @@ def step_rules(raw: dict, set_raw) -> None:
     from kruszyk.config import expand_trucks
     from kruszyk.site import site_to_scenario
 
-    st.markdown("### ② Reguły zmiany")
+    st.markdown("### ② Plan zmiany (reguły)")
     st.markdown("Jak dziś pracuje zmiana: **ile ma dać**, **która koparka gdzie ładuje** i **które wozidła dokąd "
                 "jeżdżą**. To punkt odniesienia dla „Jak było dziś”. Optymalizacja RL trzyma się reguł oznaczonych "
                 "🔒, a pozostałe może zmienić, jeśli tak jest taniej – i pokaże, co zmieniła.")
@@ -46,7 +46,7 @@ def step_rules(raw: dict, set_raw) -> None:
     excavators = site.get("excavators", [])
     piles = [p["id"] for p in site.get("piles", [])]
     if not excavators or not piles:
-        st.info("Najpierw narysuj kopalnię w kroku **① Kopalnia dziś** (usypy, koparki, drogi) i zapisz ją.")
+        st.info("Najpierw narysuj kopalnię w kroku **① Stan wyjściowy kopalni** (usypy, koparki, drogi) i zapisz ją.")
         return
     ver = st.session_state.get("ver", 0)
     k = lambda name: f"rules_{name}_{ver}"  # noqa: E731

@@ -174,7 +174,7 @@ with st.sidebar:
         set_raw(yaml.safe_load(p[choice].read_text(encoding="utf-8")), new_mine=True)
         st.rerun()
     with st.expander("🆕 Nowy projekt"):
-        st.caption("Pusta kopalnia: mapę, drogi, usypy, maszyny i kruszarki opisujesz od zera (krok ① Kopalnia dziś). "
+        st.caption("Pusta kopalnia: mapę, drogi, usypy, maszyny i kruszarki opisujesz od zera (krok ① Stan wyjściowy kopalni). "
                    "Ustawienia zmiany, kosztów i losowości są typowe – do poprawienia. **Bieżąca kopalnia zostanie "
                    "zamknięta** – zapisz ją wcześniej do pliku.")
         new_name = st.text_input("Nazwa kopalni", "", key="new_project_name", placeholder="np. Kopalnia Wapienia Zawada")
