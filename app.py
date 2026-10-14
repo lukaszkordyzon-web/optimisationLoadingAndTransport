@@ -39,7 +39,7 @@ st.set_page_config(page_title="Kruszyk – załadunek, transport, kruszenie", pa
 
 
 # ------------------------------------------------------------------ state
-DEFAULT_SCENARIO = "kruszyk_kopalnia"  # the mine opened at start
+DEFAULT_SCENARIO = "kruszyk_demo_zakrzowek"  # the mine opened at start
 
 
 def presets() -> dict[str, Path]:

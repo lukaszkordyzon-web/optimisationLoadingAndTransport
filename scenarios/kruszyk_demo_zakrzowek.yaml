@@ -1,6 +1,6 @@
 # Projekt demonstracyjny na terenie dawnego kamieniołomu Zakrzówek (Kraków; nieczynny, bez operatora).
 # Wszystkie obiekty i dane są fikcyjne – typowe wartości dla średniej kopalni wapienia (1,5 mln t/rok).
-# Generuje: python tools/make_demo_project.py
+# Drogi, usypy i obszary wyrysowane na mapie; scenariusz startowy aplikacji.
 shift_hours: 8.0
 seed: 42
 loose_density_t_m3: 1.7
@@ -40,11 +40,17 @@ traffic:
   light_speed_kmh: 30.0
 inspection:
   enabled: false
+  start: '11:25'
+  stops:
+  - K-1
+  stop_min: 10.0
 refueling:
   truck_reserve_pct: 15.0
   truck_refuel_min: 10.0
   excavator_refuel_min: 20.0
-  at_parking: false
+  at_parking: true
+  tanker_times:
+  - '13:00'
 spotting:
   times: {}
   floor_speed_kmh: 10.0
@@ -53,18 +59,80 @@ pacing:
   max_slowdown: 0.25
 name: Kamieniołom Demo – Zakrzówek (dane fikcyjne)
 dispatch: natural
-blasts: []
-excavators: []
+blasts:
+- id: U-01
+  tonnage_t: 10000.0
+  fragmentation: 0.3
+  material: wapień
+  loose_density_t_m3: 1.7
+  psd:
+  - - 10.0
+    - 2.7
+  - - 25.0
+    - 7.8
+  - - 50.0
+    - 17.1
+  - - 100.0
+    - 35.0
+  - - 200.0
+    - 62.8
+  - - 300.0
+    - 80.0
+  - - 500.0
+    - 94.9
+  - - 800.0
+    - 99.5
+  - - 1000.0
+    - 99.9
+  - - 1200.0
+    - 100.0
+- id: U-02
+  tonnage_t: 7000.0
+  fragmentation: 0.3
+  material: wapień
+  loose_density_t_m3: 1.7
+  psd:
+  - - 10.0
+    - 1.0
+  - - 25.0
+    - 3.3
+  - - 50.0
+    - 8.1
+  - - 100.0
+    - 19.3
+  - - 200.0
+    - 41.9
+  - - 300.0
+    - 60.7
+  - - 500.0
+    - 84.3
+  - - 800.0
+    - 96.9
+  - - 1000.0
+    - 99.1
+  - - 1200.0
+    - 99.7
+excavators:
+- id: K-1
+  bucket_m3: 4.5
+  swing_cycle_s: 27.0
+  blast: U-01
+  route: T-K-1
+- id: K-2
+  bucket_m3: 4.5
+  swing_cycle_s: 27.0
+  blast: U-01
+  route: T-K-2
 trucks:
 - model: wozidło sztywnoramowe 38 t
   payload_t: 38.0
   empty_mass_t: 33.5
-  power_kw: 380
-  max_speed_kmh: 60
+  power_kw: 380.0
+  max_speed_kmh: 45.0
   drive_efficiency: 0.75
-  fuel_lph_loaded: 48
-  fuel_lph_empty: 26
-  fuel_lph_idle: 8
+  fuel_lph_loaded: 48.0
+  fuel_lph_empty: 26.0
+  fuel_lph_idle: 8.0
   tank_l: 550.0
   id: WZ-01
   count: 1
@@ -72,12 +140,12 @@ trucks:
 - model: wozidło sztywnoramowe 38 t
   payload_t: 38.0
   empty_mass_t: 33.5
-  power_kw: 380
-  max_speed_kmh: 60
+  power_kw: 380.0
+  max_speed_kmh: 45.0
   drive_efficiency: 0.75
-  fuel_lph_loaded: 48
-  fuel_lph_empty: 26
-  fuel_lph_idle: 8
+  fuel_lph_loaded: 48.0
+  fuel_lph_empty: 26.0
+  fuel_lph_idle: 8.0
   tank_l: 550.0
   id: WZ-02
   count: 1
@@ -85,12 +153,12 @@ trucks:
 - model: wozidło sztywnoramowe 38 t
   payload_t: 38.0
   empty_mass_t: 33.5
-  power_kw: 380
-  max_speed_kmh: 60
+  power_kw: 380.0
+  max_speed_kmh: 45.0
   drive_efficiency: 0.75
-  fuel_lph_loaded: 48
-  fuel_lph_empty: 26
-  fuel_lph_idle: 8
+  fuel_lph_loaded: 48.0
+  fuel_lph_empty: 26.0
+  fuel_lph_idle: 8.0
   tank_l: 550.0
   id: WZ-03
   count: 1
@@ -98,12 +166,12 @@ trucks:
 - model: wozidło sztywnoramowe 38 t
   payload_t: 38.0
   empty_mass_t: 33.5
-  power_kw: 380
-  max_speed_kmh: 60
+  power_kw: 380.0
+  max_speed_kmh: 45.0
   drive_efficiency: 0.75
-  fuel_lph_loaded: 48
-  fuel_lph_empty: 26
-  fuel_lph_idle: 8
+  fuel_lph_loaded: 48.0
+  fuel_lph_empty: 26.0
+  fuel_lph_idle: 8.0
   tank_l: 550.0
   id: WZ-04
   count: 1
@@ -111,12 +179,12 @@ trucks:
 - model: wozidło przegubowe 39 t
   payload_t: 39.0
   empty_mass_t: 31.0
-  power_kw: 350
-  max_speed_kmh: 55
+  power_kw: 350.0
+  max_speed_kmh: 45.0
   drive_efficiency: 0.75
-  fuel_lph_loaded: 42
-  fuel_lph_empty: 24
-  fuel_lph_idle: 7
+  fuel_lph_loaded: 42.0
+  fuel_lph_empty: 24.0
+  fuel_lph_idle: 7.0
   tank_l: 400.0
   id: WZ-05
   count: 1
@@ -124,20 +192,433 @@ trucks:
 - model: wozidło przegubowe 39 t
   payload_t: 39.0
   empty_mass_t: 31.0
-  power_kw: 350
-  max_speed_kmh: 55
+  power_kw: 350.0
+  max_speed_kmh: 45.0
   drive_efficiency: 0.75
-  fuel_lph_loaded: 42
-  fuel_lph_empty: 24
-  fuel_lph_idle: 7
+  fuel_lph_loaded: 42.0
+  fuel_lph_empty: 24.0
+  fuel_lph_idle: 7.0
   tank_l: 400.0
   id: WZ-06
   count: 1
   excavators: []
-routes: {}
-links: {}
+routes:
+  T-K-1:
+    segments:
+    - name: front
+      length_m: 36.1
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: droga 3
+      length_m: 407.4
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: rampa 2
+      length_m: 96.6
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 10.0
+    - name: rampa 2
+      length_m: 120.7
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 10.0
+    - name: rampa 2
+      length_m: 1.0
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 10.0
+    - name: droga 1
+      length_m: 390.7
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: plac_kruszarki
+      length_m: 28.4
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 50.034502
+      - 19.911186
+    - - 50.034816
+      - 19.911057
+    - - 50.035092
+      - 19.910166
+    - - 50.03536
+      - 19.909941
+    - - 50.035987
+      - 19.910102
+    - - 50.036063
+      - 19.910853
+    - - 50.03638
+      - 19.911121
+    - - 50.037035
+      - 19.910853
+    - - 50.037335
+      - 19.911593
+    - - 50.037031
+      - 19.911856
+    - - 50.036646
+      - 19.912269
+    - - 50.036225
+      - 19.912725
+    - - 50.035719
+      - 19.913321
+    - - 50.035367
+      - 19.913374
+    - - 50.03381
+      - 19.912559
+    - - 50.032383
+      - 19.911754
+    - - 50.032135
+      - 19.911658
+    elev_start_m: 478.2
+    elev_end_m: 500.0
+  T-K-2:
+    segments:
+    - name: front
+      length_m: 17.0
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: droga 5
+      length_m: 425.9
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: droga 1
+      length_m: 390.7
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: plac_kruszarki
+      length_m: 28.4
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 50.039254
+      - 19.914104
+    - - 50.039109
+      - 19.914179
+    - - 50.038827
+      - 19.914801
+    - - 50.037304
+      - 19.914705
+    - - 50.035719
+      - 19.913321
+    - - 50.035367
+      - 19.913374
+    - - 50.03381
+      - 19.912559
+    - - 50.032383
+      - 19.911754
+    - - 50.032135
+      - 19.911658
+    elev_start_m: 500.0
+    elev_end_m: 500.0
+links:
+  K-1>K-2:
+    segments:
+    - name: front
+      length_m: 36.1
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: droga 3
+      length_m: 407.4
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: rampa 2
+      length_m: 96.6
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      grade_pct: 10.0
+    - name: rampa 2
+      length_m: 120.7
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 10.0
+    - name: rampa 2
+      length_m: 1.0
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 10.0
+    - name: droga 5
+      length_m: 425.9
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: dojazd
+      length_m: 17.0
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 50.034502
+      - 19.911186
+    - - 50.034816
+      - 19.911057
+    - - 50.035092
+      - 19.910166
+    - - 50.03536
+      - 19.909941
+    - - 50.035987
+      - 19.910102
+    - - 50.036063
+      - 19.910853
+    - - 50.03638
+      - 19.911121
+    - - 50.037035
+      - 19.910853
+    - - 50.037335
+      - 19.911593
+    - - 50.037031
+      - 19.911856
+    - - 50.036646
+      - 19.912269
+    - - 50.036225
+      - 19.912725
+    - - 50.035719
+      - 19.913321
+    - - 50.037304
+      - 19.914705
+    - - 50.038827
+      - 19.914801
+    - - 50.039109
+      - 19.914179
+    - - 50.039254
+      - 19.914104
+    elev_start_m: 478.2
+    elev_end_m: 500.0
+  K-2>K-1:
+    segments:
+    - name: front
+      length_m: 17.0
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: droga 5
+      length_m: 425.9
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: rampa 2
+      length_m: 1.0
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: 1
+      grade_pct: -10.0
+    - name: rampa 2
+      length_m: 120.7
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: 1
+      grade_pct: -10.0
+    - name: rampa 2
+      length_m: 96.6
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: 1
+      grade_pct: -10.0
+    - name: droga 3
+      length_m: 407.4
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: dojazd
+      length_m: 36.1
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 50.039254
+      - 19.914104
+    - - 50.039109
+      - 19.914179
+    - - 50.038827
+      - 19.914801
+    - - 50.037304
+      - 19.914705
+    - - 50.035719
+      - 19.913321
+    - - 50.036225
+      - 19.912725
+    - - 50.036646
+      - 19.912269
+    - - 50.037031
+      - 19.911856
+    - - 50.037335
+      - 19.911593
+    - - 50.037035
+      - 19.910853
+    - - 50.03638
+      - 19.911121
+    - - 50.036063
+      - 19.910853
+    - - 50.035987
+      - 19.910102
+    - - 50.03536
+      - 19.909941
+    - - 50.035092
+      - 19.910166
+    - - 50.034816
+      - 19.911057
+    - - 50.034502
+      - 19.911186
+    elev_start_m: 500.0
+    elev_end_m: 478.2
 planned_blasts: []
-areas: []
+areas:
+- id: O1
+  material: wapień
+  psd:
+  - - 10.0
+    - 1.0
+  - - 25.0
+    - 3.3
+  - - 50.0
+    - 8.1
+  - - 100.0
+    - 19.3
+  - - 200.0
+    - 41.9
+  - - 300.0
+    - 60.7
+  - - 500.0
+    - 84.3
+  - - 800.0
+    - 96.9
+  - - 1000.0
+    - 99.1
+  - - 1200.0
+    - 99.7
+  loose_density_t_m3: 1.7
+  reserves_t: 2350300.0
+  bench_m: 15.0
+  solid_density_t_m3: 2.65
+  blast_max_t: 20000.0
+  reblast_below_t: 8000.0
+  min_gap_days: 2
+  max_per_day: 1
+  t_per_m: 33.0
+  first_drilled: true
+  crew_arrive: 08:00
+  fire_from: '10:00'
+  fire_to: '10:15'
+  evacuation_min: 15.0
+  crew_leave: '10:40'
+  level_m: 458.8
+  polygon:
+  - - 50.040053
+    - 19.909566
+  - - 50.03975
+    - 19.910317
+  - - 50.037007
+    - 19.907893
+  - - 50.038027
+    - 19.905361
+  - - 50.040328
+    - 19.908815
+  level: Poziom +459
+  level_auto: Poziom +459
+  target_share: null
+- id: O2
+  material: wapień
+  psd:
+  - - 10.0
+    - 1.0
+  - - 25.0
+    - 3.3
+  - - 50.0
+    - 8.1
+  - - 100.0
+    - 19.3
+  - - 200.0
+    - 41.9
+  - - 300.0
+    - 60.7
+  - - 500.0
+    - 84.3
+  - - 800.0
+    - 96.9
+  - - 1000.0
+    - 99.1
+  - - 1200.0
+    - 99.7
+  loose_density_t_m3: 1.7
+  reserves_t: 523600.0
+  level: Poziom +459
+  level_m: 458.8
+  bench_m: 10.0
+  solid_density_t_m3: 2.65
+  blast_max_t: 8000.0
+  reblast_below_t: 4000.0
+  min_gap_days: 2
+  max_per_day: 1
+  t_per_m: 33.0
+  first_drilled: false
+  target_share: 40.0
+  crew_arrive: 08:00
+  fire_from: '10:00'
+  fire_to: '10:15'
+  evacuation_min: 15.0
+  crew_leave: '10:40'
+  polygon:
+  - - 50.034389
+    - 19.911036
+  - - 50.034712
+    - 19.90962
+  - - 50.033858
+    - 19.908901
+  - - 50.033251
+    - 19.911497
+  - - 50.03403
+    - 19.911937
+- id: O3
+  material: wapień
+  psd:
+  - - 10.0
+    - 1.0
+  - - 25.0
+    - 3.3
+  - - 50.0
+    - 8.1
+  - - 100.0
+    - 19.3
+  - - 200.0
+    - 41.9
+  - - 300.0
+    - 60.7
+  - - 500.0
+    - 84.3
+  - - 800.0
+    - 96.9
+  - - 1000.0
+    - 99.1
+  - - 1200.0
+    - 99.7
+  loose_density_t_m3: 1.7
+  reserves_t: 598300.0
+  level: Poziom +478
+  level_m: 478.2
+  bench_m: 10.0
+  solid_density_t_m3: 2.65
+  blast_max_t: 5000.0
+  reblast_below_t: 2000.0
+  min_gap_days: 2
+  max_per_day: 1
+  t_per_m: 33.0
+  first_drilled: false
+  target_share: 20.0
+  crew_arrive: 08:00
+  fire_from: '10:00'
+  fire_to: '10:15'
+  evacuation_min: 15.0
+  crew_leave: '10:40'
+  polygon:
+  - - 50.039474
+    - 19.91066
+  - - 50.038751
+    - 19.912902
+  - - 50.039846
+    - 19.913868
+  - - 50.040384
+    - 19.9117
 crushers_extra: []
 crusher:
   capacity_tph: 400.0
@@ -147,6 +628,10 @@ crusher:
   kwh_per_t: 2.0
   fragmentation_penalty: 0.4
   kwh_fragmentation_extra: 0.6
+  id: C-1
+  accepts: []
+  product: grys 8–16
+  target_t: 2500.0
 stockpile:
   enabled: false
 blasting:
@@ -174,10 +659,442 @@ site:
   - 50.0378
   - 19.9128
   zoom: 16
-  crusher: null
-  piles: []
-  excavators: []
-  roads: []
+  crusher:
+    lat: 50.032135
+    lon: 19.911658
+    id: C-1
+    product: grys 8–16
+    elev_m: 500.0
+    target_t: 2500.0
+  piles:
+  - id: U-01
+    material: wapień
+    tonnage_t: 10000.0
+    psd:
+    - - 10.0
+      - 2.7
+    - - 25.0
+      - 7.8
+    - - 50.0
+      - 17.1
+    - - 100.0
+      - 35.0
+    - - 200.0
+      - 62.8
+    - - 300.0
+      - 80.0
+    - - 500.0
+      - 94.9
+    - - 800.0
+      - 99.5
+    - - 1000.0
+      - 99.9
+    - - 1200.0
+      - 100.0
+    loose_density_t_m3: 1.7
+    polygon:
+    - - 50.03444
+      - 19.911829
+    - - 50.034654
+      - 19.911159
+    - - 50.034451
+      - 19.911008
+    - - 50.034054
+      - 19.91213
+    - - 50.034313
+      - 19.912301
+    uid: 1854557b47
+    level: Poziom +478
+    level_auto: Poziom +478
+    level_m: 478.2
+    target_share: null
+  - id: U-02
+    material: wapień
+    tonnage_t: 7000.0
+    psd:
+    - - 10.0
+      - 1.0
+    - - 25.0
+      - 3.3
+    - - 50.0
+      - 8.1
+    - - 100.0
+      - 19.3
+    - - 200.0
+      - 41.9
+    - - 300.0
+      - 60.7
+    - - 500.0
+      - 84.3
+    - - 800.0
+      - 96.9
+    - - 1000.0
+      - 99.1
+    - - 1200.0
+      - 99.7
+    loose_density_t_m3: 1.7
+    polygon:
+    - - 50.039123
+      - 19.913986
+    - - 50.039336
+      - 19.913353
+    - - 50.039764
+      - 19.913814
+    - - 50.039219
+      - 19.915252
+    - - 50.039047
+      - 19.914994
+    - - 50.039405
+      - 19.91405
+    - - 50.039309
+      - 19.913964
+    uid: cd12f8af0b
+    level: Poziom +500
+    level_auto: Poziom +500
+    level_m: 500.0
+    target_share: null
+  excavators:
+  - id: K-1
+    pile: U-01
+    bucket_m3: 4.5
+    swing_cycle_s: 27.0
+    fill_factor: 0.85
+    lat: 50.034502
+    lon: 19.911186
+    uid: 66f41cdac8
+    relocate_every_t: null
+    relocate_min: null
+  - id: K-2
+    pile: U-01
+    bucket_m3: 4.5
+    swing_cycle_s: 27.0
+    fill_factor: 0.85
+    lat: 50.039254
+    lon: 19.914104
+    uid: 93666ae17d
+    relocate_every_t: null
+    relocate_min: null
+  roads:
+  - id: R1
+    kind: droga
+    name: droga 1
+    grade_draw_pct: 0.0
+    speed_limit_kmh: 40.0
+    single_lane: false
+    active: true
+    coords:
+    - - 50.032383
+      - 19.911754
+    - - 50.03381
+      - 19.912559
+    - - 50.035367
+      - 19.913374
+    - - 50.035719
+      - 19.913321
+    uid: da3f9ec36a
+    inlet_elev_m: 500.0
+  - id: R2
+    kind: rampa
+    name: rampa 2
+    grade_draw_pct: -10.0
+    speed_limit_kmh: 25.0
+    single_lane: true
+    active: true
+    coords:
+    - - 50.035722
+      - 19.913315
+    - - 50.036225
+      - 19.912725
+    - - 50.036646
+      - 19.912269
+    - - 50.037031
+      - 19.911856
+    - - 50.037335
+      - 19.911593
+    uid: 16149cb0b4
+    inlet_elev_m: null
+  - id: R3
+    kind: droga
+    name: droga 3
+    grade_draw_pct: 0.0
+    speed_limit_kmh: 40.0
+    single_lane: false
+    active: true
+    coords:
+    - - 50.037324
+      - 19.911582
+    - - 50.037035
+      - 19.910853
+    - - 50.03638
+      - 19.911121
+    - - 50.036063
+      - 19.910853
+    - - 50.035987
+      - 19.910102
+    - - 50.03536
+      - 19.909941
+    - - 50.035092
+      - 19.910166
+    - - 50.034816
+      - 19.911057
+    - - 50.034589
+      - 19.910982
+    uid: 4f128951e1
+    inlet_elev_m: null
+  - id: R4
+    kind: droga
+    name: droga 4
+    grade_draw_pct: 0.0
+    speed_limit_kmh: 40.0
+    single_lane: false
+    active: true
+    coords:
+    - - 50.037331
+      - 19.911593
+    - - 50.037462
+      - 19.912119
+    - - 50.038551
+      - 19.912655
+    - - 50.038716
+      - 19.912816
+    uid: 447fd41de8
+    inlet_elev_m: null
+  - id: R5
+    kind: droga
+    name: droga 5
+    grade_draw_pct: 0.0
+    speed_limit_kmh: 40.0
+    single_lane: false
+    active: true
+    coords:
+    - - 50.035732
+      - 19.913331
+    - - 50.037304
+      - 19.914705
+    - - 50.038827
+      - 19.914801
+    - - 50.039109
+      - 19.914179
+    uid: acd2ad6a75
+    inlet_elev_m: null
+  - id: R6
+    kind: rampa
+    name: rampa 6
+    grade_draw_pct: -10.0
+    speed_limit_kmh: 25.0
+    single_lane: true
+    active: true
+    coords:
+    - - 50.037331
+      - 19.911604
+    - - 50.038813
+      - 19.910145
+    uid: 9ed7467521
+    inlet_elev_m: null
+  - id: R7
+    kind: droga
+    name: droga 7
+    grade_draw_pct: 0.0
+    speed_limit_kmh: 40.0
+    single_lane: false
+    active: true
+    coords:
+    - - 50.038813
+      - 19.910156
+    - - 50.039695
+      - 19.910456
+    uid: 18d270632f
+    inlet_elev_m: null
+  levels:
+  - name: Poziom +500
+    elev_m: 500.0
+    auto: true
+    roads:
+    - droga 1
+    - droga 5
+  - name: Poziom +478
+    elev_m: 478.2
+    auto: true
+    roads:
+    - droga 3
+    - droga 4
+  - name: Poziom +459
+    elev_m: 458.8
+    auto: true
+    roads:
+    - droga 7
+  passing_bays:
+  - lat: 50.0357293
+    lon: 19.9133065
+    uid: 12168ec509
+    id: M1
+  - lat: 50.0366025
+    lon: 19.9123161
+    uid: f8f6f38190
+    id: M2
+  parking:
+  - excavator: K-1
+    lat: 50.036049
+    lon: 19.911003
+  areas:
+  - id: O1
+    material: wapień
+    psd:
+    - - 10.0
+      - 1.0
+    - - 25.0
+      - 3.3
+    - - 50.0
+      - 8.1
+    - - 100.0
+      - 19.3
+    - - 200.0
+      - 41.9
+    - - 300.0
+      - 60.7
+    - - 500.0
+      - 84.3
+    - - 800.0
+      - 96.9
+    - - 1000.0
+      - 99.1
+    - - 1200.0
+      - 99.7
+    loose_density_t_m3: 1.7
+    reserves_t: 2350300.0
+    bench_m: 15.0
+    solid_density_t_m3: 2.65
+    blast_max_t: 20000.0
+    reblast_below_t: 8000.0
+    min_gap_days: 2
+    max_per_day: 1
+    t_per_m: 33.0
+    first_drilled: true
+    crew_arrive: 08:00
+    fire_from: '10:00'
+    fire_to: '10:15'
+    evacuation_min: 15.0
+    crew_leave: '10:40'
+    level_m: 458.8
+    polygon:
+    - - 50.040053
+      - 19.909566
+    - - 50.03975
+      - 19.910317
+    - - 50.037007
+      - 19.907893
+    - - 50.038027
+      - 19.905361
+    - - 50.040328
+      - 19.908815
+    uid: fa2eebb6aa
+    level: Poziom +459
+    level_auto: Poziom +459
+    target_share: null
+  - id: O2
+    material: wapień
+    psd:
+    - - 10.0
+      - 1.0
+    - - 25.0
+      - 3.3
+    - - 50.0
+      - 8.1
+    - - 100.0
+      - 19.3
+    - - 200.0
+      - 41.9
+    - - 300.0
+      - 60.7
+    - - 500.0
+      - 84.3
+    - - 800.0
+      - 96.9
+    - - 1000.0
+      - 99.1
+    - - 1200.0
+      - 99.7
+    loose_density_t_m3: 1.7
+    reserves_t: 523600.0
+    level: Poziom +459
+    level_m: 458.8
+    bench_m: 10.0
+    solid_density_t_m3: 2.65
+    blast_max_t: 8000.0
+    reblast_below_t: 4000.0
+    min_gap_days: 2
+    max_per_day: 1
+    t_per_m: 33.0
+    first_drilled: false
+    target_share: 40.0
+    crew_arrive: 08:00
+    fire_from: '10:00'
+    fire_to: '10:15'
+    evacuation_min: 15.0
+    crew_leave: '10:40'
+    polygon:
+    - - 50.034389
+      - 19.911036
+    - - 50.034712
+      - 19.90962
+    - - 50.033858
+      - 19.908901
+    - - 50.033251
+      - 19.911497
+    - - 50.03403
+      - 19.911937
+    uid: 95b89fe087
+  - id: O3
+    material: wapień
+    psd:
+    - - 10.0
+      - 1.0
+    - - 25.0
+      - 3.3
+    - - 50.0
+      - 8.1
+    - - 100.0
+      - 19.3
+    - - 200.0
+      - 41.9
+    - - 300.0
+      - 60.7
+    - - 500.0
+      - 84.3
+    - - 800.0
+      - 96.9
+    - - 1000.0
+      - 99.1
+    - - 1200.0
+      - 99.7
+    loose_density_t_m3: 1.7
+    reserves_t: 598300.0
+    level: Poziom +478
+    level_m: 478.2
+    bench_m: 10.0
+    solid_density_t_m3: 2.65
+    blast_max_t: 5000.0
+    reblast_below_t: 2000.0
+    min_gap_days: 2
+    max_per_day: 1
+    t_per_m: 33.0
+    first_drilled: false
+    target_share: 20.0
+    crew_arrive: 08:00
+    fire_from: '10:00'
+    fire_to: '10:15'
+    evacuation_min: 15.0
+    crew_leave: '10:40'
+    polygon:
+    - - 50.039474
+      - 19.91066
+    - - 50.038751
+      - 19.912902
+    - - 50.039846
+      - 19.913868
+    - - 50.040384
+      - 19.9117
+    uid: 0c3ad1857b
 reliability:
   enabled: true
   ref_shifts_per_day: 2.0
@@ -188,19 +1105,19 @@ reliability:
       hours: 8.0
     WZ-02:
       count: 3.0
-      hours: 8.0
+      hours: 3.0
     WZ-03:
       count: 3.0
-      hours: 8.0
+      hours: 4.0
     WZ-04:
       count: 3.0
       hours: 8.0
     WZ-05:
-      count: 3.0
+      count: 0.0
       hours: 7.0
     WZ-06:
-      count: 3.0
-      hours: 7.0
+      count: 1.0
+      hours: 10.0
     K-1:
       count: 2.0
       hours: 10.0
@@ -226,17 +1143,11 @@ production:
   total_t: 110000.0
   yields:
     C-1:
-      piasek łamany 0–2: 18.0
-      grys 2–8: 24.0
-      grys 8–16: 27.0
-      kliniec 16–31,5: 16.0
       mieszanka 0–31,5: 8.0
-    C-2:
-      kamień łamany / narzut 63–250: 5.0
-      tłuczeń 31,5–63: 18.0
-      kliniec 16–31,5: 22.0
-      kruszywo 0–63 (podbudowa): 20.0
-      mieszanka 0–31,5: 25.0
+      kliniec 16–31,5: 16.0
+      grys 8–16: 27.0
+      grys 2–8: 24.0
+      piasek łamany 0–2: 18.0
   mix:
     grysy (2–16): 45.0
     kliniec 16–31,5: 18.0
@@ -282,3 +1193,20 @@ defaults:
     capacity_tph: 300.0
     hopper_t: 70.0
     kwh_per_t: 1.2
+rl_weights:
+- 0.1777870398861094
+- 1.2660147770182597
+- 1.428929974118914
+- -0.7279983774838589
+- 1.7541995818506675
+- -0.769721229206192
+- 2.4643490023475447
+- 0.12292719358360069
+advisor:
+  arrival_margin_s: 111.03749842431233
+  max_slowdown: 0.3061301571157925
+  crusher_pacing: 0.1865040081265717
+excavator_policy:
+  min_trucks_per_excavator: 2.56393681206399
+  topup_min_fill: 1.0
+  topup_min_queue: 0.753530936773658

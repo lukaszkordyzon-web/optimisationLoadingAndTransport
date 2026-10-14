@@ -88,7 +88,7 @@ raw["defaults"] = {
         {"id": "C-2", "type": "linia II – udarowa, kliniec / mieszanki / podbudowa, 300 t/h",
          "product": "mieszanka 0–31,5", "capacity_tph": 300.0, "hopper_t": 70.0, "kwh_per_t": 1.2}],
 }
-out = ROOT / "scenarios" / "kruszyk_demo_zakrzowek.yaml"
+out = ROOT / "scenarios" / "kruszyk_demo_pusty.yaml"  # the drawn demo (kruszyk_demo_zakrzowek.yaml) is kept
 out.write_text("# Projekt demonstracyjny na terenie dawnego kamieniołomu Zakrzówek (Kraków; nieczynny, bez operatora).\n"
                "# Wszystkie obiekty i dane są fikcyjne – typowe wartości dla średniej kopalni wapienia (1,5 mln t/rok).\n"
                "# Generuje: python tools/make_demo_project.py\n"

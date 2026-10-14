@@ -226,14 +226,14 @@ def test_production_goal_backwards_and_applied():
 def test_calibration_screen_fits_and_saves():
     at = AppTest.from_file(APP, default_timeout=300).run()  # the default mine, shift module
     assert any("nieskalibrowany" in w.value for w in at.warning)
-    at.number_input(key="cal_tonnes_t").set_value(3500).run()
-    at.number_input(key="cal_trips").set_value(95).run()
+    at.number_input(key="cal_tonnes_t").set_value(2200).run()
+    at.number_input(key="cal_trips").set_value(60).run()
     next(b for b in at.button if "Dopasuj model" in b.label).click().run()
     assert not at.exception, at.exception
     assert any("Model po kalibracji" in s.value for s in at.success)
     next(b for b in at.button if "Zapisz kalibrację" in b.label).click().run()
     assert not at.exception, at.exception
-    assert at.session_state["raw"]["calibration"]["measured"]["tonnes_t"] == 3500
+    assert at.session_state["raw"]["calibration"]["measured"]["tonnes_t"] == 2200
     assert any("Model skalibrowany" in c.value for c in at.caption)
 
 
@@ -276,6 +276,9 @@ def test_clicked_object_can_be_edited():
 
 def test_every_kind_of_object_opens_its_form():
     at = AppTest.from_file(APP, default_timeout=300).run()
+    name = next(o for o in at.sidebar.selectbox[0].options if "scenariusz bazowy" in o)  # the mine with two crushers
+    at.sidebar.selectbox[0].select(name).run()
+    at.sidebar.button[0].click().run()
     site = at.session_state["site"]
     sels = [f"road:{site['roads'][0]['uid']}", f"pile:{site['piles'][0]['uid']}",
             f"excavator:{site['excavators'][0]['uid']}", f"area:{site['areas'][0]['uid']}", "crusher:main",
@@ -318,14 +321,12 @@ def test_new_project_starts_an_empty_mine():
 def test_demo_project_on_zakrzowek():
     from kruszyk.project import DEMO_CENTER
 
-    at = AppTest.from_file(APP, default_timeout=300).run()
-    name = next(o for o in at.sidebar.selectbox[0].options if "Zakrzówek" in o)
-    at.sidebar.selectbox[0].select(name).run()
-    at.sidebar.button[0].click().run()
+    at = AppTest.from_file(APP, default_timeout=300).run()  # the demo is the mine opened at start
+    assert "Zakrzówek" in at.sidebar.selectbox[0].value
     assert not at.exception, at.exception
     site = at.session_state["site"]
-    assert tuple(site["center"]) == DEMO_CENTER and site["zoom"] == 16
-    assert not site["roads"] and not at.session_state["raw"]["excavators"]  # empty: ready to draw the demo mine
+    assert abs(site["center"][0] - DEMO_CENTER[0]) < 0.02 and abs(site["center"][1] - DEMO_CENTER[1]) < 0.02
+    assert site["roads"] and at.session_state["raw"]["excavators"] and at.session_state["raw"]["defaults"]
 
 
 def test_rl_without_gain_is_not_used():
