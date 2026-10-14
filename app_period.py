@@ -528,7 +528,9 @@ def _production_plan(gp) -> None:
     def t(x) -> str:
         return f"{x:,.0f}".replace(",", " ")
     head = (f"Nadawa **{t(gp.feed_t)} t** na kruszarki → **{t(sum(p['plan_t'] for p in gp.products))} t** produktów z "
-            f"celu · koszt ok. **{t(gp.cost_zl)} zł**" + (f" (**{gp.cost_per_t:.2f} zł/t** produktu)" if gp.cost_per_t else ""))
+            f"celu · koszt całkowity ok. **{t(gp.full_cost_zl)} zł**"
+            + (f" (**{gp.full_cost_per_t:.2f} zł/t** produktu)" if gp.full_cost_per_t else "")
+            + f" – z tego zależne od wyboru usypów i kruszarek {t(gp.cost_zl)} zł")
     (st.success if gp.feasible else st.warning)(("✅ Cel do zrobienia. " if gp.feasible else "⚠️ Celu nie da się w pełni "
                                                  "zrobić. ") + head)
     for line in gp.limits:

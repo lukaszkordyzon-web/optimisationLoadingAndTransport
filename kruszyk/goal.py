@@ -80,7 +80,8 @@ class GoalPlan:
     sources: list = field(default_factory=list)
     drilling: dict = field(default_factory=dict)
     haulage: dict = field(default_factory=dict)
-    cost_zl: float = 0.0
+    cost_zl: float = 0.0            # what the choice of flows changes (haulage, crushing, new blasting)
+    full_cost_zl: float = 0.0       # everything, the way the simulation counts it (fleet, plant, blasting)
     feed_t: float = 0.0
     limits: list = field(default_factory=list)
 
@@ -88,6 +89,11 @@ class GoalPlan:
     def cost_per_t(self) -> float | None:
         made = sum(p["plan_t"] for p in self.products)
         return round(self.cost_zl / made, 2) if made else None
+
+    @property
+    def full_cost_per_t(self) -> float | None:
+        made = sum(p["plan_t"] for p in self.products)
+        return round(self.full_cost_zl / made, 2) if made and self.full_cost_zl else None
 
 
 def sources_of(sc: Scenario, pile_reblast_t: dict | None = None, t_per_m: float = 50.0) -> list[Source]:
@@ -288,6 +294,17 @@ def plan_backwards(sc: Scenario, total_t: float, mix: dict, yields: dict, shifts
         gp.limits.append(f"Wiercenie: potrzeba {rig_shifts:.0f} zmian wiertnicy, a {drills} wiertnic(e) mają "
                          f"{drills * shifts} – dołóż wiertnicę albo zmiany.")
     trucks = math.ceil(truck_h / (hours * FLEET_UTIL)) if hours else 0
+    # full cost of the period, counted like the simulation: machines are paid for every hour of the shifts
+    from .physics import drill_blast_cost_per_t
+
+    frag = float(np.mean([b.fragmentation for b in sc.blasts])) if sc.blasts else 0.3
+    fuel_lph = 0.5 * (fleet.fuel_lph_loaded + fleet.fuel_lph_empty)
+    gp.full_cost_zl = round(
+        max(trucks, 1) * hours * costs.truck_per_h + truck_h * fuel_lph * costs.fuel_per_l
+        + len(sc.excavators) * hours * costs.excavator_per_h
+        + sum(hours * costs.crusher_per_h + feed_c[j] * c.kwh_per_t * costs.energy_per_kwh
+              for j, c in enumerate(crushers) if feed_c[j] >= 1)
+        + gp.feed_t * drill_blast_cost_per_t(costs, frag))
     gp.haulage |= {"motogodziny": round(truck_h), "wozidel_potrzeba": trucks, "wozidel_jest": int(sc.truck_count),
                    "zaladunek_na_zmiane_t": round(load_cap / shifts) if shifts else 0}
     return gp

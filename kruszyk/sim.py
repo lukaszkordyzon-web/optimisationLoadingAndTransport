@@ -166,15 +166,16 @@ class Simulation:
         self.trucks: list[TruckState] = []
         # driver/truck style is persistent across shifts (drawn from the scenario seed, not the shift seed)
         crew_rng = np.random.default_rng(sc.seed)
-        per_fleet: dict[int, int] = {}
-        for i, (tid, fleet) in enumerate(truck_units(sc.trucks)):
+        # "own" excavators are dealt out in turn among the trucks that may serve the same excavators
+        dealt: dict[tuple, int] = {}
+        for tid, fleet in truck_units(sc.trucks):
             allowed = self.allowed_ids(fleet)
-            j = per_fleet[id(fleet)] = per_fleet.get(id(fleet), -1) + 1
+            j = dealt[tuple(allowed)] = dealt.get(tuple(allowed), -1) + 1
             self.trucks.append(TruckState(
                 id=tid,
                 fleet=fleet,
                 driver_factor=float(np.clip(crew_rng.normal(1.0, v.driver_sd), 0.8, 1.3)),
-                home_excavator=allowed[(i + j) % len(allowed)],
+                home_excavator=allowed[j % len(allowed)],
                 speeder=bool(crew_rng.random() < v.speeding_share),
                 fuel_left_l=fleet.tank_l,
             ))
@@ -1088,10 +1089,11 @@ class Simulation:
                             left -= part
                     unit.queued_dump_t -= tonnes
                     self._log_state(truck, "kolejka_kruszarka", t0)
+                    # in the hopper: counts as hauled now (the crusher may take it before the truck pulls away)
+                    self._mark_dumped(truck, env.now, "kosz", unit.cfg.id)
                     t0 = env.now
                     yield env.timeout(unit.cfg.dump_time_s * self._noise(0.15))
                     self._log_state(truck, "wyladunek", t0)
-                self._mark_dumped(truck, env.now, "kosz", unit.cfg.id)
             self.dumped_t += tonnes
             if self.sc.goal_t and self.goal_reached_at is None and self.dumped_t >= self.sc.goal_t - 1e-6:
                 self.goal_reached_at = env.now
