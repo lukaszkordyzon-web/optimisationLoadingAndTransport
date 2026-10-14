@@ -1121,8 +1121,10 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
     def fail(t: dict) -> tuple:
         key = t["id"] if t["id"] in rel.machines else f"truck:{t.get('model', '')}"
         return rel.values(key, "truck")[:2]
-    base_key = f"qfleet_base_{st.session_state.ver}"
-    if base_key not in st.session_state:  # fixed starting table: the editor applies its edits on top of it
+    # fixed starting table (the editor applies its edits on top of it), rebuilt when breakdowns change elsewhere
+    sig = abs(hash(repr(sorted((k_, tuple(sorted(v_.items()))) for k_, v_ in rel.machines.items()))))
+    base_key = f"qfleet_base_{st.session_state.ver}_{sig % 10**8}"
+    if base_key not in st.session_state:
         trucks = expand_trucks(raw.get("trucks", []))
         st.session_state[base_key] = (trucks, pd.DataFrame(
             [{"id": t["id"], "model": t.get("model", ""), "w_pracy": bool(t.get("count", 1)),
@@ -1130,7 +1132,7 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
               "fail_n": fail(t)[0], "fail_h": fail(t)[1]}
              for t in trucks], columns=["id", "model", "w_pracy", *TRUCK_NUM, "excavators", "fail_n", "fail_h"]))
     old, start = st.session_state[base_key]
-    ed = st.data_editor(start, num_rows="dynamic", key=f"qfleet_{st.session_state.ver}", hide_index=True,
+    ed = st.data_editor(start, num_rows="dynamic", key=f"qfleet_{base_key}", hide_index=True,
                         width="stretch", column_config={k_: v_ for k_, v_ in TRUCK_COLS.items() if v_ is not None})
     trucks, used = [], set()
     for i, r in ed.reset_index(drop=True).iterrows():
@@ -1156,11 +1158,12 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
                        **({"blend": base["blend"]} if base.get("blend") else {})})
     raw["trucks"] = trucks
     machines = rel_raw.setdefault("machines", {})
-    for t, (_, r) in zip(trucks, ed.reset_index(drop=True).iterrows()):
+    for i, (t, (_, r)) in enumerate(zip(trucks, ed.reset_index(drop=True).iterrows())):
         n_, h_ = (float(r[c]) if not pd.isna(r[c]) else None for c in ("fail_n", "fail_h"))
         if n_ is None or h_ is None:
             continue
-        if t["id"] in machines or (n_, h_) != fail(t):  # only real data, so the rest stay marked as assumptions
+        was = (float(start["fail_n"].iloc[i]), float(start["fail_h"].iloc[i])) if i < len(start) else fail(t)
+        if (n_, h_) != was:  # changed in this table (other tables keep what they set)
             machines[t["id"]] = {"count": n_, "hours": h_}
     st.caption(f"W pracy: **{sum(t['count'] for t in trucks)}** z {len(trucks)} wozideł. Kruszarki (wydajność, kosz, "
                "produkt, plan, z których usypów przyjmują) – w sekcji 3, zakładka „🛣️ Drogi, mijanki, kruszarki”.")

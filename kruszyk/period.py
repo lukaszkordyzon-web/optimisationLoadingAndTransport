@@ -51,6 +51,8 @@ class PeriodPlan:
     drills: int = 0
     drill_speed_kmh: float = 2.0      # moving between blasts
     drill_m_per_shift: float = 250.0  # drilling output of one rig per shift [m]
+    # particular rigs with their own output, speed and breakdowns: [{id, m_per_shift, speed_kmh}] (overrides drills)
+    rigs: list = field(default_factory=list)
     clear_pct: float = 10.0           # the next strip of an area can be drilled when ≤ this % of the previous blast is left
     t_per_m: float = 50.0             # default tonnes per metre drilled (when a blast / area has none)
     lead_m: float = 30.0              # a lower bench is blasted only this far behind the upper bench face
@@ -129,12 +131,18 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
     warnings: list[str] = []
     waits: dict[str, str] = {}  # blast -> why it is held back by the bench order (latest reason)
     # drilling jobs: blast id -> metres to drill / drilled; rigs move between them
-    drilling = plan.drills > 0
+    rig_cfg = [dict(r) for r in plan.rigs] or [{"id": f"W-{i + 1}", "m_per_shift": plan.drill_m_per_shift,
+                                                 "speed_kmh": plan.drill_speed_kmh} for i in range(plan.drills)]
+    drilling = bool(rig_cfg)
     jobs: dict[str, dict] = {}
-    rigs = [{"id": f"W{i + 1}", "pos": None, "job": None, "travel_h": 0.0, "down_h": 0.0, "lost_h": 0.0}
-            for i in range(plan.drills)]
+    rigs = []
+    for c in rig_cfg:
+        key = c["id"] if c["id"] in sc.reliability.machines else "drill"  # own breakdown data, else the type's
+        mtbf, mttr = sc.reliability.rates(key, "drill", sc.shift_hours)
+        rigs.append({"id": c["id"], "m": float(c.get("m_per_shift") or plan.drill_m_per_shift),
+                     "kmh": float(c.get("speed_kmh") or plan.drill_speed_kmh), "mtbf": mtbf, "mttr": mttr,
+                     "pos": None, "job": None, "travel_h": 0.0, "down_h": 0.0, "lost_h": 0.0})
     frng = np.random.default_rng(seed + 424_243)  # drill rig breakdowns
-    rig_mtbf, rig_mttr = sc.reliability.rates("drill", "drill", sc.shift_hours)
     carry: dict = {}  # repairs going on from one shift into the next: machine / truck id -> seconds
     prev_end: dt.datetime | None = None
     drill_log: list[dict] = []
@@ -200,15 +208,15 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                     r["job"] = pid
                     poly = jobs[pid]["poly"]
                     if r["pos"] is not None and poly:
-                        r["travel_h"] = haversine_m(r["pos"], centroid(poly)) / 1000 / max(plan.drill_speed_kmh, 0.1)
+                        r["travel_h"] = haversine_m(r["pos"], centroid(poly)) / 1000 / max(r["kmh"], 0.1)
         for r in rigs:
             # breakdowns: a repair from before eats into this shift; a new one may stop the rig for the rest of it
             avail = sc.shift_hours - min(sc.shift_hours, r["down_h"])
             r["lost_h"] = sc.shift_hours - avail
             r["down_h"] = max(0.0, r["down_h"] - sc.shift_hours)
-            if avail > 0 and rig_mtbf < math.inf and frng.random() < 1 - math.exp(-avail / rig_mtbf):
+            if avail > 0 and r["mtbf"] < math.inf and frng.random() < 1 - math.exp(-avail / r["mtbf"]):
                 at = frng.uniform(0, avail)
-                repair = float(frng.lognormal(math.log(rig_mttr) - 0.5, 1.0))
+                repair = float(frng.lognormal(math.log(r["mttr"]) - 0.5, 1.0))
                 lost = min(avail - at, repair)
                 r["down_h"] += repair - lost
                 r["lost_h"] += lost
@@ -218,7 +226,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
             j = jobs[r["job"]]
             move = min(avail, r["travel_h"])
             r["travel_h"] -= move
-            j["done"] = min(j["m"], j["done"] + plan.drill_m_per_shift * (avail - move) / sc.shift_hours)
+            j["done"] = min(j["m"], j["done"] + r["m"] * (avail - move) / sc.shift_hours)
             if ready(r["job"]):
                 drill_log.append({"strzal": r["job"], "wiertnica": r["id"], "data": day, "zmiana": shift_no})
                 if j["poly"]:

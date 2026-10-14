@@ -146,3 +146,21 @@ def test_lower_bench_waits_for_the_upper_bench():
     assert any("O2/1" in w for w in df.attrs["waits"])
     free = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=7, lead_m=0), seed=1)
     assert "O2/1" in [b["strzal"] for b in free.attrs["blasts"]] or len(free.attrs["waits"]) < len(df.attrs["waits"])
+
+
+def test_particular_rigs_drill_at_their_own_pace():
+    import yaml
+
+    from kruszyk.config import scenario_from_dict
+
+    raw = yaml.safe_load((Path(__file__).parent.parent / "scenarios" / "kruszyk_kopalnia.yaml").read_text(encoding="utf-8"))
+    raw["reliability"] = {"enabled": False}
+    sc = scenario_from_dict(raw)
+    sc.dispatch = "natural"
+    start = dt.date(2026, 11, 2)
+    slow = run_period(sc, PeriodPlan(start=start, days=6, rigs=[{"id": "W-7", "m_per_shift": 60.0, "speed_kmh": 2.0}]),
+                      seed=1)
+    fast = run_period(sc, PeriodPlan(start=start, days=6, rigs=[{"id": "W-7", "m_per_shift": 600.0, "speed_kmh": 2.0}]),
+                      seed=1)
+    assert {d["wiertnica"] for d in fast.attrs["drilling"]} == {"W-7"}
+    assert len(fast.attrs["drilling"]) > len(slow.attrs["drilling"])

@@ -6,6 +6,7 @@ import copy
 import datetime as dt
 import hashlib
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -191,13 +192,12 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         st.markdown("**🔩 Wiertnice** – strzał w nowym miejscu trzeba najpierw nawiercić. Metry = tony strzału / t/mb "
                     "(ustawiasz przy obszarze / strzale), czas = metry / wydajność. Następny pas obszaru można wiercić "
                     "dopiero po odebraniu poprzedniego strzału.")
-        c = st.columns(5)
-        drills = c[0].number_input("Liczba wiertnic (0 = bez wiercenia)", 0, 10, 1, 1, key="per_drills")
-        d_m = c[1].number_input("Wydajność [m / zmianę]", 10.0, 2000.0, 250.0, 10.0, key="per_dm", disabled=drills == 0)
-        d_v = c[2].number_input("Przejazd [km/h]", 0.5, 20.0, 2.0, 0.5, key="per_dv", disabled=drills == 0)
-        clear = c[3].number_input("Odebrany, gdy zostało ≤ [%]", 0.0, 100.0, 10.0, 5.0, key="per_clear",
+        rigs = _rigs_table(base_raw, sc)
+        drills = len(rigs)
+        c = st.columns(2)
+        clear = c[0].number_input("Odebrany, gdy zostało ≤ [%]", 0.0, 100.0, 10.0, 5.0, key="per_clear",
                                   disabled=drills == 0, help="poprzedniego strzału w obszarze – wtedy wiertnica może wejść")
-        tpm = c[4].number_input("Domyślnie t/mb", 5.0, 500.0, 50.0, 5.0, key="per_tpm", disabled=drills == 0,
+        tpm = c[1].number_input("Domyślnie t/mb", 5.0, 500.0, 50.0, 5.0, key="per_tpm", disabled=drills == 0,
                                 help="gdy obszar / strzał nie ma własnej wartości")
         from app_calibration import reliability_editor
 
@@ -207,8 +207,9 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                       blasts=[PileBlasts(r["usyp"], 0.0, 0, 1,  # piles only get emptied – no new blasts in a dug-out place
                                          None if pd.isna(r["udzial"]) or not r["udzial"] else float(r["udzial"]))
                               for _, r in ed.iterrows()],
-                      move_excavators=move, move_setup_min=float(setup), drills=int(drills),
-                      drill_m_per_shift=float(d_m), drill_speed_kmh=float(d_v), clear_pct=float(clear), t_per_m=float(tpm),
+                      move_excavators=move, move_setup_min=float(setup), drills=int(drills), rigs=rigs,
+                      drill_m_per_shift=float(np.mean([r["m_per_shift"] for r in rigs])) if rigs else 250.0,
+                      clear_pct=float(clear), t_per_m=float(tpm),
                       lead_m=float(st.session_state.get("per_lead", 30.0)))
     with t_cal:
         _blast_calendar(plan, sc)
@@ -325,6 +326,67 @@ def _chance_results(r: dict) -> None:
                 "**zawyżona** – awarie kruszarek i koparek zmieniłyby obraz.")
 
 
+RIG_DEFAULT = {"m_per_shift": 250.0, "speed_kmh": 2.0}
+
+
+def _rigs_table(base_raw: dict, sc) -> list[dict]:
+    """Every drill rig with its own output, speed and breakdowns. Returns the rigs in work."""
+    from kruszyk.config import Reliability
+
+    rigs = base_raw.get("drills")
+    if rigs is None:
+        rigs = base_raw["drills"] = [{"id": "W-1", "in_work": True, **RIG_DEFAULT}]
+    need = st.session_state.pop("per_rigs_needed", 0)  # the production goal asked for more rigs
+    while sum(1 for r in rigs if r.get("in_work", True)) < need:
+        idle = next((r for r in rigs if not r.get("in_work", True)), None)
+        if idle:
+            idle["in_work"] = True
+        else:
+            k = len(rigs) + 1
+            rigs.append({**(rigs[-1] if rigs else RIG_DEFAULT), "id": f"W-{k}", "in_work": True})
+    rel_raw = base_raw.setdefault("reliability", {})
+    rel = Reliability(**{k_: v_ for k_, v_ in rel_raw.items() if k_ in Reliability.__dataclass_fields__})
+
+    def fail(rid: str) -> tuple:
+        return rel.values(rid if rid in rel.machines else "drill", "drill")[:2]
+    sig = abs(hash(repr(rigs) + repr(sorted(rel.machines.items())) + str(st.session_state.get("ver", 0)))) % 10**8
+    key = f"per_rigs_{sig}"
+    if key not in st.session_state:
+        st.session_state[key] = pd.DataFrame([{"id": r["id"], "w_pracy": bool(r.get("in_work", True)),
+                                               "m": float(r.get("m_per_shift") or 250), "v": float(r.get("speed_kmh") or 2),
+                                               "fail_n": fail(r["id"])[0], "fail_h": fail(r["id"])[1]} for r in rigs],
+                                             columns=["id", "w_pracy", "m", "v", "fail_n", "fail_h"])
+    start = st.session_state[key]
+    ed = st.data_editor(start, key=key + "_ed", num_rows="dynamic", hide_index=True, width="stretch",
+                        column_config={"id": "wiertnica", "w_pracy": st.column_config.CheckboxColumn("w pracy"),
+                                       "m": st.column_config.NumberColumn("wydajność [m / zmianę]", min_value=10.0),
+                                       "v": st.column_config.NumberColumn("przejazd [km/h]", min_value=0.5),
+                                       "fail_n": st.column_config.NumberColumn("awarii / mies.", min_value=0.0),
+                                       "fail_h": st.column_config.NumberColumn("godzin awarii / mies.", min_value=0.0)})
+    new, used = [], set()
+    machines = rel_raw.setdefault("machines", {})
+    for i, r in ed.reset_index(drop=True).iterrows():
+        prev = new[-1] if new else {**RIG_DEFAULT}
+        rid = str(r["id"] or "").strip() if not pd.isna(r["id"]) else ""
+        k = len(new) + 1
+        while not rid or rid in used:
+            rid, k = f"W-{k}", k + 1
+        used.add(rid)
+        rig = {"id": rid, "in_work": bool(r["w_pracy"]) if not pd.isna(r["w_pracy"]) else True,
+               "m_per_shift": float(r["m"]) if not pd.isna(r["m"]) else prev["m_per_shift"],
+               "speed_kmh": float(r["v"]) if not pd.isna(r["v"]) else prev["speed_kmh"]}
+        new.append(rig)
+        if not pd.isna(r["fail_n"]) and not pd.isna(r["fail_h"]):
+            was = (float(start["fail_n"].iloc[i]), float(start["fail_h"].iloc[i])) if i < len(start) else fail(rid)
+            if (float(r["fail_n"]), float(r["fail_h"])) != was:
+                machines[rid] = {"count": float(r["fail_n"]), "hours": float(r["fail_h"])}
+    base_raw["drills"] = new
+    working = [r for r in new if r["in_work"]]
+    st.caption(f"W pracy: **{len(working)}** z {len(new)} wiertnic" + ("" if working else " – bez wiercenia (strzały "
+                                                                          "w nowych miejscach od razu nawiercone)") + ".")
+    return working
+
+
 def _reset_tables() -> None:
     """Share tables are snapshots: drop them so they are rebuilt from the scenario."""
     for k_ in [k_ for k_ in st.session_state if str(k_).startswith(("per_piles__", "per_areas__", "per_planned__"))]:
@@ -389,7 +451,7 @@ def _production_tab(base_raw: dict, sc, plan: PeriodPlan, n_shifts: int) -> None
             st.warning(f"{c.id}: uzyski sumują się do {tot:.0f} % – więcej niż nadawa.")
     prod.update({"total_t": float(total), "mix": {k_: round(v_, 2) for k_, v_ in mix.items()}, "yields": yields})
 
-    drills = int(st.session_state.get("per_drills", 1))
+    drills = plan.drills
     key = repr((total, mix, yields, n_shifts, dump_key(sc), plan))
     if st.button("🔁 Policz plan wstecz od kruszarek", type="primary", key="prod_go", disabled=not mix or not n_shifts):
         with st.spinner("liczę dzisiejszą zmianę (kalibracja transportu) i plan…"):
@@ -461,7 +523,7 @@ def _production_plan(gp) -> None:
         st.session_state.prod_applied = gp
         st.session_state.per_apply = {"per_target": float(gp.feed_t), "goal_kind": "deadline", "goal_t": float(gp.feed_t),
                                       "per_trucks": max(1, int(h["wozidel_potrzeba"])),
-                                      "per_drills": max(int(d["wiertnic_jest"]), int(d["wiertnic_potrzeba"]))}
+                                      "per_rigs_needed": int(d["wiertnic_potrzeba"])}
         _reset_tables()
         st.rerun()
     st.caption("Zastosuj → udziały usypów i obszarów, plany kruszarek, cel nadawy, liczba wozideł i wiertnic ustawią się "

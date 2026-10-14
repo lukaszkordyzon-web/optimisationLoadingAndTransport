@@ -127,7 +127,9 @@ def reliability_editor(raw: dict, sc, key: str) -> None:
     rows += [(e.id, "excavator", f"Koparka {e.id}", e.id) for e in sc.excavators]
     rows += [(tid, "truck", f"Wozidło {tid} · {f.model}", tid if tid in stored else f"truck:{f.model}")
              for tid, f in truck_units(sc.trucks)]
-    rows += [("drill", "drill", "Wiertnica (każda)", "drill")]
+    rigs = [r for r in raw.get("drills") or [] if r.get("id")]
+    rows += [(r["id"], "drill", f"Wiertnica {r['id']}", r["id"] if r["id"] in stored else "drill") for r in rigs] \
+        or [("drill", "drill", "Wiertnica (każda)", "drill")]
     c = st.columns([1, 1, 2])
     enabled = c[0].toggle("Uwzględniaj awarie", rel.enabled, key=f"{key}_on")
     ref = c[1].number_input("Zmian na dobę w tym okresie", 1.0, 3.0, float(rel.ref_shifts_per_day), 1.0,
@@ -146,7 +148,7 @@ def reliability_editor(raw: dict, sc, key: str) -> None:
                                        "awarii": st.column_config.NumberColumn("awarii / miesiąc", min_value=0.0, step=1.0),
                                        "godzin": st.column_config.NumberColumn("łącznie [h / miesiąc]", min_value=0.0,
                                                                                step=1.0)})
-    machines, assumed, lines = {}, [], []
+    machines, assumed, lines = dict(stored), [], []  # machines not listed here (e.g. rigs) keep their data
     probe = Reliability(enabled=True, ref_shifts_per_day=ref, ref_days_per_month=rel.ref_days_per_month)
     for (k_, kind, name, src), (_, r) in zip(rows, df.iterrows()):
         n, h = float(r["awarii"] or 0), float(r["godzin"] or 0)
