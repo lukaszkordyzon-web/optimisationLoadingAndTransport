@@ -255,6 +255,7 @@ class Simulation:
             starts = [w[0] for ex in self.excavators.values() for w in ex.down if w[2] == "strzelanie"]
             self.truck_closure = (min(starts + [self.closure[0]]), self.closure[1])
         self.light_vehicles: list[dict] = []   # for the animation
+        self.light_waits, self.light_wait_s = 0, 0.0  # light vehicles stopped at passing bays
         self.light_passages: dict[str, list] = {}  # road name -> [(t0, t1, going_up)]
         self._schedule_light_vehicles()
 
@@ -418,62 +419,96 @@ class Simulation:
         return max(hopper_wait, queue_wait if extra_t == 0 else 0.0) + (down if missing > 0 else 0.0)
 
     # ------------------------------------------------------------ light vehicles
-    def _light_trip(self, name: str, route, forward: bool, t0: float, frames: list, record: bool = True) -> float:
-        """A light vehicle drives a route starting at t0; records its road passages. Returns arrival time."""
+    def _light_duration(self, route) -> float:
+        """Driving time of a light vehicle over a route, without stops (for planning its departure)."""
+        return sum(seg.length_m / (max(5.0, min(self.sc.traffic.light_speed_kmh, seg.speed_limit_kmh)) / 3.6)
+                   for seg in route.segments)
+
+    def _light_drive(self, name: str, route, forward: bool, frames: list, segs: list[int] | None = None):
+        """A light vehicle (crew, foreman, tanker) drives a route (or some of its segments). On single-lane stretches
+        it keeps the same rules as the trucks: going up has priority, whoever is already on the stretch goes first,
+        nobody drives in to meet an oncoming vehicle; elsewhere its passages make descending trucks give way."""
         from .anim import _at, _cum
 
-        segs = list(range(len(route.segments)))
-        if not forward:
-            segs.reverse()
+        env, vid = self.env, f"lv:{name}"
+        n = len(route.segments)
+        idx = list(segs) if segs is not None else (list(range(n)) if forward else list(reversed(range(n))))
         path = route.path
         cum = _cum(path) if path else None
         seg_len = [x.length_m for x in route.segments]
         scale = (cum[-1] / sum(seg_len)) if path and sum(seg_len) else 1.0
         bounds = np.concatenate([[0.0], np.cumsum(seg_len)]) * scale
-        t = t0
-        for k in segs:
+
+        def speed(seg):
+            return max(5.0, min(self.sc.traffic.light_speed_kmh, seg.speed_limit_kmh))
+
+        t = env.now  # its planned passages are known at departure (trucks starting a road meanwhile give way)
+        for k in idx:
             seg = route.segments[k]
-            v = max(5.0, min(self.sc.traffic.light_speed_kmh, seg.speed_limit_kmh))
-            dt = seg.length_m / (v / 3.6)
+            dt = seg.length_m / (speed(seg) / 3.6)
             grade = seg.grade_pct if forward else -seg.grade_pct
-            if record and seg.name not in CONNECTORS:
+            if seg.name not in CONNECTORS and not seg.section:
                 self.light_passages.setdefault(seg.name, []).append((t, t + dt, grade > 0.5, name))
-            if record and path:
-                d0, d1 = (bounds[k], bounds[k + 1]) if forward else (bounds[k + 1], bounds[k])
-                for d in (d0, d1):
-                    lat, lon = _at(path, cum, d)
-                    frames.append([round(t + (dt if d == d1 else 0.0), 1), round(lat, 7), round(lon, 7)])
             t += dt
-        return t
+        for pos, k in enumerate(idx):
+            seg = route.segments[k]
+            dt = seg.length_m / (speed(seg) / 3.6)
+            p0 = p1 = None
+            if path:
+                d0, d1 = (bounds[k], bounds[k + 1]) if forward else (bounds[k + 1], bounds[k])
+                p0, p1 = _at(path, cum, d0), _at(path, cum, d1)
+            if seg.section:
+                t0 = env.now
+                yield from self._enter_section_v(vid, seg, forward, dt)
+                if env.now > t0:
+                    self.light_waits += 1
+                    self.light_wait_s += env.now - t0
+                    if p0:
+                        frames.append([round(t0, 1), round(p0[0], 7), round(p0[1], 7)])
+            if p0:
+                frames.append([round(env.now, 1), round(p0[0], 7), round(p0[1], 7)])
+                frames.append([round(env.now + dt, 1), round(p1[0], 7), round(p1[1], 7)])
+            nxt = route.segments[idx[pos + 1]] if pos + 1 < len(idx) else None
+            if nxt is not None and nxt.section:
+                self._approach_v(vid, nxt, forward, env.now + dt)
+            yield env.timeout(dt)
+            if seg.section:
+                self._leave_section(seg, forward)
+
+    def _light_stop(self, frames: list, stop_s: float):
+        if frames:
+            frames.append([round(self.env.now + stop_s, 1), frames[-1][1], frames[-1][2]])
+        yield self.env.timeout(stop_s)
 
     def _visit_round(self, name: str, kind: str, start: float, stops: list[str], stop_s: float,
                      refuel: bool = False) -> None:
         """crusher -> stop 1 -> stop 2 … -> crusher. A tanker round also stops the excavators for refuelling."""
-        sc = self.sc
         stops = [x for x in stops if x in self.excavators]
         if not stops:
             return
         frames: list = []
-        t, prev = start, None
+        self.light_vehicles.append({"name": name, "kind": kind, "frames": frames})
+        self.env.process(self._visit_round_p(name, start, stops, stop_s, refuel, frames))
+
+    def _visit_round_p(self, name, start, stops, stop_s, refuel, frames):
+        sc, prev = self.sc, None
+        yield self.env.timeout(start)
         for x in stops:
             ex = self.excavators[x]
             if prev is None:
-                t = self._light_trip(name, self._route_of(ex), False, t, frames)
+                yield from self._light_drive(name, self._route_of(ex), False, frames)
             else:
                 link = sc.links.get(f"{prev}>{x}")
                 if link is not None:
-                    t = self._light_trip(name, link, True, t, frames)
+                    yield from self._light_drive(name, link, True, frames)
                 else:  # no link drawn: back to the crusher and down again
-                    t = self._light_trip(name, self._route_of(self.excavators[prev]), True, t, frames)
-                    t = self._light_trip(name, self._route_of(ex), False, t, frames)
+                    yield from self._light_drive(name, self._route_of(self.excavators[prev]), True, frames)
+                    yield from self._light_drive(name, self._route_of(ex), False, frames)
             if refuel:
-                self._refuel_window(ex, t, stop_s)
-            if frames:
-                frames.append([round(t + stop_s, 1), frames[-1][1], frames[-1][2]])
-            t += stop_s
+                self._refuel_window(ex, self.env.now, stop_s)
+            yield from self._light_stop(frames, stop_s)
             prev = x
-        t = self._light_trip(name, self._route_of(self.excavators[prev]), True, t, frames)
-        self.light_vehicles.append({"name": name, "kind": kind, "frames": frames})
+        yield from self._light_drive(name, self._route_of(self.excavators[prev]), True, frames)
 
     def _schedule_light_vehicles(self) -> None:
         sc = self.sc
@@ -492,14 +527,10 @@ class Simulation:
                     raise ValueError("brak trasy")
                 route = _routes({"strzelanie": r})["strzelanie"]
                 frames: list = []
-                down = self._light_trip("ekipa strzałowa", route, False, 0.0, [], record=False)  # duration only
-                t_in = max(0.0, clock_to_s(bl.crew_arrive, start) - down)
-                self._light_trip("ekipa strzałowa", route, False, t_in, frames)
+                t_in = max(0.0, clock_to_s(bl.crew_arrive, start) - self._light_duration(route))
                 t_out = clock_to_s(bl.crew_leave, start)
-                if frames:
-                    frames.append([round(t_out, 1), frames[-1][1], frames[-1][2]])
-                self._light_trip("ekipa strzałowa", route, True, t_out, frames)
                 self.light_vehicles.append({"name": "ekipa strzałowa", "kind": "strzelanie", "frames": frames})
+                self.env.process(self._crew_p(route, t_in, t_out, frames))
             except ValueError:
                 pass  # blast point not connected to the roads: the closure still applies
         ins = sc.inspection
@@ -513,6 +544,13 @@ class Simulation:
                                          sc.refueling.excavator_refuel_min * 60, refuel=True):
                 self._visit_round(f"cysterna {i + 1}", "cysterna", clock_to_s(tt, start), ids,
                                   sc.refueling.excavator_refuel_min * 60, refuel=True)
+
+    def _crew_p(self, route, t_in: float, t_out: float, frames: list):
+        yield self.env.timeout(t_in)
+        yield from self._light_drive("ekipa strzałowa", route, False, frames)
+        if self.env.now < t_out:
+            yield from self._light_stop(frames, t_out - self.env.now)
+        yield from self._light_drive("ekipa strzałowa", route, True, frames)
 
     def _dedicated_round(self, name: str, kind: str, role: str, start: float, stops: list[str], stop_s: float,
                          refuel: bool = False) -> bool:
@@ -528,42 +566,24 @@ class Simulation:
         if r is None:
             return False
         route = _routes({role: r})[role]
-        stop_after = r.get("stop_after", [])
         frames: list = []
-        t = start
-        for k, seg in enumerate(route.segments):
-            t = self._light_segment(name, route, k, t, frames)
+        self.light_vehicles.append({"name": name, "kind": kind, "frames": frames})
+        self.env.process(self._dedicated_p(name, route, list(r.get("stop_after", [])), start, stops, stop_s, refuel,
+                                           frames))
+        return True
+
+    def _dedicated_p(self, name, route, stop_after, start, stops, stop_s, refuel, frames):
+        yield self.env.timeout(start)
+        for k in range(len(route.segments)):
+            yield from self._light_drive(name, route, True, frames, segs=[k])
             for j, sk in enumerate(stop_after):
                 if sk == k:
                     if refuel and j < len(stops):
-                        self._refuel_window(self.excavators[stops[j]], t, stop_s)
-                    if frames:
-                        frames.append([round(t + stop_s, 1), frames[-1][1], frames[-1][2]])
-                    t += stop_s
+                        self._refuel_window(self.excavators[stops[j]], self.env.now, stop_s)
+                    yield from self._light_stop(frames, stop_s)
         path = route.path
         if path and haversine_m(path[0], path[-1]) > 50:  # not a loop: drive back the same way
-            t = self._light_trip(name, route, False, t, frames)
-        self.light_vehicles.append({"name": name, "kind": kind, "frames": frames})
-        return True
-
-    def _light_segment(self, name: str, route, k: int, t: float, frames: list) -> float:
-        """One segment k of a route driven forward by a light vehicle."""
-        from .anim import _at, _cum
-
-        seg = route.segments[k]
-        v = max(5.0, min(self.sc.traffic.light_speed_kmh, seg.speed_limit_kmh))
-        dt = seg.length_m / (v / 3.6)
-        if seg.name not in CONNECTORS:
-            self.light_passages.setdefault(seg.name, []).append((t, t + dt, seg.grade_pct > 0.5, name))
-        if route.path:
-            cum = _cum(route.path)
-            seg_len = [x.length_m for x in route.segments]
-            scale = cum[-1] / sum(seg_len) if sum(seg_len) else 1.0
-            d0, d1 = sum(seg_len[:k]) * scale, sum(seg_len[:k + 1]) * scale
-            for d, tt in ((d0, t), (d1, t + dt)):
-                lat, lon = _at(route.path, cum, d)
-                frames.append([round(tt, 1), round(lat, 7), round(lon, 7)])
-        return t + dt
+            yield from self._light_drive(name, route, False, frames)
 
     # ------------------------------------------------------------ excavator moves
     def _excavator_moves(self) -> dict:
@@ -590,8 +610,8 @@ class Simulation:
 
     def _refuel_window(self, ex: ExcavatorState, t: float, stop_s: float) -> None:
         move = self.excavator_moves.get(ex.cfg.id)
-        if self.sc.refueling.at_parking and move and move[2]:
-            a, b = t - move[1], t + stop_s + move[1]
+        if self.sc.refueling.at_parking and move and move[2]:  # drives to its parking place when the tanker comes
+            a, b = t, t + stop_s + 2 * move[1]
             self._track_move(ex.cfg.id, a, b)
         else:
             a, b = t, t + stop_s
@@ -762,22 +782,29 @@ class Simulation:
         return wait, first
 
     def _approach(self, truck: TruckState, seg, forward: bool, eta: float) -> None:
+        self._approach_v(truck.id, seg, forward, eta)
+
+    def _approach_v(self, vid: str, seg, forward: bool, eta: float) -> None:
         d, slope = self._dirs(seg, forward)
         s = self._section(seg.section)
         if slope > 0:
             s["up"] = d
-        s["approach"][truck.id] = (d, eta)
+        s["approach"][vid] = (d, eta)
 
     def _enter_section(self, truck: TruckState, seg, forward: bool, route, k: int, load_t: float):
-        """Uphill trucks have priority: a truck going down does not enter while one is coming up inside
-        the stretch, waiting at its lower bay, or about to reach it before we could get through."""
+        through = segment_time_s(seg, truck.fleet, load_t > 0, self.sc.rolling_resistance_pct, forward, load_t)
+        yield from self._enter_section_v(truck.id, seg, forward, through)
+
+    def _enter_section_v(self, vid: str, seg, forward: bool, through: float):
+        """Going up has priority: a vehicle going down does not enter while one is coming up inside the stretch,
+        waiting at its lower bay, or about to reach it before we could get through. A vehicle already on the
+        stretch (it passed the bay) goes first – the one coming up waits at the bay for it."""
         env = self.env
         d, slope = self._dirs(seg, forward)
         s = self._section(seg.section)
         if slope > 0:
             s["up"] = d
-        s["approach"].pop(truck.id, None)
-        through = segment_time_s(seg, truck.fleet, load_t > 0, self.sc.rolling_resistance_pct, forward, load_t)
+        s["approach"].pop(vid, None)
         waited = False
         while True:
             blocked = s["inside"][-d] > 0
@@ -1419,7 +1446,9 @@ class SimResult:
         feed = done.groupby("blast")["tonnes"].sum() if len(done) else pd.Series(dtype=float)
         feed_share = {b.id: round(100 * float(feed.get(b.id, 0.0)) / dumped, 1) if dumped else 0.0 for b in sc.blasts}
         feed_target = {k: round(100 * v, 1) for k, v in sim.targets.items()}
-        feed_dev_pp = round(0.5 * sum(abs(feed_share[k] - feed_target[k]) for k in feed_target), 1) if feed_target else 0.0
+        exact = {b.id: 100 * float(feed.get(b.id, 0.0)) / dumped if dumped else 0.0 for b in sc.blasts}
+        dev_exact = 0.5 * sum(abs(exact[k] - 100 * v) for k, v in sim.targets.items()) if feed_target else 0.0
+        feed_dev_pp = round(dev_exact, 1)
 
         ex_rows = []
         for ex in sim.excavators.values():
@@ -1452,7 +1481,7 @@ class SimResult:
                                 * (sim.stockpile_in_t + min(sim.rehandled_t, sc.stockpile.initial_t)))
             if sc.stockpile.enabled else 0.0,
             "wiercenie_strzelanie": dumped * drill_blast_cost_per_t(c, frag_loaded),
-            "odchylka_skladu": dumped * c.blend_penalty_per_t_pp * feed_dev_pp,
+            "odchylka_skladu": dumped * c.blend_penalty_per_t_pp * dev_exact,
         }
         total = sum(cost.values())
         goal = sc.goal_t
@@ -1478,6 +1507,8 @@ class SimResult:
             "decisions": sim.decisions,
             "yields": sim.yields,
             "yield_h": round(sim.yield_s / 3600, 2),
+            "light_bay_stops": sim.light_waits,
+            "light_bay_wait_h": round(sim.light_wait_s / 3600, 2),
             "bay_stops": sim.bay_stops,
             "relocations": sum(e.relocations for e in sim.excavators.values()),
             "bay_wait_h": round(float(st.get("mijanka", 0.0)), 2),

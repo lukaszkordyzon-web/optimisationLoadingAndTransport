@@ -21,7 +21,7 @@ import numpy as np
 from .config import Calibration, Scenario
 from .sim import simulate
 
-SEEDS = (11, 12, 13)
+SEEDS = (11, 12, 13, 14, 15, 16)  # one shift is noisy: tiny changes reshuffle the queues
 MAX_DELAY_MIN = 240.0  # losses per trip the fit may assume  # every fitted value is an average over these shifts (rain, breakdowns, drivers differ)
 
 
@@ -99,23 +99,23 @@ def calibrate(sc: Scenario, measured: dict, progress=None) -> tuple[Scenario, di
             lo, hi = 0.0, MAX_DELAY_MIN
             best = (abs(at0["tonnes_t"] - target), 0.0)
             for _ in range(12):  # tonnes jump by whole trips, so keep the closest point tried, not the last one
-                mid = (lo + hi) / 2
+                mid = round((lo + hi) / 2, 2)  # the value stored is exactly the value tested
                 got = model_shift(_with(base, **cal, delay_min_per_trip=mid))["tonnes_t"]
                 best = min(best, (abs(got - target), mid))
                 lo, hi = (mid, hi) if got > target else (lo, mid)
                 tick(f"przestoje {mid:.1f} min/kurs")
-            cal["delay_min_per_trip"] = round(best[1], 2)
+            cal["delay_min_per_trip"] = best[1]
         elif at0["tonnes_t"] < 0.98 * target and not (m.get("load_min") and m.get("travel_min")):
             lo, hi = 0.4, 1.0  # the model is slower than reality: real driving / loading is quicker
             best = (abs(at0["tonnes_t"] - target), 1.0)
             for _ in range(8):
-                mid = (lo + hi) / 2
+                mid = round((lo + hi) / 2, 3)
                 kw = {"travel_factor": cal.get("travel_factor", mid), "load_factor": cal.get("load_factor", mid)}
                 got = model_shift(_with(base, **kw))["tonnes_t"]
                 best = min(best, (abs(got - target), mid))
                 lo, hi = (lo, mid) if got < target else (mid, hi)  # shorter times -> more tonnes
                 tick(f"tempo ×{mid:.2f}")
-            mid = round(best[1], 3)
+            mid = best[1]
             cal.setdefault("travel_factor", mid)
             cal.setdefault("load_factor", mid)
     # 4. fuel and energy: straight ratios on the fitted model

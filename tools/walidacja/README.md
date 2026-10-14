@@ -97,6 +97,11 @@ Infrastruktura (te same 30 zmian):
 
 Przydział z informacją na rampie jednopasowej (4 438 t) daje więcej niż poszerzenie rampy przy pracy jak dziś (4 307 t).
 
+Zasady na odcinkach jednopasowych – takie same dla wozideł i aut osobowych (sztygar, ekipa strzałowa, cysterna):
+jadący pod górę ma pierwszeństwo; kto już minął mijankę i jest na odcinku, jedzie pierwszy (jadący pod górę czeka na
+mijance); nikt nie wjeżdża na odcinek, jeśli jadący z naprzeciwka dojedzie do mijanki, zanim zdążyłby przejechać.
+Zatrzymanie kosztuje ruszenie. Test: nigdy dwa pojazdy w przeciwnych kierunkach na jednym odcinku.
+
 ## Harmonogram
 
 * miesiąc 40 zmian: najtańsza flota 3 wozidła (jak na pojedynczej zmianie);

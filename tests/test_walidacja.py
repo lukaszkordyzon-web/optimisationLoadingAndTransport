@@ -114,3 +114,32 @@ def test_loaded_truck_waits_only_for_one_already_on_the_stretch():
     bays = st[st["state"] == "mijanka"].groupby("prev")["duration_s"].agg(["count", "mean"])
     assert bays.loc["jazda_pusty", "count"] > 4 * bays.loc["jazda_pelny", "count"]
     assert bays.loc["jazda_pusty", "mean"] > bays.loc["jazda_pelny", "mean"]
+
+
+def _with_cars(**kw):
+    sc = make(single_lane=True, trucks=6, crusher_tph=800, bucket_m3=3.0, swing_s=30, **kw)
+    sc.dispatch = "natural"
+    sc.inspection.enabled, sc.inspection.start, sc.inspection.stops = True, "07:00", ["K-2", "K-1"]
+    sc.refueling.tanker_times = ["09:00", "13:00"]
+    return sc
+
+
+def test_cars_keep_the_single_lane_rules_like_the_trucks():
+    """Foreman and tanker on single-lane ramps: never two vehicles in opposite directions on one stretch;
+    the cars wait at bays like the trucks."""
+    stops, conflicts = 0, []
+    for seed in range(4):
+        sim = Simulation(_with_cars(), seed)
+        orig = sim._enter_section_v
+
+        def checked(vid, seg, forward, through, _orig=orig, _sim=sim):
+            yield from _orig(vid, seg, forward, through)
+            d, _ = _sim._dirs(seg, forward)
+            if _sim._section(seg.section)["inside"][-d]:
+                conflicts.append((vid, seg.section))
+        sim._enter_section_v = checked
+        k = sim.run().kpi
+        stops += k["light_bay_stops"]
+        assert {v["name"] for v in sim.light_vehicles} == {"sztygar", "cysterna 1", "cysterna 2"}
+    assert not conflicts
+    assert stops > 0  # the cars had to give way somewhere
