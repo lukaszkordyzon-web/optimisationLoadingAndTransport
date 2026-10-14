@@ -669,6 +669,9 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
 _TIMES = [("crew_arrive", "przyjazd ekipy", "time", None), ("fire_from", "odpalenie od", "time", None),
           ("fire_to", "odpalenie do", "time", None), ("evacuation_min", "ewakuacja przed [min]", "opt", (0.0, 5.0)),
           ("crew_leave", "wyjazd ekipy", "time", None)]
+_FAIL = [("_fail_count", "awarii / miesiąc", "num", (0.0, 1.0)),
+         ("_fail_hours", "łącznie godzin awarii / miesiąc", "num", (0.0, 1.0))]
+RELIABILITY_KIND = {"excavator": "excavator", "crusher": "crusher", "crusher2": "crusher"}
 SITE_LIST = {"road": "roads", "pile": "piles", "planned": "planned_piles", "excavator": "excavators",
              "crusher2": "crushers", "area": "areas", "bay": "passing_bays", "parking": "parking"}
 
@@ -704,8 +707,8 @@ def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
         "excavator": [("id", "nazwa", "text", None), ("pile", "ładuje z usypu", "sel", pile_ids),
                       ("bucket_m3", "łyżka [m³]", "num", (0.5, 0.5)), ("swing_cycle_s", "cykl łyżki [s]", "num", (10.0, 1.0)),
                       ("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
-                      ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0))],
-        "crusher": crusher, "crusher2": crusher,
+                      ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0)), *_FAIL],
+        "crusher": crusher + _FAIL, "crusher2": crusher + _FAIL,
         "parking": [("excavator", "koparka", "sel", [e["id"] for e in site.get("excavators", [])])],
         "bay": [("id", "nazwa", "text", None)],
         "dig": [("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
@@ -727,7 +730,16 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
                 "blast_day": 1, "t_per_m": 50.0, "min_gap_days": 1, "max_per_day": 1, "blast_max_t": 20000.0,
                 "first_drilled": True, "capacity_tph": 800.0, "hopper_t": 150.0, "kwh_per_t": 1.1}
 
+    from kruszyk.config import Reliability
+
+    rel_raw = st.session_state.raw.setdefault("reliability", {})  # kept in the session scenario in every mode
+    rel = Reliability(**{k_: v_ for k_, v_ in rel_raw.items() if k_ in Reliability.__dataclass_fields__})
+    old_id = o.get("id", "C-1")
+
     def cur(key):
+        if key.startswith("_fail") and kind in RELIABILITY_KIND:
+            n_, h_, _ = rel.values(old_id, RELIABILITY_KIND[kind])
+            return n_ if key == "_fail_count" else h_
         if kind == "crusher" and key in ("capacity_tph", "hopper_t", "kwh_per_t"):
             return cr.get(key, defaults[key])  # the main crusher's machine data live in the scenario
         if kind == "crusher" and key == "id":
@@ -768,6 +780,14 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
         ok = st.form_submit_button("💾 Zastosuj zmiany", type="primary")
     if not ok:
         return
+    fails = (new.pop("_fail_count", None), new.pop("_fail_hours", None))
+    if kind in RELIABILITY_KIND and fails[0] is not None:
+        machines = rel_raw.setdefault("machines", {})
+        mid = (new.get("id") or old_id).strip() or old_id
+        if old_id != mid:
+            machines.pop(old_id, None)
+        if old_id in rel.machines or fails != (cur("_fail_count"), cur("_fail_hours")):
+            machines[mid] = {"count": float(fails[0]), "hours": float(fails[1])}
     if "product" in new and new["product"] != (o.get("product") or "") and new["product"] in PRODUCTS:
         new["kwh_per_t"] = PRODUCTS[new["product"]]  # another product -> its typical energy
     for key, val in new.items():
@@ -1077,28 +1097,38 @@ TRUCK_COLS = {"id": "nr", "model": "typ", "count": None, "w_pracy": st.column_co
               "fuel_lph_empty": st.column_config.NumberColumn("paliwo pusty [l/h]", min_value=0.0),
               "fuel_lph_idle": st.column_config.NumberColumn("paliwo postój [l/h]", min_value=0.0),
               "tank_l": st.column_config.NumberColumn("zbiornik [l]", min_value=50.0),
-              "excavators": st.column_config.TextColumn("koparki (puste = wszystkie)")}
+              "excavators": st.column_config.TextColumn("koparki (puste = wszystkie)"),
+              "fail_n": st.column_config.NumberColumn("awarii / mies.", min_value=0.0,
+                                                      help="średnio z 3–6 miesięcy, postoje > 15 min, bez przeglądów"),
+              "fail_h": st.column_config.NumberColumn("godzin awarii / mies.", min_value=0.0)}
 TRUCK_NUM = ["payload_t", "empty_mass_t", "power_kw", "max_speed_kmh", "fuel_lph_loaded", "fuel_lph_empty",
              "fuel_lph_idle", "tank_l"]
 
 
 def quick_fleet_crusher(raw: dict, site: dict) -> None:
     """Every truck as its own row with its own parameters; changes go straight to the scenario."""
-    from kruszyk.config import expand_trucks
+    from kruszyk.config import Reliability, expand_trucks
 
     st.subheader("5. Wozidła")
     st.caption("Każde wozidło osobno – z własną ładownością, masą, mocą, zużyciem paliwa i zbiornikiem. **W pracy** "
                "odznacz, gdy wozidło stoi (np. w remoncie). **Koparki**: do których może jeździć, np. `K-1, K-2` "
-               "(puste = do wszystkich). Nowy wiersz = kopia ostatniego wozidła. Awaryjność każdego wozidła – w tabeli "
-               "„Awaryjność urządzeń” (kalibracja).")
+               "(puste = do wszystkich). Nowy wiersz = kopia ostatniego wozidła. **Awaryjność** – dwie ostatnie kolumny: "
+               "awarie w miesiącu i ich łączny czas (puste / domyślne = założenie).")
     ex_ids = {e["id"] for e in site.get("excavators", [])} | {e["id"] for e in raw.get("excavators", [])}
+    rel_raw = raw.setdefault("reliability", {})
+    rel = Reliability(**{k_: v_ for k_, v_ in rel_raw.items() if k_ in Reliability.__dataclass_fields__})
+
+    def fail(t: dict) -> tuple:
+        key = t["id"] if t["id"] in rel.machines else f"truck:{t.get('model', '')}"
+        return rel.values(key, "truck")[:2]
     base_key = f"qfleet_base_{st.session_state.ver}"
     if base_key not in st.session_state:  # fixed starting table: the editor applies its edits on top of it
         trucks = expand_trucks(raw.get("trucks", []))
         st.session_state[base_key] = (trucks, pd.DataFrame(
             [{"id": t["id"], "model": t.get("model", ""), "w_pracy": bool(t.get("count", 1)),
-              **{c: float(t.get(c) or 0) for c in TRUCK_NUM}, "excavators": ", ".join(t.get("excavators") or [])}
-             for t in trucks], columns=["id", "model", "w_pracy", *TRUCK_NUM, "excavators"]))
+              **{c: float(t.get(c) or 0) for c in TRUCK_NUM}, "excavators": ", ".join(t.get("excavators") or []),
+              "fail_n": fail(t)[0], "fail_h": fail(t)[1]}
+             for t in trucks], columns=["id", "model", "w_pracy", *TRUCK_NUM, "excavators", "fail_n", "fail_h"]))
     old, start = st.session_state[base_key]
     ed = st.data_editor(start, num_rows="dynamic", key=f"qfleet_{st.session_state.ver}", hide_index=True,
                         width="stretch", column_config={k_: v_ for k_, v_ in TRUCK_COLS.items() if v_ is not None})
@@ -1125,6 +1155,13 @@ def quick_fleet_crusher(raw: dict, site: dict) -> None:
                        "count": 1 if bool(r["w_pracy"]) or pd.isna(r["w_pracy"]) else 0, "excavators": excs,
                        **({"blend": base["blend"]} if base.get("blend") else {})})
     raw["trucks"] = trucks
+    machines = rel_raw.setdefault("machines", {})
+    for t, (_, r) in zip(trucks, ed.reset_index(drop=True).iterrows()):
+        n_, h_ = (float(r[c]) if not pd.isna(r[c]) else None for c in ("fail_n", "fail_h"))
+        if n_ is None or h_ is None:
+            continue
+        if t["id"] in machines or (n_, h_) != fail(t):  # only real data, so the rest stay marked as assumptions
+            machines[t["id"]] = {"count": n_, "hours": h_}
     st.caption(f"W pracy: **{sum(t['count'] for t in trucks)}** z {len(trucks)} wozideł. Kruszarki (wydajność, kosz, "
                "produkt, plan, z których usypów przyjmują) – w sekcji 3, zakładka „🛣️ Drogi, mijanki, kruszarki”.")
 

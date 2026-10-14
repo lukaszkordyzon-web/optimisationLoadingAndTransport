@@ -286,3 +286,16 @@ def test_every_kind_of_object_opens_its_form():
         at.run()
         assert not at.exception, (sel, at.exception)
         assert any("Zastosuj zmiany" in b.label for b in at.button), sel
+
+
+def test_breakdowns_set_on_the_clicked_machine():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    ex = at.session_state["site"]["excavators"][0]
+    sel = f"excavator:{ex['uid']}"
+    at.session_state["info_sel"] = sel
+    at.run()
+    at.number_input(key=f"of_{sel}__fail_count").set_value(7.0)
+    at.number_input(key=f"of_{sel}__fail_hours").set_value(21.0)
+    next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["raw"]["reliability"]["machines"][ex["id"]] == {"count": 7.0, "hours": 21.0}
