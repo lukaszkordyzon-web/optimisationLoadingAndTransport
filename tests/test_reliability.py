@@ -1,4 +1,5 @@
 """Breakdowns: failures per month and their total hours, per machine."""
+import copy
 import datetime as dt
 import math
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from kruszyk.config import Reliability, scenario_from_dict
+from kruszyk.config import Reliability, load_scenario, scenario_from_dict
 from kruszyk.period import PeriodPlan, run_period
 from kruszyk.sim import simulate
 
@@ -62,3 +63,17 @@ def test_no_breakdowns_when_switched_off():
     plan = PeriodPlan(start=dt.date(2026, 11, 2), days=3, shifts_per_day=2, drills=1)
     df = run_period(sc, plan, seed=4)
     assert df["awarie_h"].sum() == 0
+
+
+def test_same_breakdowns_whatever_the_dispatch():
+    """Every machine draws its breakdowns from its own stream: comparing policies is fair."""
+    sc = load_scenario(Path(__file__).parent.parent / "scenarios" / "kruszyk_demo_zakrzowek.yaml")
+    sc.reliability.enabled = True
+    sc.reliability.machines["C-1"] = {"count": 300.0, "hours": 150.0}  # often enough to show up in one shift
+    out = []
+    for disp in ("natural", "dynamic"):
+        v = copy.deepcopy(sc)
+        v.dispatch = disp
+        k = simulate(v, seed=5).kpi
+        out.append(k["crusher_breakdown_h"])
+    assert out[0] > 0 and out[0] == out[1]

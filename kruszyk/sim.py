@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import zlib
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -39,6 +40,8 @@ class TruckState:
     at: str = ""  # crusher where the truck is (dumped last); trucks start at the main crusher
     fuel_left_l: float = 0.0
     down_end: float = 0.0  # end of the current / last repair
+    worked_s: float = 0.0  # time worked in this shift (cycles)
+    fail_at_s: float | None = None  # worked time at which the next breakdown comes
     parked: bool = False   # parked (engine off) by the policy instead of queueing at the crusher
 
 
@@ -112,8 +115,10 @@ class Simulation:
         sc.validate()
         self.sc = sc
         self.rng = np.random.default_rng(sc.seed if seed is None else seed)
-        # breakdowns draw from their own stream: the rest of the shift stays comparable with / without them
-        self.frng = np.random.default_rng((sc.seed if seed is None else seed) + 99_991)
+        # breakdowns: every machine draws from its own stream, so the same shift brings the same breakdowns
+        # whatever the dispatch does (fair comparison of policies; the rest of the shift stays comparable too)
+        self._fseed = (sc.seed if seed is None else seed) + 99_991
+        self._frngs: dict[str, np.random.Generator] = {}
         self.env = simpy.Environment()
         self.shift_s = sc.shift_hours * 3600
         v = sc.variability
@@ -1017,13 +1022,16 @@ class Simulation:
                 truck.fuel_left_l = fleet.tank_l
                 self.truck_refuels += 1
 
-            # random breakdown, probability proportional to the time worked (cycle length)
-            cycle = env.now - cycle_start
+            # random breakdown after a random amount of work (drawn from the truck's own stream)
+            truck.worked_s += env.now - cycle_start
             rel_key = truck.id if truck.id in sc.reliability.machines else f"truck:{fleet.model}"
             mtbf, mttr = sc.reliability.rates(rel_key, "truck", sc.shift_hours)
-            if mtbf < math.inf and self.frng.random() < 1 - math.exp(-cycle / (mtbf * 3600)):
+            if mtbf < math.inf and truck.fail_at_s is None:
+                truck.fail_at_s = self._frng(truck.id).exponential(mtbf * 3600)
+            if truck.fail_at_s is not None and truck.worked_s >= truck.fail_at_s:
+                truck.fail_at_s = truck.worked_s + self._frng(truck.id).exponential(mtbf * 3600)
                 t0 = env.now
-                truck.down_end = t0 + self._repair_s(mttr)
+                truck.down_end = t0 + self._repair_s(mttr, truck.id)
                 if truck.down_end >= self.shift_s:  # the rest of the repair goes on to the next shift
                     self._log_state(truck, "awaria", t0, end=self.shift_s)
                     return
@@ -1044,9 +1052,15 @@ class Simulation:
             elif load["truck"] == truck.id:
                 return
 
-    def _repair_s(self, mttr_h: float) -> float:
+    def _frng(self, key: str) -> np.random.Generator:
+        """The breakdown stream of one machine."""
+        if key not in self._frngs:
+            self._frngs[key] = np.random.default_rng([self._fseed, zlib.crc32(key.encode())])
+        return self._frngs[key]
+
+    def _repair_s(self, mttr_h: float, key: str) -> float:
         """Repair time with the given mean: lognormal – mostly short, sometimes longer than a shift."""
-        return float(self.frng.lognormal(math.log(mttr_h * 3600) - REPAIR_SIGMA ** 2 / 2, REPAIR_SIGMA))
+        return float(self._frng(key).lognormal(math.log(mttr_h * 3600) - REPAIR_SIGMA ** 2 / 2, REPAIR_SIGMA))
 
     def breakdown_process(self, kind: str, obj):
         """Random breakdowns of an excavator or a crusher while the shift runs."""
@@ -1056,10 +1070,10 @@ class Simulation:
             return
         env = self.env
         while True:
-            yield env.timeout(self.frng.exponential(mtbf * 3600))
+            yield env.timeout(self._frng(key).exponential(mtbf * 3600))
             if env.now >= self.shift_s:
                 return
-            end = env.now + self._repair_s(mttr)
+            end = env.now + self._repair_s(mttr, key)
             if kind == "excavator":
                 obj.down.append((env.now, end, "awaria"))
                 obj.down_end = end
@@ -1264,8 +1278,9 @@ class SimResult:
 
         ex_rows = []
         for ex in sim.excavators.values():
-            active_s = (ex.depleted_at if ex.depleted_at is not None else shift_s) - ex.parked_s
             work = ex.loading_s + ex.spotting_s
+            # parking that went on after the pile ran out is not working time lost
+            active_s = max(work, (ex.depleted_at if ex.depleted_at is not None else shift_s) - ex.parked_s)
             ex_rows.append({
                 "excavator": ex.cfg.id,
                 "loaded_t": round(float(loads.loc[loads["excavator"] == ex.cfg.id, "tonnes"].sum()) if len(loads) else 0.0, 1),
