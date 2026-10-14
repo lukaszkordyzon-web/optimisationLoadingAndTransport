@@ -16,6 +16,7 @@ class Segment:
     speed_limit_kmh: float = 40.0
     section: str | None = None  # single-lane stretch between passing bays (one direction at a time)
     section_dir: int = 0        # +1 / -1: direction of this route (forward) relative to the road drawing
+    curves: list = field(default_factory=list)  # bends on this stretch: [[radius m, turn deg], …] (from the drawing)
 
 
 @dataclass

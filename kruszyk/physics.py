@@ -39,9 +39,41 @@ def segment_speed_kmh(seg: Segment, truck: TruckFleet, loaded: bool, rr_pct: flo
     return max(5.0, min(v, cap))
 
 
+# bends: safe speed v = sqrt(127 · R · f) [km/h, m] – haul road design, side friction f without superelevation;
+# braking before the bend and accelerating after it cost time (a loaded truck accelerates slowly)
+CURVE_FRICTION = 0.20
+BRAKE_MS2 = 0.8
+ACCEL_MS2 = {True: 0.3, False: 0.5}  # loaded / empty
+
+
+def curve_speed_kmh(radius_m: float) -> float:
+    return math.sqrt(127 * max(radius_m, 1.0) * CURVE_FRICTION)
+
+
+def curve_delay_s(seg: Segment, v_kmh: float, loaded: bool) -> float:
+    """Extra time for the bends of a segment driven at `v_kmh` on the straights."""
+    v = v_kmh / 3.6
+    extra = 0.0
+    for radius, turn_deg in seg.curves or []:
+        vc = curve_speed_kmh(radius) / 3.6
+        if vc >= v:
+            continue
+        arc = radius * math.radians(turn_deg)
+        a_b, a_a = BRAKE_MS2, ACCEL_MS2[loaded]
+        brake_t, acc_t = (v - vc) / a_b, (v - vc) / a_a
+        dist = (v * v - vc * vc) / (2 * a_b) + (v * v - vc * vc) / (2 * a_a)
+        extra += brake_t + acc_t - dist / v + arc / vc - arc / v
+    if not extra:
+        return 0.0
+    v_min = min(v, curve_speed_kmh(min(r for r, _ in seg.curves)) / 3.6)
+    return min(extra, seg.length_m / v_min - seg.length_m / v)  # at worst the whole stretch at the bend speed
+
+
 def segment_time_s(seg: Segment, truck: TruckFleet, loaded: bool, rr_pct: float,
                    forward: bool | None = None, load_t: float | None = None) -> float:
-    return seg.length_m / (segment_speed_kmh(seg, truck, loaded, rr_pct, forward, load_t) / 3.6)
+    v = segment_speed_kmh(seg, truck, loaded, rr_pct, forward, load_t)
+    load = (truck.payload_t if loaded else 0.0) if load_t is None else load_t
+    return seg.length_m / (v / 3.6) + curve_delay_s(seg, v, load > 0)
 
 
 def route_time_s(route: Route, truck: TruckFleet, loaded: bool, rr_pct: float) -> float:

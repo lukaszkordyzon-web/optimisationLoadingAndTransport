@@ -204,3 +204,36 @@ def test_ramp_inlet_sets_heights_and_flat_roads_become_levels():
     assert not analyze_site(site)["warnings"]  # the crusher follows the ramp inlet
     site["crusher"].update(elev_m=0.0, elev_set=True)  # typed in by hand: 0 m does not fit an inlet at 100 m
     assert any("nie zgadza" in w or "różnych wysokościach" in w for w in analyze_site(site)["warnings"])
+
+
+def test_bends_slow_the_trucks_down():
+    import math
+
+    from kruszyk.config import Segment, TruckFleet
+    from kruszyk.physics import curve_speed_kmh, segment_time_s
+    from kruszyk.site import group_bends, polyline_bends
+
+    # an L-shaped road: 200 m east, then 200 m north -> one 90° bend, a short leg -> a tight radius
+    pts = [(50.0, 20.0), (50.0, 20.0028), (50.0018, 20.0028)]
+    bends = group_bends(polyline_bends(pts))
+    assert len(bends) == 1 and abs(bends[0][1] - 90) < 2 and 80 < bends[0][0] < 120
+    # an arc drawn with several points is one bend
+    arc = [(50.0, 20.0)] + [(50.0 + 0.0004 * (1 - math.cos(a / 10)), 20.0 + 0.0006 * math.sin(a / 10)) for a in range(1, 16)]
+    assert len(group_bends(polyline_bends(arc))) <= 2
+    assert 19 < curve_speed_kmh(15) < 20 and 35 < curve_speed_kmh(50) < 36
+    t = TruckFleet(model="38 t", count=1, payload_t=38, empty_mass_t=33.5, power_kw=380, max_speed_kmh=60)
+    straight = segment_time_s(Segment("d", 400, 0, 40), t, True, 3)
+    hairpin = segment_time_s(Segment("d", 400, 0, 40, curves=[[15, 180]]), t, True, 3)
+    gentle = segment_time_s(Segment("d", 400, 0, 40, curves=[[120, 30]]), t, True, 3)
+    assert hairpin > straight + 8 and gentle == straight  # a wide bend does not slow a truck at 40 km/h
+
+
+def test_routes_from_the_map_carry_their_bends():
+    import yaml
+
+    from kruszyk.site import site_to_scenario
+
+    raw = yaml.safe_load((Path(__file__).parent.parent / "scenarios" / "kruszyk_kopalnia.yaml").read_text(encoding="utf-8"))
+    new = site_to_scenario(raw["site"], raw)
+    curves = [c for r in new["routes"].values() for s in r["segments"] for c in s.get("curves", [])]
+    assert curves and min(r for r, _ in curves) < 30  # the hairpin on the way out of the pit

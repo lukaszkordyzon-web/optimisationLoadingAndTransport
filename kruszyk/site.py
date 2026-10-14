@@ -401,6 +401,41 @@ def _lane_pieces(g: RoadGraph, u: int, v: int, w: float, dz: float, ri: int) -> 
     return [p for p in out if p[0] > 0.01] or [(w, dz, f"{rid}#{bisect.bisect_right(bays, au)}", sdir)]
 
 
+CURVE_MIN_DEG = 12.0  # smaller changes of direction are drawing noise, not bends
+
+
+def polyline_bends(pts: list) -> list[tuple[int, float, float]]:
+    """Bends of a drawn line: (vertex index, radius m, turn deg). The radius is the largest arc that fits the
+    corner touching both legs at their middles – a long gentle corner gives a big radius, a tight one a small."""
+    if len(pts) < 3:
+        return []
+    lat0 = pts[0][0]
+    xy = [_local(p, lat0) for p in pts]
+    out = []
+    for i in range(1, len(xy) - 1):
+        (x0, y0), (x1, y1), (x2, y2) = xy[i - 1], xy[i], xy[i + 1]
+        a1, a2 = math.atan2(y1 - y0, x1 - x0), math.atan2(y2 - y1, x2 - x1)
+        turn = (a2 - a1 + math.pi) % (2 * math.pi) - math.pi
+        deg = abs(math.degrees(turn))
+        if deg < CURVE_MIN_DEG:
+            continue
+        leg = min(math.hypot(x1 - x0, y1 - y0), math.hypot(x2 - x1, y2 - y1)) / 2
+        radius = leg / math.tan(min(abs(turn), math.radians(170)) / 2)
+        out.append((i, max(radius, 6.0), deg * (1 if turn > 0 else -1)))
+    return out
+
+
+def group_bends(bends: list[tuple[int, float, float]]) -> list[list[float]]:
+    """Neighbouring vertices turning the same way are one bend (an arc drawn with several points)."""
+    groups: list[list] = []
+    for i, r, deg in bends:
+        if groups and groups[-1][0] == i - 1 and (groups[-1][2] > 0) == (deg > 0):
+            groups[-1] = [i, min(groups[-1][1], r), groups[-1][2] + deg]
+        else:
+            groups.append([i, r, deg])
+    return [[round(r, 1), round(abs(d), 1)] for _, r, d in groups]
+
+
 def path_between(g: RoadGraph, start, end, elev: dict[int, float],
                  start_name: str = "front", end_name: str = "plac_kruszarki") -> dict:
     """Route start -> end over the network. Segments are grouped per road; each segment's grade is
@@ -415,6 +450,7 @@ def path_between(g: RoadGraph, start, end, elev: dict[int, float],
         segments.append({"name": start_name, "length_m": round(s_off, 1), "grade_pct": 0.0, "speed_limit_kmh": 15.0})
     geometry.append(list(g.nodes[s_node]))
     run = None
+    edge_run = []  # the segment each edge of the path ends in (bends at its end vertex belong there)
     for u, v, w, ri in path:
         road = g.roads[ri]
         name = road.get("name") or road.get("id") or f"droga {ri + 1}"
@@ -431,6 +467,17 @@ def path_between(g: RoadGraph, start, end, elev: dict[int, float],
                     run["section"], run["section_dir"] = section, sdir
                 segments.append(run)
         geometry.append(list(g.nodes[v]))
+        edge_run.append(run)
+    # bends along the path (also where two roads meet at an angle), each in the segment it lies on
+    nodes = [g.nodes[path[0][0]]] + [g.nodes[v] for _, v, _, _ in path]
+    by_run: dict[int, list] = {}
+    for i, r, deg in polyline_bends(nodes):
+        seg = edge_run[i - 1]
+        if seg is not None:
+            by_run.setdefault(id(seg), []).append((i, r, deg))
+    for seg in segments:
+        if id(seg) in by_run:
+            seg["curves"] = group_bends(by_run[id(seg)])
     if e_off > 5:
         segments.append({"name": end_name, "length_m": round(e_off, 1), "grade_pct": 0.0, "speed_limit_kmh": 15.0})
     geometry.append(list(end))

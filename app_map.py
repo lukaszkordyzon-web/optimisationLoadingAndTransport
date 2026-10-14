@@ -614,7 +614,8 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
              ("rzędna wlotu (wpisana)", _fmt(o.get("inlet_elev_m"), "m", 1)), ("poziom (auto)", auto or "–"),
              ("limit prędkości", _fmt(o.get("speed_limit_kmh"), "km/h")), ("jeden pas", _fmt(bool(o.get("single_lane")))),
              ("mijanki", ", ".join(bays) or "–"), ("w użyciu", _fmt(o.get("active", True))),
-             ("czas przejazdu przy limicie", _fmt(L / max(float(o.get("speed_limit_kmh") or 30), 1) * 3.6 / 60, "min", 1))]
+             ("czas przejazdu przy limicie", _fmt(L / max(float(o.get("speed_limit_kmh") or 30), 1) * 3.6 / 60, "min", 1)),
+             ("łuki (promień → prędkość w łuku)", _bends_text(o["coords"]))]
     elif kind in ("pile", "planned"):
         from kruszyk.psd import summary as psd_summary
 
@@ -834,6 +835,14 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
     st.session_state.obj_ver += 1
     st.session_state.map_flash = "✅ Zmieniono parametry – zapisz kopalnię, żeby weszły do obliczeń."
     st.rerun()
+
+
+def _bends_text(coords: list) -> str:
+    from kruszyk.physics import curve_speed_kmh
+    from kruszyk.site import group_bends, polyline_bends
+
+    bends = group_bends(polyline_bends(coords))
+    return ", ".join(f"R {r:.0f} m / {d:.0f}° → {curve_speed_kmh(r):.0f} km/h" for r, d in bends) or "brak (prosta)"
 
 
 def highlight(m, site: dict, sel: str | None) -> None:
@@ -1785,9 +1794,12 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         st.success("✅ Kopalnia zapisana. Dalej: **② Organizacja zmiany** i **③ Kalibracja**." if simple else
                    "Scenariusz zaktualizowany z mapy – zobacz zakładki „Scenariusz” i „Wyniki zmiany”.")
     if raw_for_build.get("site") and any("path" in r for r in raw_for_build["routes"].values()):
+        from kruszyk.physics import curve_speed_kmh
+
         rows = [{"trasa": rid, "odcinek": s["name"], "długość [m]": s["length_m"],
                  "nachylenie w stronę kruszarki [%]": s["grade_pct"],
-                 "limit [km/h]": s.get("speed_limit_kmh")}
+                 "limit [km/h]": s.get("speed_limit_kmh"),
+                 "łuki (R → km/h)": ", ".join(f"{r:.0f} m → {curve_speed_kmh(r):.0f}" for r, _ in s.get("curves") or [])}
                 for rid, r in raw_for_build["routes"].items() for s in r["segments"]]
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
