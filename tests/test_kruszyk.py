@@ -79,7 +79,11 @@ def test_live_cost_ends_at_the_final_cost_per_tonne():
     from kruszyk.config import load_scenario
     from kruszyk.sim import simulate
 
+    import yaml
+
     for f in sorted(glob.glob(str(Path(__file__).parent.parent / "scenarios" / "*.yaml"))):
+        if not yaml.safe_load(Path(f).read_text(encoding="utf-8")).get("excavators"):
+            continue  # a project template still to be drawn (e.g. the demo) – nothing to simulate yet
         r = simulate(load_scenario(f), seed=5)
         assert r.timeline["t_s"].iloc[-1] == r.scenario.shift_hours * 3600
         assert r.timeline["cost_per_t"].iloc[-1] == pytest.approx(r.kpi["cost_per_t"], abs=0.006), f

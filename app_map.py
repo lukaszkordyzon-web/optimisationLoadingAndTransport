@@ -47,6 +47,26 @@ DEDICATED_FOR = {"ekipa": "🧨 ekipa strzałowa", "sztygar": "👷 sztygar", "c
 DIRECTIONS = {"⬇ w dół": -1, "⬆ pod górę": 1, "➡ płasko": 0}
 
 
+def _dflt(key: str, fallback):
+    """A default from the project's catalogue (raw['defaults'], e.g. the demo project), else `fallback`."""
+    return (st.session_state.get("raw") or {}).get("defaults", {}).get(key, fallback)
+
+
+def _next_from_catalogue(kind: str, used: set) -> dict:
+    """The next machine of the project's catalogue that is not on the map yet ({} = none)."""
+    return next((m for m in _dflt(kind, []) if m.get("id") not in used), {})
+
+
+def _preset_index(default_name: str = DEFAULT_PRESET) -> int:
+    name = _dflt("psd_preset", default_name)
+    return list(PRESETS).index(name) if name in PRESETS else list(PRESETS).index(DEFAULT_PRESET)
+
+
+def _material_index() -> int:
+    m = _dflt("material", MATERIALS[0])
+    return MATERIALS.index(m) if m in MATERIALS else 0
+
+
 def empty_site() -> dict:
     return {"center": [52.0, 19.4], "zoom": 6, "crusher": None, "piles": [], "excavators": [], "roads": []}
 
@@ -328,8 +348,9 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
                                      "kwh_per_t": attrs.get("kwh_per_t")})
             ensure_uids(site)
             return f"✅ Dodano kruszarkę {cid} – zbuduj trasy (zapisz kopalnię), żeby wozidła do niej jeździły"
-        site["crusher"] = {**(site.get("crusher") or {}), "lat": lat, "lon": lon,
-                           **({"level": attrs["level"]} if attrs.get("level") else {})}
+        old = site.get("crusher") or {}
+        site["crusher"] = {**old, "lat": lat, "lon": lon, **({"level": attrs["level"]} if attrs.get("level") else {}),
+                           **{k: attrs[k] for k in ("id", "product") if attrs.get(k) and not old.get(k)}}
         return "✅ Ustawiono kruszarkę główną"
     if target == "Miejsce strzelania":
         site["blast"] = {"lat": lat, "lon": lon}
@@ -1306,16 +1327,17 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             attrs["status"] = "planned" if planned else "lying"
             n_all = len(site["piles"]) + len(site.get("planned_piles", []))
             attrs["id"] = st.text_input("Oznaczenie usypu", f"{'S' if planned else 'U'}-{n_all + 1:02d}", key=f"pile_id_{planned}")
-            attrs["material"] = st.selectbox("Materiał", MATERIALS)
+            attrs["material"] = st.selectbox("Materiał", MATERIALS, index=_material_index())
             lvl = level_select("Poziom", site, "pile_lvl")
             if lvl:
                 attrs["level"] = lvl
             attrs["tonnage_t"] = st.number_input("Ile ton da strzał" if planned else "Ilość [t]", 0.0, 10_000_000.0,
                                                  15_000.0 if planned else 10_000.0, 500.0, key=f"pile_t_{planned}")
             preset = st.selectbox("Uziarnienie (krzywą można potem dokładnie ustawić)", list(PRESETS),
-                                  index=list(PRESETS).index(DEFAULT_PRESET))
+                                  index=_preset_index())
             attrs["psd"] = PRESETS[preset]
-            attrs["loose_density_t_m3"] = st.number_input("Gęstość spulchniona [t/m³]", 1.0, 3.0, 1.75, 0.05)
+            attrs["loose_density_t_m3"] = st.number_input("Gęstość spulchniona [t/m³]", 1.0, 3.0,
+                                                          float(_dflt("loose_density_t_m3", 1.75)), 0.05)
             share = st.number_input("Udział w nadawie [%] (0 = bez celu)", 0.0, 100.0, 0.0, 5.0,
                                     help="Oczekiwany procent nadawy z tego usypu. Steruje nim optymalizacja – tylko "
                                          "dla wozideł nieprzypisanych na sztywno do jednej koparki.")
@@ -1326,8 +1348,8 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                                          help="licząc od pierwszego dnia harmonogramu (1 = pierwszy "
                                                               "dzień roboczy)"))
                 c = st.columns(2)
-                attrs["t_per_m"] = c[0].number_input("Ton na metr wiercenia [t/mb]", 5.0, 500.0, 50.0, 5.0,
-                                                     key="pile_tpm")
+                attrs["t_per_m"] = c[0].number_input("Ton na metr wiercenia [t/mb]", 5.0, 500.0,
+                                                     float(_dflt("t_per_m", 50.0)), 1.0, key="pile_tpm")
                 attrs["drilled"] = c[1].checkbox("Już nawiercony", key="pile_drilled")
                 attrs.update(blast_times_form("pile"))
                 st.caption("Narzędzie „wielokąt” (⬠). Obrysuj miejsce strzału (urobek po strzale). W dniu strzału "
@@ -1338,12 +1360,11 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         elif mode == "Planowany strzał (nowy usyp)":
             n_pl = len(site.get("planned_piles", []))
             attrs["id"] = st.text_input("Oznaczenie", f"S-{n_pl + 1:02d}")
-            attrs["material"] = st.selectbox("Materiał", MATERIALS, key="pl_mat")
+            attrs["material"] = st.selectbox("Materiał", MATERIALS, index=_material_index(), key="pl_mat")
             attrs["tonnage_t"] = st.number_input("Ile ton da strzał", 0.0, 10_000_000.0, 15_000.0, 1000.0, key="pl_t")
-            preset = st.selectbox("Spodziewane uziarnienie", list(PRESETS), index=list(PRESETS).index(DEFAULT_PRESET),
-                                  key="pl_psd")
+            preset = st.selectbox("Spodziewane uziarnienie", list(PRESETS), index=_preset_index(), key="pl_psd")
             attrs["psd"] = PRESETS[preset]
-            attrs["loose_density_t_m3"] = 1.75
+            attrs["loose_density_t_m3"] = float(_dflt("loose_density_t_m3", 1.75))
             share = st.number_input("Udział w nadawie [%] (0 = bez celu)", 0.0, 100.0, 0.0, 5.0, key="pl_share",
                                     help="ile procent nadawy ma iść z tego usypu, gdy już będzie odstrzelony")
             if share > 0:
@@ -1352,7 +1373,8 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                                      help="licząc od pierwszego dnia okresu w module „Planowanie produkcji” "
                                                           "(1 = pierwszy dzień roboczy)"))
             c = st.columns(2)
-            attrs["t_per_m"] = c[0].number_input("Ton na metr wiercenia [t/mb]", 5.0, 500.0, 50.0, 5.0, key="pl_tpm",
+            attrs["t_per_m"] = c[0].number_input("Ton na metr wiercenia [t/mb]", 5.0, 500.0, float(_dflt("t_per_m", 50.0)),
+                                                 1.0, key="pl_tpm",
                                                  help="z tego program liczy metry do wywiercenia i czas wiercenia")
             attrs["drilled"] = c[1].checkbox("Już nawiercony", key="pl_drilled")
             attrs.update(blast_times_form("pl"))
@@ -1363,10 +1385,9 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         elif mode == "Obszar wydobycia (strzały automatycznie)":
             n_ar = len(site.get("areas", []))
             attrs["id"] = st.text_input("Oznaczenie obszaru", f"O{n_ar + 1}", key="ar_id")
-            attrs["material"] = st.selectbox("Materiał", MATERIALS, key="ar_mat")
-            preset = st.selectbox("Spodziewane uziarnienie", list(PRESETS), index=list(PRESETS).index(DEFAULT_PRESET),
-                                  key="ar_psd")
-            attrs["psd"], attrs["loose_density_t_m3"] = PRESETS[preset], 1.75
+            attrs["material"] = st.selectbox("Materiał", MATERIALS, index=_material_index(), key="ar_mat")
+            preset = st.selectbox("Spodziewane uziarnienie", list(PRESETS), index=_preset_index(), key="ar_psd")
+            attrs["psd"], attrs["loose_density_t_m3"] = PRESETS[preset], float(_dflt("loose_density_t_m3", 1.75))
             attrs["reserves_t"] = st.number_input("Zasoby w obszarze [t] (0 = policz z powierzchni)", 0.0, 50_000_000.0,
                                                   0.0, 10_000.0, key="ar_res")
             lvl = level_select("Poziom (piętro)", site, "ar_lvl")
@@ -1375,19 +1396,23 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
             else:
                 st.caption("Bez poziomu rzędna zostanie odczytana z dróg przy obszarze (dodaj poziomy powyżej mapy).")
             c = st.columns(2)
-            attrs["bench_m"] = c[0].number_input("Wysokość piętra [m]", 1.0, 50.0, 15.0, 1.0, key="ar_h")
-            attrs["solid_density_t_m3"] = c[1].number_input("Gęstość w caliźnie [t/m³]", 1.5, 3.5, 2.6, 0.05, key="ar_d")
+            attrs["bench_m"] = c[0].number_input("Wysokość piętra [m]", 1.0, 50.0, float(_dflt("bench_m", 15.0)), 1.0,
+                                                 key="ar_h")
+            attrs["solid_density_t_m3"] = c[1].number_input("Gęstość w caliźnie [t/m³]", 1.5, 3.5,
+                                                            float(_dflt("solid_density_t_m3", 2.6)), 0.05, key="ar_d")
             st.markdown("**Ograniczenia strzałów**")
             c = st.columns(2)
-            attrs["blast_max_t"] = c[0].number_input("Największy strzał [t]", 1000.0, 1_000_000.0, 20_000.0, 1000.0,
-                                                     key="ar_max")
+            attrs["blast_max_t"] = c[0].number_input("Największy strzał [t]", 1000.0, 1_000_000.0,
+                                                     float(_dflt("blast_max_t", 20_000.0)), 1000.0, key="ar_max")
             attrs["reblast_below_t"] = c[1].number_input("Strzelaj, gdy zostanie mniej niż [t]", 0.0, 1_000_000.0,
-                                                         8_000.0, 1000.0, key="ar_below",
+                                                         float(_dflt("reblast_below_t", 8_000.0)), 1000.0, key="ar_below",
                                                          help="urobku z tego obszaru na usypach")
-            attrs["min_gap_days"] = int(c[0].number_input("Odstęp między strzałami [dni rob.]", 1, 30, 2, 1, key="ar_gap"))
+            attrs["min_gap_days"] = int(c[0].number_input("Odstęp między strzałami [dni rob.]", 1, 30,
+                                                          int(_dflt("min_gap_days", 2)), 1, key="ar_gap"))
             attrs["max_per_day"] = int(c[1].number_input("Strzałów dziennie maks.", 1, 5, 1, 1, key="ar_mpd"))
             c = st.columns(2)
-            attrs["t_per_m"] = c[0].number_input("Ton na metr wiercenia [t/mb]", 5.0, 500.0, 50.0, 5.0, key="ar_tpm",
+            attrs["t_per_m"] = c[0].number_input("Ton na metr wiercenia [t/mb]", 5.0, 500.0, float(_dflt("t_per_m", 50.0)),
+                                                 1.0, key="ar_tpm",
                                                  help="z tego program liczy metry do wywiercenia i czas wiercenia")
             attrs["first_drilled"] = c[1].checkbox("Pierwszy pas już nawiercony", True, key="ar_fd")
             share = st.number_input("Udział w nadawie [%] (0 = bez celu)", 0.0, 100.0, 0.0, 5.0, key="ar_share")
@@ -1400,11 +1425,19 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                        "mają co ładować – z zachowaniem odstępu między strzałami. Kruszarki przyjmują urobek z obszaru, "
                        "jeśli zaznaczysz go w tabeli kruszarek.")
         elif mode == "Koparka":
-            attrs["id"] = st.text_input("Oznaczenie koparki", f"K-{len(site['excavators']) + 1}")
+            cat = _next_from_catalogue("excavators", {e["id"] for e in site["excavators"]})
+            if cat:
+                st.caption(f"Z katalogu projektu: **{cat.get('type', cat['id'])}**")
+            attrs["id"] = st.text_input("Oznaczenie koparki", cat.get("id", f"K-{len(site['excavators']) + 1}"),
+                                        key=f"ex_id_{cat.get('id', '')}")
             piles = [p["id"] for p in site["piles"]]
             attrs["pile"] = st.selectbox("Ładuje z usypu", piles or ["(najbliższy)"])
-            attrs["bucket_m3"] = st.number_input("Łyżka [m³]", 0.5, 30.0, 5.0, 0.5)
-            attrs["swing_cycle_s"] = st.number_input("Cykl łyżki [s]", 10.0, 90.0, 30.0, 1.0)
+            attrs["bucket_m3"] = st.number_input("Łyżka [m³]", 0.5, 30.0, float(cat.get("bucket_m3", 5.0)), 0.5,
+                                                 key=f"ex_b_{cat.get('id', '')}")
+            attrs["swing_cycle_s"] = st.number_input("Cykl łyżki [s]", 10.0, 90.0, float(cat.get("swing_cycle_s", 30.0)),
+                                                     1.0, key=f"ex_c_{cat.get('id', '')}")
+            if cat.get("fill_factor"):
+                attrs["fill_factor"] = float(cat["fill_factor"])
             st.caption("Narzędzie „znacznik” (📍). Postaw go w miejscu pracy koparki.")
         elif mode == "Miejsce postoju koparki":
             ex_ids = [e["id"] for e in site["excavators"]]
@@ -1419,15 +1452,28 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                 lvl = level_select("Poziom kruszarki", site, "cr_lvl", (site.get("crusher") or {}).get("level"))
                 if lvl:
                     attrs["level"] = lvl
+            used = {(site.get("crusher") or {}).get("id", "C-1") if site.get("crusher") else None} | \
+                {c["id"] for c in site.get("crushers", [])}
+            cat = _next_from_catalogue("crushers", used)
+            if cat:
+                st.caption(f"Z katalogu projektu: **{cat.get('type', cat['id'])}**")
+            if not attrs.get("new_crusher") and cat and not site.get("crusher"):
+                attrs["id"], attrs["product"] = cat["id"], cat.get("product", "")
             if attrs.get("new_crusher"):
                 n_cr = len(site.get("crushers", []))
-                attrs["id"] = st.text_input("Oznaczenie", f"C-{n_cr + 2}", key="cr_id")
-                attrs["capacity_tph"] = st.number_input("Wydajność [t/h]", 50.0, 10_000.0, 800.0, 50.0, key="cr_cap")
-                attrs["hopper_t"] = st.number_input("Kosz [t]", 10.0, 2000.0, 150.0, 10.0, key="cr_hop")
+                attrs["id"] = st.text_input("Oznaczenie", cat.get("id", f"C-{n_cr + 2}"), key=f"cr_id_{cat.get('id', '')}")
+                attrs["capacity_tph"] = st.number_input("Wydajność [t/h]", 50.0, 10_000.0, float(cat.get("capacity_tph", 800.0)),
+                                                        50.0, key=f"cr_cap_{cat.get('id', '')}")
+                attrs["hopper_t"] = st.number_input("Kosz [t]", 10.0, 2000.0, float(cat.get("hopper_t", 150.0)), 10.0,
+                                                    key=f"cr_hop_{cat.get('id', '')}")
                 attrs["accepts"] = st.multiselect(
                     "Przyjmuje urobek z (puste = ze wszystkich)", _pile_ids(site), key="cr_acc")
-                attrs["product"] = st.selectbox("Co produkuje", list(PRODUCTS), key="cr_prod")
-                attrs["kwh_per_t"] = st.number_input("Energia [kWh/t]", 0.1, 10.0, float(PRODUCTS[attrs["product"]]),
+                attrs["product"] = st.selectbox("Co produkuje", list(PRODUCTS), key=f"cr_prod_{cat.get('id', '')}",
+                                                index=list(PRODUCTS).index(cat["product"]) if cat.get("product") in PRODUCTS
+                                                else 0)
+                attrs["kwh_per_t"] = st.number_input("Energia [kWh/t]", 0.1, 10.0, float(
+                    cat["kwh_per_t"] if cat.get("kwh_per_t") and cat.get("product") == attrs["product"]
+                    else PRODUCTS[attrs["product"]]),
                                                      0.1, key=f"cr_kwh_{attrs['product']}",
                                                      help="typowa dla wybranego produktu – możesz poprawić")
                 attrs["target_t"] = st.number_input("Plan na zmianę [t] (0 = bez planu)", 0.0, 100_000.0, 0.0, 500.0,

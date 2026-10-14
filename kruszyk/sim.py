@@ -25,6 +25,7 @@ IDLE_STATES = {"kolejka_koparka", "podstawienie", "zaladunek", "kolejka_kruszark
                "wyladunek_halda", "postoj_koparki", "wyjazd_z_frontu", "mijanka", "inne_przestoje"}
 CONNECTORS = {"front", "plac_kruszarki", "dojazd"}  # short links to the network, not real roads
 PREFILL_NATURAL_P = 0.3  # without information the operator sometimes guesses and fills the bucket in time
+NATURAL_QUEUE_SWITCH_S = 180.0  # a driver goes to another crusher when the queue at the nearest is this much longer
 
 
 @dataclass
@@ -273,14 +274,18 @@ class Simulation:
         return self.sc.routes[ex.cfg.crusher_routes[crusher_id]]
 
     def _pick_crusher(self, truck: TruckState, plan, last: ExcavatorState, tonnes: float) -> CrusherUnit:
-        """Where to dump: a crusher taking all the material on board. Today's practice: the nearest one;
-        with the system: the one where the truck is unloaded soonest (drive + expected wait)."""
+        """Where to dump: a crusher taking all the material on board. Today's practice: the nearest one, unless
+        the driver sees a clearly longer queue there than at another line (no knowledge of trucks on the way);
+        with the system: the one where the truck is unloaded soonest (drive + expected wait, trucks on the way)."""
         ok = [u for u in self.units.values() if all(u.cfg.takes(e.cfg.blast) for e, _ in plan)]
         if len(ok) <= 1:
             return ok[0] if ok else self.main
         fleet, rr = truck.fleet, self.sc.rolling_resistance_pct
         if self.sc.dispatch == "natural":
-            return min(ok, key=lambda u: self._route_to(last, u.cfg.id).length_m)
+            near = min(ok, key=lambda u: self._route_to(last, u.cfg.id).length_m)
+            seen = {u.cfg.id: self.expected_dump_wait_s(tonnes, unit=u) for u in ok}  # what the queues look like now
+            other = min(ok, key=lambda u: seen[u.cfg.id])
+            return other if seen[near.cfg.id] - seen[other.cfg.id] > NATURAL_QUEUE_SWITCH_S else near
 
         def finish(u):
             haul = route_time_s(self._route_to(last, u.cfg.id), fleet, True, rr)

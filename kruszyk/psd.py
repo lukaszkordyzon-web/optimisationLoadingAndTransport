@@ -24,6 +24,7 @@ def rosin_rammler(p80_mm: float, n: float = 1.2, sizes=SIEVES_MM) -> list[list[f
 PRESETS = {
     "drobne (dobry odstrzał)": rosin_rammler(150, 1.3),
     "średnie": rosin_rammler(300, 1.2),
+    "średnio-grube (P50 240, P80 450 mm)": rosin_rammler(450, 1.34),
     "grube": rosin_rammler(550, 1.1),
     "bardzo grube (dużo brył)": rosin_rammler(850, 1.0),
 }

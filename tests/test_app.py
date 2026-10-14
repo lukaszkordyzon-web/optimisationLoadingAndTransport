@@ -313,3 +313,16 @@ def test_new_project_starts_an_empty_mine():
     assert not at.exception, at.exception
     at.toggle(key="advanced").set_value(True).run()
     assert not at.exception, at.exception
+
+
+def test_demo_project_on_zakrzowek():
+    from kruszyk.project import DEMO_CENTER
+
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    name = next(o for o in at.sidebar.selectbox[0].options if "Zakrzówek" in o)
+    at.sidebar.selectbox[0].select(name).run()
+    at.sidebar.button[0].click().run()
+    assert not at.exception, at.exception
+    site = at.session_state["site"]
+    assert tuple(site["center"]) == DEMO_CENTER and site["zoom"] == 16
+    assert not site["roads"] and not at.session_state["raw"]["excavators"]  # empty: ready to draw the demo mine

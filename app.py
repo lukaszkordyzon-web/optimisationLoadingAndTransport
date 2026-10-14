@@ -57,25 +57,11 @@ def set_raw(raw: dict, new_mine: bool = False):
             st.session_state.pop(key, None)
 
 
-# what a new project keeps from the default mine: settings, not the mine itself
-NEW_PROJECT_KEEP = ("shift_hours", "seed", "loose_density_t_m3", "rolling_resistance_pct", "variability", "costs",
-                    "shift_plan", "traffic", "inspection", "refueling", "spotting", "pacing")
-
-
 def new_project(name: str) -> dict:
-    """An empty mine: no map objects, no machines – only the usual settings (shift, costs, variability)."""
-    from app_map import empty_site
+    """An empty mine with the usual settings of the default mine."""
+    from kruszyk.project import new_project as make
 
-    base = yaml.safe_load(presets_by_stem()[DEFAULT_SCENARIO].read_text(encoding="utf-8"))
-    raw = {k_: copy.deepcopy(base[k_]) for k_ in NEW_PROJECT_KEEP if k_ in base}
-    raw.update({"name": name.strip() or "Nowa kopalnia", "dispatch": "natural", "blasts": [], "excavators": [],
-                "trucks": [], "routes": {}, "links": {}, "planned_blasts": [], "areas": [], "crushers_extra": [],
-                "crusher": {"capacity_tph": 800.0, "hopper_t": 150.0, "dump_time_s": 60.0},
-                "stockpile": {"enabled": False}, "blasting": {"enabled": False}, "drills": [],
-                "site": empty_site()})
-    raw["refueling"] = {k_: v_ for k_, v_ in (raw.get("refueling") or {}).items() if k_ != "tanker_times"}
-    raw["inspection"] = {"enabled": False}
-    return raw
+    return make(yaml.safe_load(presets_by_stem()[DEFAULT_SCENARIO].read_text(encoding="utf-8")), name)
 
 
 def presets_by_stem() -> dict[str, Path]:
