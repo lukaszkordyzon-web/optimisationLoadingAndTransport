@@ -538,6 +538,13 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
                        help="Każde wozidło dostaje zalecaną prędkość, żeby dojechać pod koparkę dokładnie, gdy będzie "
                             "wolna (nie wcześniej – kolejka, nie później – koparka czeka). Operator koparki dostaje "
                             "komunikat, kto i za ile podjedzie oraz co robić: nabrać łyżkę i czekać, przegarnąć front…")
+    chain = st.select_slider(
+        "🔗 Ucz na zmianach z rzędu", [1, 3, 5], value=1, key="rl_chain",
+        format_func=lambda n: "1 – osobne zmiany" if n == 1 else f"{n} zmian z rzędu",
+        help="1: każda zmiana próbna zaczyna się od pełnych usypów – szybko, ale polityka nie widzi, że dziś "
+             "wybrany do zera usyp jutro będzie pusty. 3 / 5: zmiany po kolei jak w harmonogramie – co jedna zmiana "
+             "wywiezie, tego brakuje na następnej, koparki przejeżdżają, obszary są strzelane. Wolniej, ale polityka "
+             "uczy się równo zbierać z usypów.")
     yaml_text = targets[which]
     sc = scenario_from_dict(yaml.safe_load(yaml_text))
     sc.advisor.enabled = advise
@@ -562,8 +569,9 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
             chart.line_chart(pd.DataFrame(rows).set_index("iteracja")[["koszt_polityka", "koszt_naturalny"]]
                              .rename(columns={"koszt_polityka": "po nauce", "koszt_naturalny": "bez optymalizacji"}))
 
-        res = rl_train(sc, iterations=8, population=10, episodes=2, shift_hours=min(4.0, sc.shift_hours),
-                       eval_episodes=3, callback=cb, advisor=advise, learn_advisor=True, learn_excavators=True)
+        res = rl_train(sc, iterations=8, population=10, episodes=2 if chain <= 3 else 1,
+                       shift_hours=min(4.0, sc.shift_hours), eval_episodes=3 if chain == 1 else 2, callback=cb,
+                       advisor=advise, learn_advisor=True, learn_excavators=True, chain=chain)
         bar.empty()
         chart.empty()
         # the policy is used only if it really beats today's practice on full shifts (not just in training)
@@ -572,10 +580,21 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
         from kruszyk.optimize import kpi_row
         from kruszyk.rl import aggregate
 
-        before = aggregate([kpi_row(run_policy(base_yaml, s_, "natural").kpi) for s_ in seeds])["objective"]
-        after = aggregate([kpi_row(run_policy(dump_scenario(trial), s_, "rl").kpi) for s_ in seeds])["objective"]
+        if chain > 1:  # the check runs the same way as the learning: shifts in a row
+            from kruszyk.rl import chain_kpis
+
+            today_sc = scenario_from_dict(yaml.safe_load(base_yaml))
+            today_sc.dispatch = "natural"
+            before = aggregate([kpi_row(k) for k in chain_kpis(today_sc, seeds[:2], chain)])["objective"]
+            after = aggregate([kpi_row(k) for k in chain_kpis(trial, seeds[:2], chain)])["objective"]
+            test_label = f"2 serie po {chain} " + ("zmiany" if chain < 5 else "zmian") + " z rzędu"
+        else:
+            before = aggregate([kpi_row(run_policy(base_yaml, s_, "natural").kpi) for s_ in seeds])["objective"]
+            after = aggregate([kpi_row(run_policy(dump_scenario(trial), s_, "rl").kpi) for s_ in seeds])["objective"]
+            test_label = f"{len(seeds)} pełne zmiany"
         no_gain = after > before * (1 - RL_MIN_GAIN)
-        store[which] = {"result": res, "key": mine_key, "no_gain": no_gain, "test": (before, after)}
+        store[which] = {"result": res, "key": mine_key, "no_gain": no_gain, "test": (before, after),
+                        "test_label": test_label}
         if which == "stan obecny" and no_gain:
             base_raw.pop("rl_weights", None)  # keep today's practice – nothing to gain here
         elif which == "stan obecny":
@@ -587,8 +606,12 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
         st.rerun()
     entry = store.get(which)
     if not entry or entry["key"] != mine_key:
-        st.caption("Kliknij przycisk – nauka trwa zwykle 15–40 s.")
+        st.caption("Kliknij przycisk – nauka trwa zwykle " + ("15–40 s." if chain == 1 else
+                   f"{2 if chain == 3 else 3}–{4 if chain == 3 else 6} min (pełne zmiany po kolei)."))
         return
+    st.info(learned_on(entry["result"].setup, entry.get("test_label", "4 pełne zmiany")))
+    if entry["result"].setup.get("chain", 1) != chain:
+        st.caption("↻ Suwak „zmiany z rzędu” zmienił się od nauki – kliknij przycisk, żeby nauczyć politykę od nowa.")
     if advise:
         st.info("**Komunikaty na terminalach operatorów:**  \n"
                 "🚚 **Kierowca:** „Jedź do K-2, zalecana prędkość 22 km/h – będziesz, gdy koparka skończy WZ-04” "
@@ -605,7 +628,7 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     if entry.get("no_gain"):
         before, after = entry["test"]
         st.warning(f"**Nauczony przydział nie obniża kosztu tej kopalni** ({after:.2f} zł/t wobec {before:.2f} zł/t dziś, "
-                   "średnio z 4 pełnych zmian) – zostaje przydział jak dziś, a polityka RL **nie jest zapisywana**.  \n"
+                   f"test: {entry.get('test_label', '4 pełne zmiany')}) – zostaje przydział jak dziś, a polityka RL **nie jest zapisywana**.  \n"
                    + "  \n".join(bottleneck(today)))
     st.markdown(f"#### Wynik: {which} + nauczony przydział vs dziś (ta sama zmiana)")
     _tiles(best, today)
@@ -641,6 +664,25 @@ def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     st.plotly_chart(fig, width="stretch")
     st.markdown("#### Zobacz, jak jeżdżą po optymalizacji")
     components.html(compare_page(rl_yaml, "rl", base_yaml, seed, f"{which} + nauczony przydział"), height=760, scrolling=False)
+
+
+def learned_on(setup: dict, test_label: str) -> str:
+    """What the policy learned on, in plain words."""
+    n = setup.get("chain", 1)
+    it, pop, ep = setup.get("iterations", 0), setup.get("population", 0), setup.get("episodes", 0)
+    if n > 1:
+        how = (f"**{ep} {'serii' if ep == 1 else 'seriach'} po {n} {'pełne zmiany' if n < 5 else 'pełnych zmian'} "
+               "z rzędu** – usypy przechodzą ze zmiany "
+               "na zmianę, koparki przejeżdżają na inne usypy, obszary są strzelane jak w harmonogramie. Polityka "
+               "płaci za to, że dziś opróżni usyp, a jutro koparka nie ma czego ładować.")
+    else:
+        h = setup.get("shift_hours")
+        how = (f"**{ep} osobnych zmianach**" + (f" skróconych do {h:g} h" if h else "") + ", każda od pełnych "
+               "usypów – polityka **nie widzi**, że wybrany dziś usyp będzie pusty na następnej zmianie (do "
+               "harmonogramu lepiej uczyć na zmianach z rzędu).")
+    return (f"🎓 **Na czym polityka się uczyła:** {it} rund nauki × {pop} wersji polityki; każda wersja sprawdzana na "
+            f"{how}  \nRazem ok. **{setup.get('shifts', 0):,} zmian symulacji**".replace(",", " ")
+            + f"; zatwierdzenie względem pracy jak dziś: {test_label}, na nowych zmianach (pogoda, awarie).")
 
 
 def _rec_numbers(x: dict) -> str:

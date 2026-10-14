@@ -90,8 +90,9 @@ def _blends_ok(sc: Scenario, ex_pile: dict, ex_id: str, pile: str) -> bool:
     return True
 
 
-def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> pd.DataFrame:
-    """One row per shift. `progress(i, n)` is called after every shift (for a progress bar)."""
+def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpis: list | None = None) -> pd.DataFrame:
+    """One row per shift. `progress(i, n)` is called after every shift (for a progress bar); `kpis` collects
+    the full KPIs of every shift."""
     from .config import Blast
     from .site import haversine_m
 
@@ -394,6 +395,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None) -> 
                 e.route, e.dig_routes = e.dig_routes[k], e.dig_routes[k:]
         res = simulate(v, seed=seed + 7919 * i)
         k = res.kpi
+        if kpis is not None:
+            kpis.append(k)
         carry = dict(k.get("carry_down") or {})
         loaded = res.loads.groupby("blast")["tonnes"].sum() if len(res.loads) else pd.Series(dtype=float)
         for pid in left:

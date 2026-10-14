@@ -8,6 +8,9 @@ ones, move the sampling distribution towards them, repeat. Reward = -cost per to
 
 Candidates in one iteration are evaluated on the same random shifts (common random numbers), so they
 are compared fairly; every iteration uses new shifts, so the policy does not overfit to one day.
+
+With `chain` = N every episode is N shifts one after another (as in the schedule): what one shift takes out of
+a pile is missing on the next one, so a policy that empties the nearest pile pays for it later.
 """
 from __future__ import annotations
 
@@ -99,11 +102,28 @@ def _episode_scenario(sc: Scenario, policy: str, theta=None, shift_hours: float 
     return v
 
 
+def chain_kpis(sc: Scenario, seeds: list[int], n: int) -> list[dict]:
+    """KPIs of `n` shifts one after another for every seed, the scenario as it is (dispatch, policy): the piles
+    carry over from shift to shift, excavators move and areas are blasted as in the schedule."""
+    import datetime as dt
+
+    from .period import PeriodPlan, run_period
+
+    plan = PeriodPlan(start=dt.date(2026, 1, 5), days=n, shifts_per_day=1, saturdays=True, sundays=True)
+    out: list[dict] = []
+    for s in seeds:
+        run_period(sc, plan, seed=s, kpis=out)
+    return out
+
+
 def evaluate(sc: Scenario, policy: str, seeds: list[int], theta=None, shift_hours: float | None = None,
-             advisor: bool = False, learn_excavators: bool = False, learn_advisor: bool = False) -> dict:
-    """Mean KPIs of a policy over the given simulated shifts."""
-    v = _episode_scenario(sc, policy, theta, shift_hours, advisor, learn_excavators, learn_advisor)
-    rows = [kpi_row(simulate(v, seed=s).kpi) for s in seeds]
+             advisor: bool = False, learn_excavators: bool = False, learn_advisor: bool = False,
+             chain: int = 1) -> dict:
+    """Mean KPIs of a policy over the given simulated shifts (`chain` > 1: series of shifts in a row)."""
+    v = _episode_scenario(sc, policy, theta, None if chain > 1 else shift_hours, advisor, learn_excavators,
+                          learn_advisor)
+    rows = [kpi_row(k) for k in chain_kpis(v, seeds, chain)] if chain > 1 else \
+        [kpi_row(simulate(v, seed=s).kpi) for s in seeds]
     df = pd.DataFrame(rows)
     out = df.mean(numeric_only=True).to_dict()
     out.update(aggregate(rows))
@@ -132,19 +152,24 @@ class TrainResult:
     advisor: dict | None = None   # learned advisor settings (None when not learned)
     excavators: dict | None = None  # learned excavator management (None when not learned)
     baseline_by_iteration: dict = field(default_factory=dict)
+    setup: dict = field(default_factory=dict)  # what the policy learned on (for the description)
 
 
 def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: float = 0.25,
           episodes: int = 2, shift_hours: float | None = 4.0, eval_episodes: int = 4, seed: int = 0,
           callback: Callable[[int, int, dict], None] | None = None, advisor: bool = False,
-          learn_advisor: bool = True, learn_excavators: bool = True) -> TrainResult:
+          learn_advisor: bool = True, learn_excavators: bool = True, chain: int = 1) -> TrainResult:
     """Learn the dispatch weights; with `advisor` the trucks/operators get real-time advice and, with
-    `learn_advisor`, its three settings are learned together with the dispatch (starting from the rules)."""
+    `learn_advisor`, its three settings are learned together with the dispatch (starting from the rules).
+    `chain` > 1: every episode is that many full shifts in a row (piles carry over), not one separate shift."""
+    chain = max(1, int(chain))
+    if chain > 1:
+        shift_hours = None  # depletion of the piles needs whole shifts
     rng = np.random.default_rng(seed)
     n = len(FEATURE_NAMES)
     learn_adv = advisor and learn_advisor
     dim = n + (N_EX if learn_excavators else 0) + (len(ADVISOR_PARAMS) if learn_adv else 0)
-    kw = dict(advisor=advisor, learn_excavators=learn_excavators, learn_advisor=learn_adv)
+    kw = dict(advisor=advisor, learn_excavators=learn_excavators, learn_advisor=learn_adv, chain=chain)
     mu = np.zeros(dim)  # start: an untrained dispatch policy + the hand-made advice rules
     sigma = np.concatenate([np.full(n, 1.5), np.full(dim - n, 1.0)])
     n_elite = max(2, int(round(population * elite_frac)))
@@ -152,7 +177,7 @@ def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: 
 
     def record(it: int, seeds: list[int], pop_costs: list[float] | None):
         policy = evaluate(sc, "rl", seeds, mu, shift_hours, **kw)
-        natural = evaluate(sc, "natural", seeds, None, shift_hours)
+        natural = evaluate(sc, "natural", seeds, None, shift_hours, chain=chain)
         row = {
             "iteracja": it,
             "koszt_populacja_sredni": float(np.mean([min(c, 1e3) for c in pop_costs])) if pop_costs else None,
@@ -197,7 +222,7 @@ def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: 
     eval_seeds = [sc.seed + 90_000 + e for e in range(eval_episodes)]
     comp = []
     for policy in ("natural", "fixed", "dynamic"):
-        comp.append({"polityka": POLICIES[policy], **evaluate(sc, policy, eval_seeds)})
+        comp.append({"polityka": POLICIES[policy], **evaluate(sc, policy, eval_seeds, chain=chain)})
     if learn_excavators or learn_adv:
         # the same learned dispatch, but excavators and advice as today / by the rules
         only_dispatch = np.concatenate([mu[:n], np.zeros(dim - n)])
@@ -209,7 +234,11 @@ def train(sc: Scenario, iterations: int = 10, population: int = 12, elite_frac: 
     return TrainResult(weights=[float(x) for x in mu[:n]], history=pd.DataFrame(history),
                        comparison=pd.DataFrame(comp),
                        advisor=decode_advisor(adv_x) if learn_adv else None,
-                       excavators=decode_excavators(ex_x) if learn_excavators else None)
+                       excavators=decode_excavators(ex_x) if learn_excavators else None,
+                       setup={"iterations": iterations, "population": population, "episodes": episodes,
+                              "shift_hours": shift_hours, "eval_episodes": eval_episodes, "chain": chain,
+                              "shifts": (iterations * (population + 2) + 2) * episodes * chain
+                              + (4 + (learn_excavators or learn_adv)) * eval_episodes * chain})
 
 
 def explain_excavators(p: dict) -> list[str]:

@@ -139,3 +139,16 @@ def test_old_policies_without_new_features_still_run(demo):
     sc = copy.deepcopy(demo)
     sc.dispatch, sc.rl_weights = "rl", [1.0, 1.0, 0.5, 1.0, 0.0, 0.5, 0.0]  # saved before the feed-mix feature
     assert simulate(sc).kpi["hauled_t"] > 0
+
+
+def test_rl_learns_on_shifts_in_a_row():
+    """chain = N: every episode is N full shifts one after another – the piles carry over between them."""
+    from kruszyk.rl import chain_kpis
+
+    sc = load_scenario(Path(__file__).parent.parent / "scenarios" / "kruszyk_demo_zakrzowek.yaml")
+    sc.dispatch = "natural"
+    kpis = chain_kpis(sc, [5], 3)
+    assert len(kpis) == 3 and all(k["hauled_t"] > 0 for k in kpis)
+    r = train(copy.deepcopy(sc), iterations=1, population=3, episodes=1, eval_episodes=1, chain=2)
+    assert r.setup["chain"] == 2 and r.setup["shift_hours"] is None  # whole shifts, not shortened
+    assert r.setup["shifts"] > 0 and len(r.weights) == len(FEATURE_NAMES)
