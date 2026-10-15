@@ -203,3 +203,19 @@ def test_excavators_work_only_in_their_areas():
             allowed = {"K-1": k1.areas, "K-2": k2.areas}.get(ex)
             if allowed:
                 assert pile in allowed or pile.split("/")[0] in allowed, (ex, pile)
+
+
+def test_excavator_goes_to_the_pile_set_in_the_plan():
+    """Without a plan the dug-out excavator goes to the nearest free pile; with next_piles to the one named."""
+    sc = load_scenario(DEMO)
+    for b in sc.blasts:
+        b.tonnage_t = 1500.0 if b.id == "U-01" else b.tonnage_t
+    for p in sc.planned_blasts:
+        p["blast_day"] = 1  # both new piles are there from the first day: two free places to choose from
+    others = [p["id"] for p in sc.planned_blasts]
+    assert len(others) >= 2
+    ex = next(e for e in sc.excavators if e.blast == "U-01")
+    for target in others:
+        df = run_period(sc, PeriodPlan(start=dt.date(2026, 11, 2), days=3, shifts_per_day=1,
+                                       next_piles={ex.id: [target]}), seed=1)
+        assert any(f"{ex.id} → {target}" in m for m in df["przejazdy_koparek"]), (target, list(df["przejazdy_koparek"]))

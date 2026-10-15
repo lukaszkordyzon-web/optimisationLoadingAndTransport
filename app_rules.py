@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 
 import streamlit as st
+import yaml
 
 from ui import card
 
@@ -31,6 +32,26 @@ def goal_feed_t(raw: dict, item: str, tonnes: float) -> tuple[float, float]:
         den += cap
     share = num / den if den else 0.0
     return (tonnes / (share / 100) if share > 0 else 0.0), share
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def loading_rates(raw_yaml: str) -> tuple[dict, float]:
+    """How many tonnes an hour each excavator loads on a shift worked as today ({id: t/h}, shift hours) – to tell
+    whether its pile lasts the shift."""
+    from kruszyk.config import scenario_from_dict
+    from kruszyk.sim import simulate
+
+    try:
+        sc = scenario_from_dict(yaml.safe_load(raw_yaml))
+    except Exception:  # an unfinished mine: no estimate
+        return {}, 8.0
+    sc.dispatch, sc.shift_goal = "natural", {}
+    k = simulate(sc, seed=sc.seed).kpi
+    out = {}
+    for e in k["excavators"]:
+        h = e.get("blast_done_at_h") or sc.shift_hours
+        out[e["excavator"]] = e["loaded_t"] / h if h else 0.0
+    return out, float(sc.shift_hours)
 
 
 def step_rules(raw: dict, set_raw) -> None:
@@ -84,26 +105,36 @@ def step_rules(raw: dict, set_raw) -> None:
             st.caption("Bez celu: zmiana wozi, ile zdąży; optymalizacja szuka najniższego kosztu na tonę.")
 
     # ---------------------------------------------------------------- excavators
+    rates, hours = loading_rates(yaml.safe_dump(raw, allow_unicode=True))
+    pile_t = {p["id"]: float(p.get("tonnage_t") or 0.0) for p in site.get("piles", [])}
     with card("rules_ex"):
-        st.markdown("#### ⛏️ Koparki – gdzie ładują i dokąd przejeżdżają")
-        st.caption("Gdy usyp się kończy (albo zostanie na nim mniej niż próg), koparka **w trakcie zmiany** "
-                   "przejeżdża na wskazany usyp; resztę ładuje koparka, która została na starym.")
-        h = st.columns([1, 2, 2, 2])
-        for c_, t_ in zip(h, ("**koparka**", "**ładuje z usypu**", "**potem przejeżdża na**", "**gdy zostanie mniej niż [t]**")):
-            c_.markdown(t_)
+        st.markdown("#### ⛏️ Koparki – gdzie ładują")
         ex_rules = {}
         for e in excavators:
             c = st.columns([1, 2, 2, 2])
             c[0].markdown(f"**{e['id']}**  \n<small>{e.get('model', '')}</small>", unsafe_allow_html=True)
-            pile = c[1].selectbox("usyp", piles, index=piles.index(e["pile"]) if e.get("pile") in piles else 0,
-                                  key=k(f"pile_{e['id']}"), label_visibility="collapsed")
-            nxt_opts = ["— zostaje —"] + [p for p in piles if p != pile]
-            nxt = c[2].selectbox("potem", nxt_opts, index=nxt_opts.index(e["then_pile"]) if e.get("then_pile") in nxt_opts
-                                 else 0, key=k(f"then_{e['id']}"), label_visibility="collapsed")
-            below = c[3].number_input("próg", 0.0, 100_000.0, float(e.get("then_below_t") or 0.0), 100.0,
-                                      key=k(f"below_{e['id']}"), label_visibility="collapsed",
-                                      disabled=nxt == nxt_opts[0])
-            ex_rules[e["id"]] = (pile, "" if nxt == nxt_opts[0] else nxt, below)
+            pile = c[1].selectbox("ładuje z usypu", piles, index=piles.index(e["pile"]) if e.get("pile") in piles else 0,
+                                  key=k(f"pile_{e['id']}"))
+            # all excavators loading from this pile empty it together
+            rate = rates.get(e["id"], 0.0) + sum(rates.get(x["id"], 0.0) for x in excavators
+                                                 if x["id"] != e["id"] and x.get("pile") == pile)
+            lasts_h = pile_t.get(pile, 0.0) / rate if rate > 0 else None
+            runs_out = lasts_h is not None and lasts_h < hours
+            if lasts_h is not None:
+                c[1].caption(f"⚠️ skończy się po ok. {lasts_h:.1f} h" if runs_out else
+                             f"starczy na całą zmianę (zostanie ok. {pile_t[pile] - rate * hours:,.0f} t)".replace(",", " "))
+            nxt, below = "", 0.0
+            if runs_out or e.get("then_pile"):  # only when the pile really ends during the shift (or a move is set)
+                nxt_opts = ["— zostaje —"] + [p for p in piles if p != pile]
+                pick = c[2].selectbox("potem przejeżdża na", nxt_opts,
+                                      index=nxt_opts.index(e["then_pile"]) if e.get("then_pile") in nxt_opts else 0,
+                                      key=k(f"then_{e['id']}"))
+                if pick != nxt_opts[0]:
+                    nxt = pick
+                    below = c[3].number_input("zjeżdża, gdy zostanie mniej niż [t]", 0.0, 100_000.0,
+                                              float(e.get("then_below_t") or 0.0), 100.0, key=k(f"below_{e['id']}"),
+                                              help="0 = wybiera usyp do końca")
+            ex_rules[e["id"]] = (pile, nxt, below)
 
     # ---------------------------------------------------------------- trucks
     trucks = expand_trucks(raw.get("trucks", []))

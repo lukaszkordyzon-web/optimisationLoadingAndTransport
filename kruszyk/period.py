@@ -47,6 +47,9 @@ class PeriodPlan:
     target_t: float = 0.0             # production target for the period (0 = none)
     move_excavators: bool = True      # an excavator without material drives to the nearest free blasted pile
     move_setup_min: float = 15.0      # + this on top of the drive (preparing the new face)
+    # where an excavator goes when its pile is dug out, in order: {excavator: [pile, ...]}; the first one that is
+    # blasted and free is taken, otherwise the nearest free pile
+    next_piles: dict = field(default_factory=dict)
     # drilling: blasts in new places must be drilled first (0 rigs = drilling not modelled)
     drills: int = 0
     drill_speed_kmh: float = 2.0      # moving between blasts
@@ -342,7 +345,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                 def dist(p, here=here):
                     there = sc.routes[pile_route[p]].path
                     return haversine_m(here[0], there[0]) if here and there else 0.0
-                target = min(free, key=dist)
+                wanted = [p for p in plan.next_piles.get(e.id, []) if p in free]
+                target = wanted[0] if wanted else min(free, key=dist)
                 d = dist(target)
                 delay[e.id] = round(d / (move_kmh / 3.6) / 60 + plan.move_setup_min, 1)
                 moves.append(f"{e.id} → {target} ({round(d):,} m".replace(",", " ") + f"; {delay[e.id]:.0f} min)")

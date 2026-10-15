@@ -196,11 +196,10 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                                                          "odstawiane od końca listy")
         if n_trucks != sc.truck_count:
             sc = sc.with_truck_count(int(n_trucks))
-        c = st.columns(2)
-        move = c[0].checkbox("Koparka bez urobku przejeżdża na inny usyp", True, key="per_move",
-                             help="na najbliższy odstrzelony usyp, na którym nikt nie pracuje")
-        setup = c[1].number_input("Przygotowanie nowego frontu [min] (oprócz jazdy)", 0.0, 240.0, 15.0, 5.0,
-                                  key="per_setup", disabled=not move)
+        cal = PeriodPlan(start=start, days=int(days), shifts_per_day=int(shifts), saturdays=sat,
+                         holidays=_holidays(hol, start.year))
+        next_piles, setup, shortage = _excavator_moves(sc, cal)
+        move = True
         st.markdown("**🔩 Wiertnice** – strzał w nowym miejscu trzeba najpierw nawiercić. Metry = tony strzału / t/mb "
                     "(ustawiasz przy obszarze / strzale), czas = metry / wydajność. Następny pas obszaru można wiercić "
                     "dopiero po odebraniu poprzedniego strzału.")
@@ -220,7 +219,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
                       blasts=[PileBlasts(r["usyp"], 0.0, 0, 1,  # piles only get emptied – no new blasts in a dug-out place
                                          None if pd.isna(r["udzial"]) or not r["udzial"] else float(r["udzial"]))
                               for _, r in ed.iterrows()],
-                      move_excavators=move, move_setup_min=float(setup), drills=int(drills), rigs=rigs,
+                      move_excavators=move, move_setup_min=float(setup), next_piles=next_piles,
+                      drills=int(drills), rigs=rigs,
                       drill_m_per_shift=float(np.mean([r["m_per_shift"] for r in rigs])) if rigs else 250.0,
                       clear_pct=float(clear), t_per_m=float(tpm),
                       lead_m=float(st.session_state.get("per_lead", 30.0)))
@@ -233,6 +233,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     with t_prod:
         _production_tab(base_raw, sc, plan, n)
 
+    if shortage:
+        st.warning(shortage)
     key = hashlib.md5(repr((dump_key(sc), plan, seed, compare_rl)).encode()).hexdigest()
     if st.button("▶️ Policz okres", type="primary", disabled=n == 0):
         runs = 2 if compare_rl else 1
@@ -776,6 +778,58 @@ def yaml_load(text: str) -> dict:
     import yaml
 
     return yaml.safe_load(text)
+
+
+NEAREST = "(najbliższy wolny usyp)"
+
+
+def _excavator_moves(sc, cal: PeriodPlan) -> tuple[dict, float, str | None]:
+    """Ask only what the period really needs: for every excavator whose pile is dug out within the period, where
+    it goes next (one line per move, chained while the next pile also runs out). Returns ({excavator: [piles]},
+    setup minutes, a one-line warning when the material lying and planned does not last the period)."""
+    from app_rules import loading_rates
+
+    rates, hours = loading_rates(dump_key(sc))
+    shifts = cal.shifts()
+    n = len(shifts)
+    tonnes = {b.id: float(b.tonnage_t) for b in sc.blasts}
+    tonnes |= {p["id"]: float(p.get("tonnage_t") or 0.0) for p in sc.planned_blasts}
+    per_shift = {e.id: rates.get(e.id, 0.0) * hours for e in sc.excavators}
+    next_piles, asked = {}, False
+    st.markdown("**⛏️ Koparki po wybraniu usypu**")
+    for e in sc.excavators:
+        if per_shift[e.id] <= 0 or n == 0:
+            continue
+        cur, used, seen = e.blast, 0.0, {e.blast}
+        rate = sum(per_shift[x.id] for x in sc.excavators if x.blast == e.blast)  # all on the pile empty it together
+        for depth in range(3):
+            used += tonnes.get(cur, 0.0) / rate if rate > 0 else n
+            if used >= n:
+                break
+            day = shifts[int(used)][0]
+            options = [NEAREST] + [p for p in tonnes if p not in seen]
+            pick = st.selectbox(f"{e.id} skończy {cur} ok. {day:%d.%m} → potem", options,
+                                key=f"per_next_{e.id}_{depth}")
+            asked = True
+            if pick == NEAREST:
+                break
+            next_piles.setdefault(e.id, []).append(pick)
+            cur, rate = pick, per_shift[e.id]
+            seen.add(pick)
+    if asked:
+        setup = st.number_input("Przygotowanie nowego frontu [min] (oprócz jazdy)", 0.0, 240.0, 15.0, 5.0,
+                                key="per_setup")
+    else:
+        setup = 15.0
+        st.caption("Usypy starczą na cały okres – koparki nie przejeżdżają.")
+    shortage = None
+    need = sum(per_shift.values()) * n
+    have = sum(tonnes.values())
+    if not sc.areas and need > have * 1.02:
+        shortage = (f"⛰️ Urobku (usypy + planowane strzały) jest ok. {have:,.0f} t, a okres potrzebuje ok. "
+                    f"{need:,.0f} t – brakuje ok. {need - have:,.0f} t. Dodaj strzał albo obszar wydobycia w kroku ①, "
+                    "inaczej koparki staną.").replace(",", " ")
+    return next_piles, float(setup), shortage
 
 
 def dump_key(sc) -> str:

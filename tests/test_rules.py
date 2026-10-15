@@ -72,6 +72,14 @@ def test_rules_screen_saves_goal_assignment_and_move():
     ver = at.session_state["ver"]
     at.radio(key=f"rules_goal_kind_{ver}").set_value("Tony przez zakład").run()
     at.number_input(key=f"rules_goal_t_{ver}").set_value(1800.0).run()
+    assert not any(sb.key == f"rules_then_K-2_{ver}" for sb in at.selectbox)  # U-01 lasts the shift: no "then"
+    raw, site = at.session_state["raw"], at.session_state["site"]
+    for o in raw["blasts"] + raw["site"]["piles"] + site["piles"]:
+        if o["id"] == "U-01":
+            o["tonnage_t"] = 1500.0  # a small pile: it ends during the shift -> the move can be set
+    at.session_state["raw"], at.session_state["site"] = raw, site
+    at.session_state["obj_ver"] += 1  # fresh tables on the map step (their snapshot would write the old tonnes back)
+    at.run()
     at.selectbox(key=f"rules_then_K-2_{ver}").set_value("U-02").run()
     at.multiselect(key=f"rules_tr_K-1_{ver}").set_value(["WZ-01", "WZ-02"]).run()
     at.toggle(key=f"rules_lock_K-1_{ver}").set_value(True).run()

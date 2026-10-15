@@ -419,3 +419,16 @@ def test_road_point_elevations_are_edited_and_saved():
     assert not at.exception, at.exception
     saved = next(r for r in at.session_state["site"]["roads"] if r["uid"] == road["uid"])
     assert saved["z"][0] == 520.0 and len(saved["z"]) == len(saved["coords"]) and saved["inlet_elev_m"] == 520.0
+
+
+def test_schedule_asks_where_the_excavator_goes_only_when_its_pile_runs_out():
+    at = AppTest.from_file(APP, default_timeout=300).run()  # the start mine: K-1 and K-2 on U-01 (10 000 t)
+    at.radio(key="work_kind").set_value("Planowanie produkcji").run()
+    assert not at.exception, at.exception
+    asks = [sb for sb in at.selectbox if sb.key and sb.key.startswith("per_next_")]
+    assert asks and "skończy U-01" in asks[0].label  # U-01 is dug out within the month
+    asks[0].set_value("U-02").run()
+    assert not at.exception, at.exception
+    at.session_state["per_days"] = 1  # one day: nothing runs out, nothing to ask
+    at.run()
+    assert not [sb for sb in at.selectbox if sb.key and sb.key.startswith("per_next_")]
