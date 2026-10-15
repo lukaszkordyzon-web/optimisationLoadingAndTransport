@@ -31,12 +31,37 @@ def _approved():
 
 
 def _month_key(appr) -> str:
-    return hashlib.md5(repr((state.raw_yaml(), appr["key"])).encode()).hexdigest()
+    return hashlib.md5(repr((state.raw_yaml(), appr["key"], _weight())).encode()).hexdigest()
+
+
+def _weight() -> float:
+    """The RL goal from the slider: 0 = the cheapest tonne … 1 = the most tonnes (within the schedule)."""
+    return int(st.session_state.get("k2_rl_w", 50)) / 100
+
+
+GOAL_WORDS = {0: "najtańsza tona", 50: "pół na pół", 100: "najwięcej ton"}
+
+
+def goal_label(w: float) -> str:
+    v = round(100 * w)
+    return GOAL_WORDS.get(v) or (f"bliżej najtańszej tony ({v})" if v < 50 else f"bliżej najwięcej ton ({v})")
+
+
+def goal_slider() -> None:
+    with card("rlgoal"):
+        c = st.columns([1.2, 4, 1.2], vertical_alignment="center")
+        c[0].markdown('<div class="k2-h4" style="margin:0">Cel nauki RL</div><div class="k2-note">najtańsza tona</div>',
+                      unsafe_allow_html=True)
+        c[1].slider("Cel nauki RL", 0, 100, 50, 10, key="k2_rl_w", label_visibility="collapsed",
+                    help="Lewo: RL może odpuścić trochę ton, jeśli tona wyjdzie wyraźnie taniej. Środek: tańsza tona, ale "
+                         "bez utraty ton. Prawo: każda tona się liczy – w granicach harmonogramu i wydajności koparek.")
+        c[2].markdown('<div class="k2-note" style="text-align:right">najwięcej ton</div>', unsafe_allow_html=True)
 
 
 def month(appr) -> dict | None:
     """Both months (today / with the signals) on the frozen schedule; the signals are learned on the shifts of the
     month worked as today. Computed on a click, kept until the mine or the schedule changes."""
+    goal_slider()
     key = _month_key(appr)
     res = st.session_state.get("month")
     if res and res["key"] == key:
@@ -44,7 +69,7 @@ def month(appr) -> dict | None:
     with card("monthgo"):
         theme.h4("Policz miesiąc")
         theme.note("Program liczy miesiąc jak dziś według zatwierdzonego harmonogramu, uczy się na nim sygnałów jazdy "
-                   "i liczy ten sam miesiąc z sygnałami – zwykle 1–3 min.")
+                   f"i liczy ten sam miesiąc z sygnałami – zwykle 1–3 min. Cel nauki: <b>{goal_label(_weight())}</b>.")
         go_ = st.button("Policz miesiąc i naucz sygnały", type="primary", key="k2_month_go")
     if not go_:
         return None
@@ -59,7 +84,7 @@ def month(appr) -> dict | None:
     df0 = run_period(today(sc), plan, seed=SEED, states=states, kpis=kpi0,
                      progress=lambda i, k: bar.progress(0.35 * i / k, f"Miesiąc jak dziś: zmiana {i} z {k}"))
     size = QUICK if st.session_state.get("k2_quick") else {}
-    r = train_signals(states, seed=SEED, **size,
+    r = train_signals(states, seed=SEED, **size, weight=_weight(),
                       callback=lambda i, k, row: bar.progress(0.35 + 0.3 * i / k, f"Nauka sygnałów: runda {i} z {k}"))
     kpi1 = []
     df1 = run_period(with_signals(sc, r.params), plan, seed=SEED, kpis=kpi1,
@@ -215,7 +240,8 @@ def step_result() -> None:
             theme.h4("Sygnały dla kierowców")
             st.markdown(signal_boxes(res["params"]), unsafe_allow_html=True)
             s = res["setup"]
-            theme.note(f"Nauczone na {s['shifts']} zmianach symulacji, w sytuacjach z {s['states']} zmian tego miesiąca "
+            theme.note(f"Cel nauki: <b>{goal_label(s.get('weight', 0.5))}</b>. "
+                       f"Nauczone na {s['shifts']} zmianach symulacji, w sytuacjach z {s['states']} zmian tego miesiąca "
                        "(pełne usypy, końcówki, przejazdy koparek, deszcz, awarie).")
         with card("sure"):
             wins = int((b["koszt_na_t"] < a["koszt_na_t"]).sum())

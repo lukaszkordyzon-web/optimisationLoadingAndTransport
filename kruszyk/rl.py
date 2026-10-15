@@ -322,13 +322,23 @@ def _run(cases: list[tuple[Scenario, int]], params: dict | None) -> list[dict]:
             for s, seed in cases]
 
 
-def signals_objective(rows: list[dict], base: list[dict]) -> float:
-    """Cost per tonne over the shifts, made worse by tonnes hauled below today's on the same shifts."""
+def signals_objective(rows: list[dict], base: list[dict], keep: float = KEEP_T, gain: float = 0.0) -> float:
+    """Cost per tonne over the shifts, made worse by tonnes hauled below today's on the same shifts (`keep` per
+    share of tonnes lost) and better by tonnes above today's (`gain`)."""
     t, t0 = sum(r["hauled_t"] for r in rows), sum(r["hauled_t"] for r in base)
     if t <= 0:
         return 1e6
     short = max(0.0, 1 - t / t0) if t0 else 0.0
-    return sum(r["cost_total"] for r in rows) / t * (1 + KEEP_T * short)
+    more = max(0.0, t / t0 - 1) if t0 else 0.0
+    return sum(r["cost_total"] for r in rows) / t * max(0.05, 1 + keep * short - gain * more)
+
+
+def goal_weights(w: float) -> tuple[float, float]:
+    """The planner's slider, 0 = the cheapest tonne … 1 = the most tonnes, as (keep, gain) of the objective:
+    0 – only the cost per tonne counts; 0.5 – as before (losing tonnes is costly); 1 – every tonne counts."""
+    w = float(np.clip(w, 0.0, 1.0))
+    keep = 20.0 * w * w
+    return keep, keep * max(0.0, 2 * w - 1)
 
 
 @dataclass
@@ -339,7 +349,8 @@ class SignalsResult:
 
 
 def train_signals(states: list[Scenario], iterations: int = 8, population: int = 10, episodes: int = 3,
-                  seed: int = 0, callback: Callable[[int, int, dict], None] | None = None) -> SignalsResult:
+                  seed: int = 0, callback: Callable[[int, int, dict], None] | None = None,
+                  weight: float = 0.5) -> SignalsResult:
     """Learn the signal settings (CEM) on shifts starting from `states` – the situations of a month worked as
     today (full piles, last tonnes of a pile, an excavator after a move …). Every iteration practises on other
     shifts; all candidates of an iteration on the same ones, compared with today's driving on them."""
@@ -347,13 +358,15 @@ def train_signals(states: list[Scenario], iterations: int = 8, population: int =
     dim = len(SIGNAL_KEYS)
     mu, sigma = np.zeros(dim), np.ones(dim)
     n_elite = max(2, population // 4)
+    keep, gain = goal_weights(weight)
     history = []
     for it in range(iterations):
         cases = [(states[int(rng.integers(len(states)))], 50_000 + 1000 * it + e) for e in range(episodes)]
         base = _run(cases, None)
         cand = mu + sigma * rng.standard_normal((population, dim))
         cand[0] = mu
-        scored = sorted(((signals_objective(_run(cases, decode_signals(x)), base), k) for k, x in enumerate(cand)))
+        scored = sorted(((signals_objective(_run(cases, decode_signals(x)), base, keep, gain), k)
+                         for k, x in enumerate(cand)))
         elite = np.array([cand[k] for _, k in scored[:n_elite]])
         mu = elite.mean(axis=0)
         sigma = elite.std(axis=0) + max(0.05, 0.5 * (1 - it / max(iterations - 1, 1)))
@@ -364,7 +377,8 @@ def train_signals(states: list[Scenario], iterations: int = 8, population: int =
             callback(it + 1, iterations, row)
     return SignalsResult(params=decode_signals(mu), history=pd.DataFrame(history),
                          setup={"iterations": iterations, "population": population, "episodes": episodes,
-                                "states": len(states), "shifts": iterations * (population + 1) * episodes})
+                                "states": len(states), "shifts": iterations * (population + 1) * episodes,
+                                "weight": weight})
 
 
 def explain_signals(p: dict) -> list[str]:
