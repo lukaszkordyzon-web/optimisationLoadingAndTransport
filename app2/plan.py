@@ -8,7 +8,6 @@ import copy
 import dataclasses
 import datetime as dt
 import hashlib
-import math
 
 from pathlib import Path
 
@@ -324,28 +323,25 @@ def _areas_editor(raw: dict, sc, rigs: list, fire: int, work: dict) -> None:
     cap = sc.blasting.max_blast_t()
     rows = []
     for a in sc.areas:
-        t = area_blast_t(a, cap)
         rows.append({"obszar": a["id"], "poziom": a.get("level_m"), "start_t": float(work["start"].get(a["id"], 0.0)),
-                     "odstrzal_t": float(a.get("blast_max_t") or 20000), "tpm": float(a.get("t_per_m") or 50),
-                     "zasoby_t": float(a.get("reserves_t") or 0), "mb": round(t / float(a.get("t_per_m") or 50)),
+                     "tpm": float(a.get("t_per_m") or 50), "zasoby_t": float(a.get("reserves_t") or 0),
+                     "mb10": round(10000 / float(a.get("t_per_m") or 50)),
                      "wiert": " · ".join(f"{r['id']} {_kt(workplan.rig_rate(r, a))} kt" for r in rigs) or "–"})
     ver = f"{st.session_state.get('ver', 0)}_{st.session_state.get('k2_area_ver', 0)}"
     ed = st.data_editor(pd.DataFrame(rows), key=f"k2_areas_{ver}", hide_index=True, width="stretch",
-                        disabled=["obszar", "poziom", "mb", "wiert"],
+                        disabled=["obszar", "poziom", "mb10", "wiert"],
                         column_config={"obszar": "obszar", "poziom": st.column_config.NumberColumn("poziom [m]", format="%.0f"),
                                        "start_t": st.column_config.NumberColumn("leży na start [t]", min_value=0.0,
                                                                                 step=1000.0, format="%.0f"),
-                                       "odstrzal_t": st.column_config.NumberColumn("odstrzał [t]", min_value=500.0,
-                                                                                   step=500.0, format="%.0f"),
                                        "tpm": st.column_config.NumberColumn("t/mb", min_value=5.0),
                                        "zasoby_t": st.column_config.NumberColumn("zasoby [t]", min_value=0.0, step=5000.0,
                                                                                  format="%.0f"),
-                                       "mb": "mb na 1 odstrzał",
+                                       "mb10": "mb na 10 tys. t",
                                        "wiert": st.column_config.TextColumn(
                                            "wiertnica na zmianę", help="Ile ton wiertnica odwierci w tym obszarze przez "
                                                                        "całą zmianę (mb/zm. × t/mb).")})
-    theme.note("Na start leży usyp <b>/1</b> (np. O1/1). Odwiercone tony strzela się, gdy uzbiera się odstrzał – albo "
-               "gdy wiertnice schodzą z obszaru; każdy strzał to następny usyp: O1/2, O1/3 …"
+    theme.note("Na start leży usyp <b>/1</b> (np. O1/1). Każde zlecenie wiercenia to jeden strzał tej wielkości – po "
+               "odwierceniu; każdy strzał to następny usyp: O1/2, O1/3 …"
                + (f" · limit MW: największy strzał {cap:,.0f} t".replace(",", " ") if cap < float("inf") else ""))
     started = False
     for _, r in ed.iterrows():
@@ -358,7 +354,7 @@ def _areas_editor(raw: dict, sc, rigs: list, fire: int, work: dict) -> None:
     changed = False
     new = copy.deepcopy(raw)
     for _, r in ed.iterrows():
-        upd = {"blast_max_t": float(r["odstrzal_t"]), "t_per_m": float(r["tpm"]), "reserves_t": float(r["zasoby_t"])}
+        upd = {"t_per_m": float(r["tpm"]), "reserves_t": float(r["zasoby_t"])}
         for src in (new.get("areas") or []) + ((new.get("site") or {}).get("areas") or []):
             if src.get("id") == r["obszar"] and any(float(src.get(k) or 0) != val for k, val in upd.items()):
                 src.update(upd)
@@ -382,7 +378,7 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
     """Everything the interactive grid draws: columns (days or shifts), rows with coloured cells, and what the lists
     of the rig / excavator / truck / blast cells offer."""
     n = len(shifts)
-    grid, blasts = ev["grid"], ev["blasts"]
+    blasts = ev["blasts"]
     area_ids = [a["id"] for a in sc.areas]
     by_area = {a["id"]: a for a in sc.areas}
     acol = {a: AREA_COLORS[j % len(AREA_COLORS)] for j, a in enumerate(area_ids)}
@@ -476,7 +472,7 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
         orders_row, drill_row = rig_rows(r["id"])
         rows.append({"kind": "dr", "name": f"{r['id']} · zlecenia", "id": r["id"], "cells": orders_row})
         rows.append({"kind": "drx", "name": "↳ wierci [kt]", "cells": drill_row})
-    rows.append({"kind": "group", "name": "STRZAŁY – z odwierconych ton · kliknij, żeby przesunąć"})
+    rows.append({"kind": "group", "name": "STRZAŁY – zlecenie = strzał, po odwierceniu · kliknij, żeby przesunąć"})
     for a_id in area_ids:
         out = []
         for g in groups:
@@ -538,10 +534,9 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
                         f"do końca: {_num(acc)} t" + (f" · w tempie celu powinno być {_num(due)} t" if target else ""),
                         bold=True))
     rows.append({"kind": "sum", "name": "wywiezione [kt]", "cells": out})
-    cap = sc.blasting.max_blast_t()
     areas = []
     for a in sc.areas:
-        info = f"leży {_kt(ev['area_left'][a['id']][0])} kt · odstrzał {_kt(area_blast_t(a, cap))} kt"
+        info = f"leży na start {_kt(ev['area_left'][a['id']][0])} kt"
         areas.append({"id": a["id"], "info": info, "bg": acol[a["id"]][0], "fg": acol[a["id"]][1]})
     exs = [{"id": e.id, "allowed": [a for a in area_ids if e.may_work(a)] or area_ids, "rate": round(rates.get(e.id, 0.0)),
             "bg": ecol[e.id][0], "fg": ecol[e.id][1]} for e in sc.excavators if e.id in ecol]
@@ -649,6 +644,10 @@ def _issue(it, work, lab, n, j, ev) -> None:
     elif k == workplan.EXHAUSTED:
         st.markdown(f'<div class="k2-issue"><b>Obszar {it["area"]}: od {lab[i]} wiercenie przekracza zasoby</b><br>'
                     "Zwiększ zasoby w tabeli obszarów albo przenieś wiertnicę.</div>", unsafe_allow_html=True)
+    elif k == workplan.TOO_BIG:
+        st.markdown(f'<div class="k2-issue"><b>{it["rig"]} · {lab[i]}: strzał {_num(it["t"])} t w {it["area"]}</b><br>'
+                    f"Limit materiału wybuchowego pozwala na ok. {_num(it['cap'])} t w jednym strzale – podziel "
+                    "zlecenie na dwa.</div>", unsafe_allow_html=True)
     elif k == workplan.UNFINISHED:
         st.markdown(f'<div class="k2-issue w"><b>{it["rig"]}: {_num(it["t"])} t w {it["area"]} nie zostanie odwierconych '
                     "do końca okresu</b><br>Zleceń jest więcej, niż wiertnica zdąży – przesuń część na drugą wiertnicę "

@@ -4,9 +4,9 @@
 - every truck: to which excavator it drives – or that it stands.
 
 The program works out the rest:
-- the blasts: the tonnes drilled in an area are fired once they make up a blast of the area's size, or when the
-  rigs leave the area (what is drilled is fired); the material is there after the firing – a blast can be moved
-  later by the planner;
+- the drilling: every order (tonnes in an area) is drilled for as many shifts as it takes, orders in a queue;
+- the blasts: every order is one blast, fired when it is drilled out; the material is there after the firing – a
+  blast can be moved later by the planner;
 - the piles: what lies in an area at the start is its pile A/1, every blast is the next pile A/2, A/3 …, loaded in
   order;
 - an excavator loads only what is blasted: the rest of its tonnes is a shortage;
@@ -19,12 +19,11 @@ from __future__ import annotations
 import copy
 import math
 
-from .schedule import area_blast_t
-
 SHORT = "short"
 EXHAUSTED = "exhausted"
 OVER = "over"
 UNFINISHED = "unfinished"
+TOO_BIG = "too_big"
 NO_TRUCKS = "no_trucks"
 IDLE_TRUCK = "idle_truck"
 
@@ -74,6 +73,12 @@ def default(excavators: list, trucks: list[str], areas: list[dict], rates: dict[
     return work
 
 
+def proposal_blast_t(area: dict, cap_t: float = math.inf) -> float:
+    """Size of the blasts a first plan orders: the area's former blast size, else 10 000 t; within the explosive
+    limit."""
+    return min(float(area.get("blast_max_t") or 10000.0), cap_t)
+
+
 def propose_drilling(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: float = math.inf,
                      fire: int = 1, shift_h: float = 8.0) -> dict:
     """Drilling that keeps the excavators supplied: when a rig is free, it gets an order of one whole blast in the
@@ -95,11 +100,11 @@ def propose_drilling(work: dict, areas: list[dict], rigs: list[dict], n: int, ca
             if busy[r["id"]] <= 1e-6:
                 best, gap = "", 0.0
                 for a, ar in by_id.items():
-                    g = need[a][min(n - 1, i + ahead + 2)] + area_blast_t(ar, cap_t) - have[a]
+                    g = need[a][min(n - 1, i + ahead + 2)] + proposal_blast_t(ar, cap_t) - have[a]
                     if left[a] > 0 and need[a][-1] > 0 and g > gap:
                         best, gap = a, g
                 if best:
-                    t = min(area_blast_t(by_id[best], cap_t), left[best])
+                    t = min(proposal_blast_t(by_id[best], cap_t), left[best])
                     out[r["id"]][i] = {"a": best, "t": float(round(t))}
                     have[best] += t
                     left[best] -= t
@@ -120,6 +125,7 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
     drill_by: dict[str, list[list[str]]] = {a: [[] for _ in range(n)] for a in by_id}
     queued = {a: [0.0] * n for a in by_id}  # still to drill in the area at the end of every shift
     rig_rows: dict[str, list[dict]] = {}
+    done_orders: list[tuple] = []  # (shift drilled out, rig, area, tonnes, first shift drilled)
     rig_cap: dict[str, list[float]] = {}
     for r in rigs:
         rid = r["id"]
@@ -129,7 +135,9 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
         for i in range(n):
             a, t = cell(work, rid, i, "dr")
             if a in by_id and t > 0:
-                queue.append([a, t])
+                queue.append([a, t, t, None])
+                if cap_t < math.inf and t > cap_t + 1:
+                    issues.append({"kind": TOO_BIG, "rig": rid, "shift": i, "t": t, "cap": cap_t, "area": a})
             stop = bool(i < len(cells) and cells[i].get("stop"))
             row = {"order": (a, t) if a in by_id and t > 0 else None, "stop": stop, "drill": [], "drive_h": 0.0}
             hours = 0.0 if stop else shift_h
@@ -145,55 +153,47 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
                     break
                 per_h = rig_rate(r, by_id[qa]) / shift_h
                 d = min(queue[0][1], per_h * hours)
+                if queue[0][3] is None:
+                    queue[0][3] = i
                 drilled[qa][i] += d
                 drill_by[qa][i].append(rid)
                 row["drill"].append((qa, d))
                 queue[0][1] -= d
                 hours -= d / per_h
-                if queue[0][1] <= 1.0:
-                    queue.pop(0)
+                if queue[0][1] <= 1.0:  # the order is drilled out: it is one blast
+                    qa_, _, t0, first = queue.pop(0)
+                    done_orders.append((i, rid, qa_, t0, first))
             row["waiting"] = sum(q[1] for q in queue)
-            for qa, qt in queue:
-                queued[qa][i] += qt
+            for q in queue:
+                queued[q[0]][i] += q[1]
             rows.append(row)
         rig_rows[rid], rig_cap[rid] = rows, caps
         if queue:
             issues.append({"kind": UNFINISHED, "rig": rid, "shift": n - 1, "t": sum(q[1] for q in queue),
                            "area": ", ".join(dict.fromkeys(q[0] for q in queue))})
-    # ---- blasts: drilled tonnes are fired when they make a blast, or when the drilling of the area stops
+    # ---- blasts: every drill order is one blast, fired when it is drilled out (the planner may move it later)
     blasts: dict[str, dict] = {}
-    for a_id, a in by_id.items():
-        size = area_blast_t(a, cap_t)
+    k = {a: 2 for a in by_id}
+    total = {a: 0.0 for a in by_id}
+    warned = set()
+    for i, rid, a_id, t, first in sorted(done_orders):
+        a = by_id[a_id]
         reserve = float(a.get("reserves_t") or 0.0)
-        acc, total, k, since = 0.0, 0.0, 2, 0
-        warned = False
-        for i in range(n):
-            d = drilled[a_id][i]
-            if reserve > 0 and total + d > reserve + 1:
-                d = max(0.0, reserve - total)
-                if not warned:
-                    warned = True
-                    issues.append({"kind": EXHAUSTED, "area": a_id, "shift": i})
-            acc += d
-            total += d
-            ready = []
-            while acc >= size - 1e-6:
-                ready.append(size)
-                acc -= size
-            stops = acc > 1.0 and (i + 1 >= n or drilled[a_id][i + 1] <= 0) and queued[a_id][i] <= 1.0
-            if stops and i + 1 < n:  # the rigs leave the area: what is drilled is fired
-                ready.append(acc)
-                acc = 0.0
-            for t in ready:
-                pid = f"{a_id}/{k}"
-                k += 1
-                delay = int((work.get("fire") or {}).get(pid, 0))
-                avail = i + 1 + fire + delay
-                blasts[pid] = {"area": a_id, "t": round(t), "m": round(t / float(a.get("t_per_m") or 50.0)), "done": i,
-                               "fire": list(range(i + 1 + delay, avail)), "avail": avail, "auto": i + 1 + fire,
-                               "delay": delay,
-                               "drill": [(rid, x) for x in range(since, i + 1) for rid in drill_by[a_id][x]]}
-                since = i + 1
+        if reserve > 0 and total[a_id] + t > reserve + 1:
+            if a_id not in warned:
+                warned.add(a_id)
+                issues.append({"kind": EXHAUSTED, "area": a_id, "shift": i})
+            t = max(0.0, reserve - total[a_id])
+            if t <= 1:
+                continue
+        total[a_id] += t
+        pid = f"{a_id}/{k[a_id]}"
+        k[a_id] += 1
+        delay = int((work.get("fire") or {}).get(pid, 0))
+        avail = i + 1 + fire + delay
+        blasts[pid] = {"area": a_id, "t": round(t), "m": round(t / float(a.get("t_per_m") or 50.0)), "done": i,
+                       "fire": list(range(i + 1 + delay, avail)), "avail": avail, "auto": i + 1 + fire, "delay": delay,
+                       "rig": rid, "drill": [(rid, x) for x in range(first if first is not None else i, i + 1)]}
     # ---- excavators: they load only what lies blasted, piles in order
     grid = {ex: [""] * n for ex in work["ex"]}
     quota = {ex: [0.0] * n for ex in work["ex"]}
