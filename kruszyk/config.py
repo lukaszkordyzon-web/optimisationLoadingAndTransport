@@ -277,6 +277,38 @@ class Costs:
     # part of the truck rate that goes with engine hours (service, tyres, wear); a parked truck saves it
     truck_variable_share: float = 0.4
     blend_penalty_per_t_pp: float = 0.05  # zł per tonne for each percentage point the feed misses its target mix
+    # the hourly rate split (when given): operator per paid hour (fixed); replacement cost (depreciation) and service
+    # per engine hour (mth) – an engine switched off on a parking costs neither
+    truck_operator_per_h: float | None = None
+    truck_amort_per_mth: float | None = None
+    truck_service_per_mth: float | None = None
+    excavator_operator_per_h: float | None = None
+    excavator_amort_per_mth: float | None = None
+    excavator_service_per_mth: float | None = None
+
+    def __post_init__(self):
+        # with the split given, the hourly rates (used by quick estimates) are its sum
+        if self.truck_operator_per_h is not None:
+            self.truck_per_h = sum(self.truck_rates())
+        if self.excavator_operator_per_h is not None:
+            self.excavator_per_h = sum(self.excavator_rates())
+
+    def truck_rates(self) -> tuple[float, float, float]:
+        """(operator per hour, depreciation per mth, service per mth) of a truck; without the split: the hourly
+        rate shared as before (the engine-hour part = truck_variable_share)."""
+        if self.truck_operator_per_h is None:
+            var = self.truck_per_h * self.truck_variable_share
+            return self.truck_per_h - var, var / 2, var / 2
+        return (float(self.truck_operator_per_h), float(self.truck_amort_per_mth or 0.0),
+                float(self.truck_service_per_mth or 0.0))
+
+    def excavator_rates(self) -> tuple[float, float, float]:
+        if self.excavator_operator_per_h is None:
+            op = self.excavator_per_h * self.excavator_idle_share
+            var = self.excavator_per_h - op
+            return op, var / 2, var / 2
+        return (float(self.excavator_operator_per_h), float(self.excavator_amort_per_mth or 0.0),
+                float(self.excavator_service_per_mth or 0.0))
 
 
 @dataclass

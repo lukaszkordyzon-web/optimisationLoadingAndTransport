@@ -237,6 +237,22 @@ def step_result() -> None:
                          f"{int(g['win'].sum())} z {len(g)}"])
         st.markdown(theme.table([("Tydzień", ""), ("Tony dziś / z RL", "n"), ("zł/t dziś / z RL", "n"),
                                  ("Zmian taniej", "n")], rows, numeric={1, 2, 3}, sans={0}), unsafe_allow_html=True)
+    parts = [("paliwo", "Paliwo (wozidła)"), ("wozidla_serwis", "Serwis wozideł – od mth"),
+             ("wozidla_amortyzacja", "Amortyzacja wozideł – od mth"), ("wozidla_kierowcy", "Kierowcy – stały"),
+             ("koparki_serwis", "Serwis koparek – od mth"), ("koparki_amortyzacja", "Amortyzacja koparek – od mth"),
+             ("koparki_operatorzy", "Operatorzy koparek – stały")]
+    if all(f"k_{k}" in a for k, _ in parts):
+        with card("savings"):
+            theme.h4("Skąd oszczędność", "cały miesiąc; kierowcy i operatorzy są opłaceni tak samo – liczy się "
+                                         "paliwo i to, co zależy od motogodzin")
+            rows = []
+            for k, label in parts:
+                x0, x1 = float(a[f"k_{k}"].sum()), float(b[f"k_{k}"].sum())
+                rows.append([label, num(x0), num(x1), f"{x1 - x0:+,.0f}".replace(",", " ")])
+            m0, m1 = float(a["motogodziny_wozidel"].sum()), float(b["motogodziny_wozidel"].sum())
+            rows.append(["Motogodziny wozideł [mth]", num(m0), num(m1), f"{m1 - m0:+,.0f}".replace(",", " ")])
+            st.markdown(theme.table([("Składnik", ""), ("Jak dziś [zł]", "n"), ("Z RL [zł]", "n"), ("Różnica", "n")],
+                                    rows, numeric={1, 2, 3}, sans={0}), unsafe_allow_html=True)
     with c2_:
         with card("signals"):
             theme.h4("Sygnały dla kierowców")

@@ -134,13 +134,34 @@ def machines() -> None:
     with card("costs"):
         theme.h2("Koszty")
         co = raw.setdefault("costs", {})
-        c = st.columns(6)
-        fields = [("truck_per_h", "wozidło [zł/h]", 300.0), ("excavator_per_h", "koparka [zł/h]", 900.0),
-                  ("crusher_per_h", "kruszarka [zł/h]", 1200.0), ("fuel_per_l", "paliwo [zł/l]", 6.5),
+        from kruszyk.config import Costs
+
+        cur = Costs(**{k_: x for k_, x in co.items() if k_ in Costs.__dataclass_fields__})
+        rates = {"truck": cur.truck_rates(), "excavator": cur.excavator_rates()}
+        for kind, title in (("truck", "Wozidło"), ("excavator", "Koparka")):
+            c = st.columns([0.8, 1, 1, 1, 1.4], vertical_alignment="bottom")
+            c[0].markdown(f'<div class="k2-h4" style="padding-bottom:10px">{title}</div>', unsafe_allow_html=True)
+            op, am, sv = rates[kind]
+            vals = [c[1].number_input("operator / kierowca [zł/h zmiany]", 0.0, 10_000.0, round(op, 1), 5.0,
+                                      key=f"k2_cost_{kind}_op_{v}"),
+                    c[2].number_input("amortyzacja – koszt odtworzenia [zł/mth]", 0.0, 10_000.0, round(am, 1), 5.0,
+                                      key=f"k2_cost_{kind}_am_{v}",
+                                      help="Cena nowej maszyny ÷ motogodziny jej życia. Liczy się tylko, gdy silnik "
+                                           "pracuje."),
+                    c[3].number_input("serwis, opony, części [zł/mth]", 0.0, 10_000.0, round(sv, 1), 5.0,
+                                      key=f"k2_cost_{kind}_sv_{v}")]
+            for k_, val in zip(("operator_per_h", "amort_per_mth", "service_per_mth"), vals):
+                co[f"{kind}_{k_}"] = float(val)
+            c[4].markdown(f'<div class="k2-note" style="padding-bottom:10px">razem przy pracującym silniku '
+                          f'<b>{sum(vals):,.0f} zł/h</b>; na postoju z wyłączonym silnikiem {vals[0]:,.0f} zł/h</div>'
+                          .replace(",", " "), unsafe_allow_html=True)
+        c = st.columns(4)
+        fields = [("crusher_per_h", "kruszarka [zł/h]", 1200.0), ("fuel_per_l", "paliwo [zł/l]", 6.5),
                   ("energy_per_kwh", "energia [zł/kWh]", 0.9), ("drill_blast_per_t", "wiercenie + strzał [zł/t]", 3.0)]
         for col, (k_, label, d) in zip(c, fields):
             co[k_] = col.number_input(label, 0.0, 100_000.0, float(co.get(k_, d)), key=f"k2_cost_{k_}_{v}")
-        st.caption("Stawki maszyn bez paliwa (paliwo liczy się osobno z jazdy i postojów).")
+        st.caption("Stawki bez paliwa (paliwo liczy się osobno z jazdy i postojów). mth = motogodzina: amortyzacja i serwis "
+                   "liczą się tylko wtedy, gdy silnik pracuje – także w kolejce na biegu jałowym.")
 
     with st.expander("Awarie maszyn (z rejestru: ile razy i ile godzin w miesiącu)"):
         from app_calibration import reliability_editor

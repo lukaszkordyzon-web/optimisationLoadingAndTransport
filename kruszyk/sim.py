@@ -1419,7 +1419,9 @@ class SimResult:
                                             "stockpile_in_t": sim.stockpile_in_t}
             h = pd.concat([h, pd.DataFrame([last])], ignore_index=True)
         # same formulas as the final KPIs (_kpis), applied to what has happened up to each moment
-        fixed_per_h = (sc.truck_count * c.truck_per_h + len(sc.excavators) * c.excavator_per_h
+        t_op, t_am, t_sv = c.truck_rates()
+        e_op, e_am, e_sv = c.excavator_rates()
+        fixed_per_h = (sc.truck_count * (t_op + t_am + t_sv) + len(sc.excavators) * (e_op + e_am + e_sv)
                        + len(sc.crushers) * c.crusher_per_h
                        + (sc.stockpile.loader_per_h if sc.stockpile.enabled else 0.0))
         parked_s = sum(ex.parked_s for ex in sim.excavators.values())
@@ -1447,12 +1449,12 @@ class SimResult:
                 share = np.where(dumped > 0, 100 * cum[b] / np.where(dumped > 0, dumped, 1), 0.0)
                 dev += 0.5 * np.abs(share - 100 * target)
         drill = dumped * (c.drill_blast_per_t + c.drill_blast_fine_extra_per_t * (1 - frag))
-        parked_share = np.clip(t / sim.shift_s, 0, 1) * parked_s / 3600 * (1 - c.excavator_idle_share)
+        parked_share = np.clip(t / sim.shift_s, 0, 1) * parked_s / 3600
         tp = self.states[self.states["state"].isin(["parking", "cel_osiagniety"])]
         truck_parked_h = np.array([float(np.clip(np.minimum(tp["end_s"], x) - tp["start_s"], 0, None).sum()) / 3600
                                    for x in t]) if len(tp) else np.zeros(len(t))
-        h["cost"] = (fixed_per_h * t / 3600 - c.excavator_per_h * parked_share
-                     - c.truck_per_h * c.truck_variable_share * truck_parked_h
+        h["cost"] = (fixed_per_h * t / 3600 - (e_am + e_sv) * parked_share
+                     - (t_am + t_sv) * truck_parked_h
                      + h["fuel_l"] * c.fuel_per_l + h["kwh"] * c.energy_per_kwh + drill
                      + dumped * c.blend_penalty_per_t_pp * dev
                      + (h["stockpile_in_t"] * sc.stockpile.rehandle_cost_per_t if sc.stockpile.enabled else 0.0))
@@ -1499,12 +1501,18 @@ class SimResult:
 
         h, c = sc.shift_hours, sc.costs
         frag_loaded = float((done["tonnes"] * done["fragmentation"]).sum() / dumped) if dumped else 0.0
+        t_op, t_am, t_sv = c.truck_rates()
+        e_op, e_am, e_sv = c.excavator_rates()
+        truck_mth = sc.truck_count * h - sim.truck_parked_s / 3600  # engine hours: a parked truck has its engine off
+        ex_mth = len(sc.excavators) * h - parked_h
+        split = {"wozidla_kierowcy": t_op * sc.truck_count * h, "wozidla_amortyzacja": t_am * truck_mth,
+                 "wozidla_serwis": t_sv * truck_mth, "koparki_operatorzy": e_op * len(sc.excavators) * h,
+                 "koparki_amortyzacja": e_am * ex_mth, "koparki_serwis": e_sv * ex_mth}
         cost = {
-            # a parked truck (engine off) does not wear: it saves the engine-hour part of its rate
-            "wozidla": c.truck_per_h * (sc.truck_count * h - sim.truck_parked_s / 3600 * c.truck_variable_share),
+            # operators are paid for the whole shift; depreciation (replacement cost) and service go with engine hours
+            "wozidla": split["wozidla_kierowcy"] + split["wozidla_amortyzacja"] + split["wozidla_serwis"],
             "paliwo": sim.fuel_l * c.fuel_per_l,
-            # a parked excavator still costs its operator, but no fuel / wear
-            "koparki": c.excavator_per_h * (len(sc.excavators) * h - parked_h * (1 - c.excavator_idle_share)),
+            "koparki": split["koparki_operatorzy"] + split["koparki_amortyzacja"] + split["koparki_serwis"],
             "kruszarka": c.crusher_per_h * h * len(sc.crushers),
             "energia": sim.crusher_kwh * c.energy_per_kwh,
             # everything put on the stockpile will be rehandled at some point – charge it now
@@ -1585,6 +1593,8 @@ class SimResult:
             "cost_total": round(total, 0),
             "cost_per_t": round(total / dumped, 2) if dumped else None,
             "cost_breakdown": {k: round(v, 0) for k, v in cost.items()},
+            "cost_split": {k: round(v, 0) for k, v in split.items()},
+            "truck_mth": round(truck_mth, 2),
             "parked_excavator_h": round(parked_h, 2),
             "parked_truck_h": round(sim.truck_parked_s / 3600, 2),
             "topup_skips": sum(e.topup_skips for e in sim.excavators.values()),
