@@ -11,7 +11,7 @@
   th { background: #F7F8FA; padding: 8px 4px; border-bottom: 1px solid #D9DDE3; border-left: 1px solid #EEF0F3;
        white-space: nowrap; font-weight: 600; min-width: var(--cw); }
   td { padding: 7px 4px; text-align: center; border-left: 1px solid #EEF0F3; border-bottom: 1px solid #EEF0F3;
-       white-space: nowrap; min-width: var(--cw); height: 32px; }
+       white-space: nowrap; min-width: var(--cw); height: 32px; line-height: 1.35; }
   td.name { position: sticky; left: 0; z-index: 1; background: #fff; text-align: left; padding: 7px 10px;
             font: 700 12px 'IBM Plex Sans', sans-serif; min-width: 170px; }
   tr.sum td.name, tr.pile td.name, tr.rig td.name, tr.drx td.name { font-weight: 500; color: #3A4452; }
@@ -52,10 +52,10 @@
 <div class="wrap"><table id="grid"></table></div>
 <div class="legend">
   <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>zlecenie wiertnicy / koparka: obszar i tys. t</span>
-  <span><i style="background:repeating-linear-gradient(135deg,#fff 0 4px,#E0B990 4px 6px);border:1px solid #E0B990"></i>co wiertnica wierci danego dnia (⟶ zostaje na kolejne dni)</span>
+  <span><i style="background:repeating-linear-gradient(135deg,#fff 0 4px,#E0B990 4px 6px);border:1px solid #E0B990"></i>co wiertnica wierci danego dnia i ile zostaje na kolejne dni</span>
   <span><i style="background:#DCE8F7;border:1px solid #A9C1E2"></i>wozidło: do której koparki</span>
-  <span><i style="background:#1B2733"></i>✸ strzał: numer usypu·kt – kliknij, żeby przesunąć</span>
-  <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek leży (kt = tys. t)</span>
+  <span><i style="background:#1B2733"></i>strzał: wielkość i godzina – kliknij, żeby przesunąć</span>
+  <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek odstrzelony leży</span>
   <span><i style="background:#fff;border:2px solid #B3122A"></i>coś się nie zgadza – najedź, żeby zobaczyć</span>
 </div>
 <div class="hint">Kliknij komórkę wiertnicy, koparki albo wozidła – albo przeciągnij po kilku dniach (wozidła: także po kilku wierszach) – wybierz z listy i kliknij „Zastosuj” (albo Enter). Każde zlecenie wiercenia to jeden strzał – po odwierceniu.</div>
@@ -75,14 +75,14 @@ function inSel(ri, j) {
 }
 
 function render() {
-  document.documentElement.style.setProperty('--cw', D.day ? '70px' : '58px');
+  document.documentElement.style.setProperty('--cw', D.day ? '104px' : '96px');
   let h = '<tr><th style="position:sticky;left:0;z-index:2"></th>' + D.heads.map(x => `<th>${esc(x)}</th>`).join('') + '</tr>';
   D.rows.forEach((r, ri) => {
     if (r.kind === 'group') { h += `<tr class="group"><td colspan="${D.heads.length + 1}">${esc(r.name)}</td></tr>`; return; }
     h += `<tr class="${r.kind}"><td class="name">${esc(r.name)}</td>`;
     r.cells.forEach((c, j) => {
       const cls = [editable(r, c) ? 'ed' : '', c.red ? 'red' : '', inSel(ri, j) ? 'sel' : ''].join(' ');
-      h += `<td class="${cls}" data-r="${ri}" data-j="${j}" title="${esc(c.title || '')}" style="background:${c.bd ? `repeating-linear-gradient(135deg, #fff 0 7px, ${c.bd} 7px 11px)` : c.bg};color:${c.fg};${c.bold ? 'font-weight:700;' : ''}">${esc(c.text)}</td>`;
+      h += `<td class="${cls}" data-r="${ri}" data-j="${j}" title="${esc(c.title || '')}" style="background:${c.bd ? `repeating-linear-gradient(135deg, #fff 0 7px, ${c.bd} 7px 11px)` : c.bg};color:${c.fg};${c.bold ? 'font-weight:700;' : ''}">${esc(c.text).replace(/\n/g, '<br>')}</td>`;
     });
     h += '</tr>';
   });
@@ -175,7 +175,7 @@ function showPop(td) {
     h += `<span>t</span>${!isRig && ex.rate ? `<span style="color:#4A5562">(ładuje ok. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
     h += `<div class="lbl">${isRig ? 'Gdzie wierci' : 'Skąd ładuje'}</div>`;
     areas.forEach(a => {
-      const info = isRig ? `wierci ok. ${Math.round(((ex.rates || {})[a.id] || 0) * D.spd / 100) / 10} kt na dzień` : a.info;
+      const info = isRig ? `wierci ok. ${String(Math.round(((ex.rates || {})[a.id] || 0) * D.spd / 100) / 10).replace('.', ',')} tys. t na dzień` : a.info;
       h += `<button class="o ${a.id === choice ? 'cur' : ''}" data-a="${esc(a.id)}" style="background:${a.bg}"><b>${esc(a.id)}</b><span>${esc(info)}</span></button>`;
     });
     h += `<button class="o stand ${choice === 'postój' ? 'cur' : ''}" data-a="postój"><b>postój</b><span>${isRig ? 'wiertnica stoi (serwis, brak operatora)' : 'koparka nie pracuje'}</span></button>`;

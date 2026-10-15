@@ -135,8 +135,8 @@ def step_plan() -> None:
     p = plan_settings()
     head = st.columns([4, 1.6], vertical_alignment="bottom")
     with head[0]:
-        theme.header("Harmonogram miesiąca", "Ustawiasz pracę: koparka – obszar i tony, wozidło – do której koparki. "
-                                             "Usypy, wiercenie i strzały program układa sam.")
+        theme.header("Harmonogram miesiąca", "Ustawiasz pracę: wiertnica i koparka – obszar i tony, wozidło – do której koparki. "
+                                             "Wiercenie dni, strzały i usypy program liczy sam.")
     if not sc.excavators or not sc.areas:
         st.info("Najpierw narysuj kopalnię w kroku **① Kopalnia**: drogi, kruszarkę, koparki i obszary wydobycia.")
         return
@@ -326,7 +326,7 @@ def _areas_editor(raw: dict, sc, rigs: list, fire: int, work: dict) -> None:
         rows.append({"obszar": a["id"], "poziom": a.get("level_m"), "start_t": float(work["start"].get(a["id"], 0.0)),
                      "tpm": float(a.get("t_per_m") or 50), "zasoby_t": float(a.get("reserves_t") or 0),
                      "mb10": round(10000 / float(a.get("t_per_m") or 50)),
-                     "wiert": " · ".join(f"{r['id']} {_kt(workplan.rig_rate(r, a))} kt" for r in rigs) or "–"})
+                     "wiert": " · ".join(f"{r['id']} {_tt(workplan.rig_rate(r, a))}" for r in rigs) or "–"})
     ver = f"{st.session_state.get('ver', 0)}_{st.session_state.get('k2_area_ver', 0)}"
     ed = st.data_editor(pd.DataFrame(rows), key=f"k2_areas_{ver}", hide_index=True, width="stretch",
                         disabled=["obszar", "poziom", "mb10", "wiert"],
@@ -371,7 +371,13 @@ def _num(x: float) -> str:
 
 
 def _kt(x: float) -> str:
-    return f"{x / 1000:.1f}".rstrip("0").rstrip(".") if x < 10_000 else f"{x / 1000:.0f}"
+    """Thousands of tonnes as a planner writes them: 2,2 · 15 · 0,5."""
+    v = f"{x / 1000:.1f}".rstrip("0").rstrip(".") if x < 10_000 else f"{x / 1000:.0f}"
+    return v.replace(".", ",")
+
+
+def _tt(x: float) -> str:
+    return f"{_kt(x)} tys. t"
 
 
 def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd) -> dict:
@@ -413,7 +419,7 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
                                 red=bool(why), v=vals))
                 continue
             bg, fg = acol.get(areas[-1], ("#FFFFFF", "#1B2733"))
-            out.append(cell(f"{'/'.join(areas)} {_kt(tot)}", bg, fg, f"{key}: {'/'.join(areas)} – {_num(tot)} t "
+            out.append(cell(f"{'/'.join(areas)}: {_tt(tot)}", bg, fg, f"{key}: {'/'.join(areas)} – {_num(tot)} t "
                             f"({_num(per)} t na zmianę)" + (f" – {why}" if why else ""), red=bool(why), v=vals))
         return out
 
@@ -442,7 +448,7 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             vals = {"a": orders[0][0] if orders else "", "t": sum(t for _, t in orders)}
             if orders:
                 bg, fg = acol.get(orders[-1][0], ("#FFFFFF", "#1B2733"))
-                orders_row.append(cell(" + ".join(f"{a} {_kt(t)}" for a, t in orders), bg, fg,
+                orders_row.append(cell("\n".join(f"{a}: {_tt(t)}" for a, t in orders), bg, fg,
                                        f"{rid}: zlecenie " + ", ".join(f"{a} {_num(t)} t" for a, t in orders), bold=True,
                                        v=vals))
             elif any(rr[i]["stop"] for i in g):
@@ -461,7 +467,7 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             if drill:
                 a = next(iter(drill))
                 bg, fg = acol.get(a, ("#FFFFFF", "#1B2733"))
-                text = f"{'/'.join(drill)} {_kt(sum(drill.values()))}" + (f" ⟶{_kt(wait)}" if wait > 1 else "")
+                text = "\n".join(f"{a}: {_tt(d)}" for a, d in drill.items()) + (f"\nzostaje {_tt(wait)}" if wait > 1 else "")
                 drill_row.append(cell(text, "#FFFFFF", fg, title, bd=bg))
             else:
                 drill_row.append(cell("–", "#FFFFFF", "#8A93A0", title))
@@ -471,8 +477,10 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
     for r in rigs:
         orders_row, drill_row = rig_rows(r["id"])
         rows.append({"kind": "dr", "name": f"{r['id']} · zlecenia", "id": r["id"], "cells": orders_row})
-        rows.append({"kind": "drx", "name": "↳ wierci [kt]", "cells": drill_row})
+        rows.append({"kind": "drx", "name": "↳ wierci", "cells": drill_row})
     rows.append({"kind": "group", "name": "STRZAŁY – zlecenie = strzał, po odwierceniu · kliknij, żeby przesunąć"})
+    bl = sc.blasting
+    fire_at = f"{bl.fire_from}–{bl.fire_to}"
     for a_id in area_ids:
         out = []
         for g in groups:
@@ -480,10 +488,10 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             if fired:
                 p, b = fired[0]
                 moved = f" (przesunięty o {b['delay']} zm.)" if b["delay"] else ""
-                txt = " ".join(f"{q.rsplit('/', 1)[1]}·{_kt(c['t'])}" for q, c in fired)
-                out.append(cell(f"✸ {txt}", "#1B2733", "#FFFFFF",
-                                f"strzał {', '.join(q for q, _ in fired)}: {_num(b['t'])} t · {b['m']} mb{moved} – "
-                                f"urobek od {lab[min(b['avail'], n - 1)]}", bold=True, p=p))
+                txt = "\n".join(f"strzał {_tt(c['t'])}" for _, c in fired) + f"\n{fire_at}"
+                out.append(cell(txt, "#1B2733", "#FFFFFF",
+                                "\n".join(f"strzał {q} (usyp {q}): {_num(c['t'])} t · {c['m']} mb" for q, c in fired)
+                                + f" · {fire_at}{moved} – urobek od {lab[min(b['avail'], n - 1)]}", bold=True, p=p))
             else:
                 out.append(cell("", "#FFFFFF", "#FFFFFF"))
         rows.append({"kind": "fire", "name": a_id, "cells": out})
@@ -494,10 +502,10 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             lft = ev["area_left"][a_id][g[0]]
             miss = sum(ev["short"][a_id][i] for i in g)
             if miss > 1:
-                out.append(cell(f"−{_kt(miss)}", "#FDE2E2", "#8C0E20", f"{a_id}: koparkom zabraknie {_num(miss)} t",
+                out.append(cell(f"brak {_tt(miss)}", "#FDE2E2", "#8C0E20", f"{a_id}: koparkom zabraknie {_num(miss)} t",
                                 red=True))
             else:
-                out.append(cell(f"{_kt(lft)} kt" if lft > 1 else "–", "#E3F1E6" if lft > 1 else "#FFFFFF",
+                out.append(cell(_tt(lft) if lft > 1 else "–", "#E3F1E6" if lft > 1 else "#FFFFFF",
                                 "#1E5A2C" if lft > 1 else "#8A93A0", f"{a_id}: leży ok. {_num(lft)} t"))
         rows.append({"kind": "pile", "name": a_id, "cells": out})
     rows.append({"kind": "group", "name": "KOPARKI – obszar i tony · ustawiasz Ty"})
@@ -524,19 +532,19 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             out.append(cell(str(k) if k else "–", "#FFFFFF", "#3A4452" if k else "#8A93A0", f"do {x}: {k} wozideł"))
         rows.append({"kind": "sum", "name": f"wozideł do {x}", "cells": out})
     planned = ev["planned"]
-    rows.append({"kind": "group", "name": "PLAN NARASTAJĄCO" + (f" · cel {_kt(target)} kt" if target else "")})
+    rows.append({"kind": "group", "name": "PLAN NARASTAJĄCO" + (f" · cel {_tt(target)}" if target else "")})
     out, acc = [], 0.0
     for g in groups:
         acc += sum(planned[i] for i in g)
         due = target * (g[-1] + 1) / n if target else 0.0
         ok = not target or acc >= due * 0.98
-        out.append(cell(f"{acc / 1000:.1f}", "#E3F1E6" if ok else "#FFF0B8", "#1E5A2C" if ok else "#6E5600",
+        out.append(cell(f"{acc / 1000:.1f}".replace(".", ","), "#E3F1E6" if ok else "#FFF0B8", "#1E5A2C" if ok else "#6E5600",
                         f"do końca: {_num(acc)} t" + (f" · w tempie celu powinno być {_num(due)} t" if target else ""),
                         bold=True))
-    rows.append({"kind": "sum", "name": "wywiezione [kt]", "cells": out})
+    rows.append({"kind": "sum", "name": "wywiezione [tys. t]", "cells": out})
     areas = []
     for a in sc.areas:
-        info = f"leży na start {_kt(ev['area_left'][a['id']][0])} kt"
+        info = f"leży na start {_tt(ev['area_left'][a['id']][0])}"
         areas.append({"id": a["id"], "info": info, "bg": acol[a["id"]][0], "fg": acol[a["id"]][1]})
     exs = [{"id": e.id, "allowed": [a for a in area_ids if e.may_work(a)] or area_ids, "rate": round(rates.get(e.id, 0.0)),
             "bg": ecol[e.id][0], "fg": ecol[e.id][1]} for e in sc.excavators if e.id in ecol]
