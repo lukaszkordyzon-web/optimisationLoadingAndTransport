@@ -38,7 +38,8 @@ def cell(work: dict, ex: str, i: int, part: str = "ex") -> tuple[str, float]:
 
 def fit(work: dict, n: int) -> dict:
     """The plan cut or extended (last shift repeated) to n shifts."""
-    out = {"start": dict(work.get("start") or {}), "ex": {}, "tr": {}, "dr": {}, "fire": dict(work.get("fire") or {})}
+    out = {"start": dict(work.get("start") or {}), "ex": {}, "tr": {}, "dr": {}, "fire": dict(work.get("fire") or {}),
+           "mode": work.get("mode", "limit")}
     for part in ("ex", "dr"):
         for k, cells in (work.get(part) or {}).items():
             cells = list(cells) or [{"a": "", "t": 0.0}]
@@ -261,13 +262,18 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
 
 def frozen(work: dict, ev: dict, n: int) -> dict:
     """The plan for PeriodPlan.frozen: per shift the excavators' piles, the blasts that become ready (with their
-    tonnes), the tonnes every excavator gets and where every truck drives."""
+    tonnes), the tonnes every excavator gets and where every truck drives. With the plan's tonnes as a minimum
+    (`mode` "min") an excavator with tonnes loads on as long as it has blasted material, trucks and time."""
     grid, blasts = ev["grid"], ev["blasts"]
-    return {"ex": [{ex: cells[i] for ex, cells in grid.items() if cells[i]} for i in range(n)],
+    if work.get("mode") == "min":
+        quota = [{ex: cell(work, ex, i)[1] for ex in work["ex"]} for i in range(n)]
+    else:
+        quota = [{ex: ev["quota"][ex][i] for ex in work["ex"]} for i in range(n)]
+    return {"open": work.get("mode") == "min","ex": [{ex: cells[i] for ex, cells in grid.items() if cells[i]} for i in range(n)],
             "blasts": [sorted((p for p, b in blasts.items() if b["avail"] == i),
                               key=lambda p: (p.rsplit("/", 1)[0], int(p.rsplit("/", 1)[1]))) for i in range(n)],
             "blast_t": {p: float(b["t"]) for p, b in blasts.items()},
-            "quota": [{ex: ev["quota"][ex][i] for ex in work["ex"]} for i in range(n)],
+            "quota": quota,
             "trucks": [{tid: (cells[i] if i < len(cells) else "") for tid, cells in work["tr"].items()} for i in range(n)]}
 
 

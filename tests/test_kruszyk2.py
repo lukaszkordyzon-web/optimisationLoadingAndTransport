@@ -81,3 +81,19 @@ def test_a_copy_of_the_schedule_is_compared_with_the_base():
     assert not at.exception, at.exception
     cmp = at.session_state["k2_cmp"]
     assert set(cmp) == {"A", "B"} and cmp["A"]["t"] > 0 and cmp["A"]["plan_t"] == cmp["B"]["plan_t"]
+
+
+def test_full_output_variant():
+    at = AppTest.from_file(APP, default_timeout=900)
+    at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
+                                   "real_t": 0.0}
+    at.run()
+    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.button(key="k2_var_copy").click().run()
+    at.toggle(key="k2_open_B").set_value(True).run()
+    assert at.session_state["variants"]["B"]["mode"] == "min"
+    assert at.session_state["variants"]["A"].get("mode", "limit") == "limit"
+    at.button(key="k2_var_cmp").click().run()
+    assert not at.exception, at.exception
+    cmp = at.session_state["k2_cmp"]
+    assert cmp["B"]["t"] >= cmp["A"]["t"] and cmp["B"]["mode"] == "min"

@@ -387,6 +387,13 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
             moved = []
             for e in sc.excavators:
                 target = want.get(e.id, ex_pile[e.id])
+                if frozen.get("open") and "/" in target and left.get(target, 0.0) < MIN_PILE_T:
+                    # loading more than planned: the plan's pile is taken out sooner – the next blasted one of the area
+                    area = target.rsplit("/", 1)[0]
+                    ready = sorted((int(p.rsplit("/", 1)[1]), p) for p, t in left.items()
+                                   if p.rsplit("/", 1)[0] == area and t >= MIN_PILE_T and p in pile_route)
+                    if ready:
+                        target = ready[0][1]
                 if target != ex_pile[e.id] and target in pile_route:
                     moved.append((ex_pile[e.id], target))
                     relocate(e, target)
@@ -429,7 +436,9 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
         quota = frozen["quota"][i] if frozen and i < len(frozen.get("quota") or []) else None
         if quota is not None:  # the tonnes the plan gives every excavator on this shift (none = it stands)
             for e in v.excavators:
-                e.quota_t = float(quota.get(e.id, 0.0))
+                q = float(quota.get(e.id, 0.0))
+                # the plan as a minimum: an excavator that works loads as much as there is
+                e.quota_t = None if frozen.get("open") and q > 0 else q
         drive = frozen["trucks"][i] if frozen and i < len(frozen.get("trucks") or []) else None
         if drive is not None:  # which excavator every truck drives to on this shift ("" = it does not drive)
             for f in v.trucks:

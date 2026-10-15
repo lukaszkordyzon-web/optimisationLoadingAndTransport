@@ -170,7 +170,9 @@ def step_result() -> None:
     with head[0]:
         sub = ""
         if res and appr and res["key"] == _month_key(appr):
-            sub = (f"Wariant {appr.get('variant', 'A')} · {res['labels'][0]} – {res['labels'][-1]} · {len(res['today'])} zmian · ten sam harmonogram, strzały, "
+            sub = (f"Wariant {appr.get('variant', 'A')}"
+                   + (" (pełna wydajność koparek)" if (appr.get("work") or {}).get("mode") == "min" else "") + " · "
+                   f"{res['labels'][0]} – {res['labels'][-1]} · {len(res['today'])} zmian · ten sam harmonogram, strzały, "
                    "pogoda i awarie. Wozidła jeżdżą tam, gdzie wysyła sztygar – zmienia się tylko sposób jazdy.")
         theme.header("Ten sam miesiąc: jak dziś i z sygnałami RL", sub)
     appr = _approved()

@@ -185,8 +185,24 @@ def _month_today(raw: dict, sc, work: dict, p: dict, rigs: list, cap: float) -> 
     plan.frozen = workplan.frozen(work, ev, n)
     df = run_period(today(sim), plan, seed=0)
     t, cost = float(df["wywiezione_t"].sum()), float(df["koszt_zl"].sum())
+    crush_cap = sum(float(c.capacity_tph) for c in sim.crushers) * sim.shift_hours * n
     return {"plan_t": sum(ev["planned"]), "t": t, "cost": cost, "zl_t": cost / t if t else 0.0,
-            "fuel": float(df["paliwo_l"].sum()), "queue": float(df["kolejki_h"].sum()), "issues": len(ev["issues"])}
+            "fuel": float(df["paliwo_l"].sum()), "queue": float(df["kolejki_h"].sum()), "issues": len(ev["issues"]),
+            "mode": work.get("mode", "limit"), "shifts": n, "crusher_use": t / crush_cap if crush_cap else 0.0,
+            "ex_wait_h": float(df["koparki_czekaly_h"].sum()), "ex_h": len(sim.excavators) * sim.shift_hours * n,
+            "no_material": int((df["skonczyl_sie_urobek"] != "").sum())}
+
+
+def _limits(r: dict) -> str:
+    """What stops a variant loading more (with the plan's tonnes as a minimum)."""
+    if r["no_material"] >= 0.15 * r["shifts"]:
+        return (f"urobek – koparkom kończył się odstrzelony urobek na {r['no_material']} zmianach; wiercenie nie "
+                "nadąża za większym wydobyciem")
+    if r["crusher_use"] >= 0.85:
+        return f"kruszarka – wykorzystana w {100 * r['crusher_use']:.0f} %"
+    if r["ex_h"] and r["ex_wait_h"] >= 0.25 * r["ex_h"]:
+        return f"wozidła – koparki czekały na wozidła {r['ex_wait_h']:,.0f} h".replace(",", " ")
+    return "koparki – pracują na pełnych możliwościach"
 
 
 def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
@@ -205,6 +221,16 @@ def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
         go_ = c[4].button("Porównaj warianty", type="primary", key="k2_var_cmp", width="stretch",
                           disabled=len(names) < 2,
                           help="Każdy wariant liczony jak dziś – ten sam miesiąc, pogoda i awarie; różni się tylko plan.")
+        act = st.session_state.get("k2seg_variant") or first
+        w = vs[act]
+        open_ = st.toggle(f"Pełna wydajność w wariancie {act} – koparki nie stają po zrobieniu planu",
+                          value=w.get("mode") == "min", key=f"k2_open_{act}",
+                          help="Wyłączone: koparka robi tony z harmonogramu i staje. Włączone: po zrobieniu planu ładuje "
+                               "dalej, dopóki ma odstrzelony urobek, wozidła i czas – porównanie pokaże, ile da kopalnia, "
+                               "co ją ogranicza i ile kosztuje dodatkowa tona.")
+        if open_ != (w.get("mode") == "min"):
+            w["mode"] = "min" if open_ else "limit"
+            st.rerun()
         theme.note("Harmonogram poniżej to wybrany wariant. „Kopia” tworzy nowy z tym samym planem – zmieniasz w nim "
                    "wiercenie, koparki albo wozidła i porównujesz. Potem wybrany wariant zatwierdzasz do porównania z RL.")
         cache = st.session_state.setdefault("k2_cmp", {})
@@ -222,8 +248,9 @@ def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
             rows = []
             for k in done:
                 r = cache[k]
+                label = _variant_name(k, first) + (" · pełna wydajność" if r.get("mode") == "min" else "")
                 dz, dc = r["zl_t"] - base["zl_t"], r["cost"] - base["cost"]
-                rows.append([_variant_name(k, first), _num(r["plan_t"]), _num(r["t"]), f"{r['zl_t']:.2f}",
+                rows.append([label, _num(r["plan_t"]), _num(r["t"]), f"{r['zl_t']:.2f}",
                              "–" if k == first else f"{dz:+.2f}", _num(r["cost"]),
                              "–" if k == first else f"{dc:+,.0f}".replace(",", " "), _num(r["fuel"]), _num(r["queue"]),
                              str(r["issues"])])
@@ -232,8 +259,18 @@ def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
                                      ("Paliwo [l]", "n"), ("Kolejki [h]", "n"), ("Do poprawy", "n")], rows,
                                     numeric=set(range(1, 10)), sans={0}), unsafe_allow_html=True)
             for k in done:
+                r = cache[k]
+                lines = []
                 if k != first:
-                    theme.note(f"<b>{k} względem {first}:</b> " + " · ".join(_diff(vs[first], vs[k], lab)))
+                    lines.append(" · ".join(_diff(vs[first], vs[k], lab)))
+                if r.get("mode") == "min":
+                    over = r["t"] - r["plan_t"]
+                    lines.append(f"ponad plan <b>{over:+,.0f} t</b>".replace(",", " ") + f" · ogranicza: {_limits(r)}")
+                if k != first and r["t"] - base["t"] > 100:
+                    extra = (r["cost"] - base["cost"]) / (r["t"] - base["t"])
+                    lines.append(f"dodatkowa tona kosztuje <b>{extra:.2f} zł</b> (średnio {r['zl_t']:.2f} zł/t)")
+                if lines:
+                    theme.note(f"<b>{k}:</b> " + " · ".join(lines))
         elif cache and not go_:
             theme.note("Zmieniłeś coś od ostatniego porównania – kliknij „Porównaj warianty”, żeby policzyć od nowa.")
 

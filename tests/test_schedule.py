@@ -144,3 +144,26 @@ def test_drill_order_runs_as_long_as_it_takes_and_orders_queue():
     # then 2 h of driving: B gets 8 − 4 (A) − 2 (drive) = 2 h of the 3rd shift, the rest on the 4th
     assert [round(x) for x in ev["drilled"]["B"]] == [0, 0, 825, 2475, 0, 0]
     assert ev["blasts"]["A/2"]["t"] == 7500 and ev["blasts"]["A/2"]["done"] == 2  # fired when the rig leaves A
+
+
+def test_plan_as_a_minimum_loads_more_when_there_is_material():
+    from kruszyk import workplan
+    import yaml
+    from kruszyk.config import scenario_from_dict
+
+    raw = yaml.safe_load(DEMO.read_text(encoding="utf-8"))
+    sc = load_scenario(DEMO)
+    n, cap = 4, sc.blasting.max_blast_t()
+    work = {"start": {"O2": 30000.0, "O3": 30000.0},
+            "ex": {"K-1": [{"a": "O2", "t": 500.0}] * n, "K-2": [{"a": "O3", "t": 500.0}] * n},
+            "tr": {f.id: ["K-1" if j % 2 else "K-2"] * n for j, f in enumerate(sc.trucks)}, "dr": {}}
+    runs = {}
+    for mode in ("limit", "min"):
+        w = dict(work, mode=mode)
+        ev = workplan.evaluate(w, sc.areas, [], n, cap)
+        sim = scenario_from_dict(workplan.scenario_raw(raw, w, ev["grid"], cap))
+        p = PeriodPlan(start=dt.date(2026, 11, 2), days=2, shifts_per_day=2)
+        p.frozen = workplan.frozen(w, ev, n)
+        runs[mode] = float(run_period(today(sim), p, seed=1)["wywiezione_t"].sum())
+    assert runs["limit"] <= 4000 + 80  # the plan: 2 × 500 t a shift
+    assert runs["min"] > 1.3 * runs["limit"]  # the machines can do much more than that
