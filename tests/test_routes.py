@@ -237,3 +237,42 @@ def test_routes_from_the_map_carry_their_bends():
     new = site_to_scenario(raw["site"], raw)
     curves = [c for r in new["routes"].values() for s in r["segments"] for c in s.get("curves", [])]
     assert curves and min(r for r, _ in curves) < 30  # the hairpin on the way out of the pit
+
+
+def _branching_site():
+    """A 700 m ramp from 300 m at −10 %, flat roads leaving it at 350 m and 400 m and at its foot."""
+    m = 1 / 111195
+
+    def lat(d):
+        return 50.0 - d * m
+
+    def lon(d):
+        return 19.9 + d * m / 0.6428
+    return {"crusher": {"lat": lat(700), "lon": lon(300), "id": "C-1", "elev_m": 0.0}, "piles": [], "excavators": [],
+            "roads": [
+                {"id": "R2", "name": "rampa 2", "kind": "rampa", "grade_draw_pct": -10.0, "inlet_elev_m": 300.0,
+                 "coords": [[lat(d), 19.9] for d in range(0, 701, 100)]},
+                {"id": "R3", "name": "droga 3", "kind": "droga", "grade_draw_pct": 0.0,
+                 "coords": [[lat(400), 19.9], [lat(400), lon(300)]]},
+                {"id": "R4", "name": "droga 4", "kind": "droga", "grade_draw_pct": 0.0,
+                 "coords": [[lat(350), 19.9], [lat(350), lon(-300)]]},
+                {"id": "R5", "name": "droga 5", "kind": "droga", "grade_draw_pct": 0.0,
+                 "coords": [[lat(700), 19.9], [lat(700), lon(300)]]}]}
+
+
+def test_flat_road_takes_the_height_where_it_leaves_the_ramp():
+    from kruszyk.site import analyze_site, auto_levels
+
+    site = _branching_site()
+    assert not analyze_site(site)["warnings"]
+    levels = {lv["roads"][0]: lv["elev_m"] for lv in auto_levels(site)}
+    assert levels == {"droga 3": 260.0, "droga 4": 265.0, "droga 5": 230.0}  # 300 − 10 % × distance down the ramp
+    # a flat road joining two places on different heights: the warning says where both heights come from
+    site["roads"][2]["coords"].append(site["roads"][1]["coords"][-1])
+    w = analyze_site(site)["warnings"]
+    assert any("droga 4" in x and "rampa 2" in x and "260 / 265" in x for x in w), w
+    # a typed height that does not fit the ramp: both sources are named
+    site = _branching_site()
+    site["roads"][3]["inlet_elev_m"] = 250.0
+    w = analyze_site(site)["warnings"]
+    assert any("rampa 2" in x and "droga 5" in x and "250" in x for x in w), w

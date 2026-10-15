@@ -1092,6 +1092,7 @@ def editing_map(site: dict) -> folium.Map:
     return m
 
 
+FROM_RAMP = "(ze styku z pochylnią)"
 ROAD_COLS = {"id": "id", "name": "nazwa", "kind": st.column_config.SelectboxColumn("rodzaj", options=["droga", "rampa"]),
              "grade_draw_pct": st.column_config.NumberColumn(
                  "nachylenie wzdłuż rysowania [%]", help="+ = droga wznosi się w kierunku rysowania (strzałka na mapie), "
@@ -1645,27 +1646,54 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
     t_ev = t_ex
     t_plan = tabs[3] if len(tabs) > 3 else None
     road_levels = {n: lv["name"] for lv in site.get("levels") or [] for n in lv.get("roads", [])}
+    for r in site["roads"]:
+        r.pop("level_pick", None)  # a table helper, never stored
     net = analyze_site(site)
     with t_road:
         crushers_table(site, raw_for_build)
         if site["roads"]:
+            def shown_level(r) -> str:
+                z = r.get("inlet_elev_m")
+                if r.get("kind") == "rampa" or abs(float(r.get("grade_draw_pct") or 0.0)) >= 0.05:
+                    lv = next((x for x in site.get("levels") or [] if z not in (None, "")
+                               and abs(float(x.get("elev_m") or 0) - float(z)) < 0.05), None)
+                    return lv["name"] if lv else FROM_RAMP
+                return road_levels.get(r.get("name") or r.get("id"), FROM_RAMP)
+            shown = {r["uid"]: shown_level(r) for r in site["roads"]}
             object_table(site, "roads", lambda: pd.DataFrame(
                 [{k: v for k, v in r.items() if k not in ("coords", "uid")} | {"active": r.get("active", True),
                                                                                "single_lane": bool(r.get("single_lane")),
                                                                                "inlet_elev_m": r.get("inlet_elev_m")}
-                 | {"poziom (auto)": road_levels.get(r.get("name") or r.get("id"), "–"),
+                 | {"level_pick": shown[r["uid"]],
                     "rzędna początku [m]": _node_elev(net, r["coords"][0]),
                     "rzędna końca [m]": _node_elev(net, r["coords"][-1]),
                     "długość [m]": round(polyline_length_m(r["coords"]))} for r in site["roads"]]),
-                extra=("active", "single_lane", "inlet_elev_m"),
-                disabled=["id", "długość [m]", "poziom (auto)", "rzędna początku [m]", "rzędna końca [m]"],
+                extra=("active", "single_lane", "inlet_elev_m", "level_pick"),
+                disabled=["id", "długość [m]", "rzędna początku [m]", "rzędna końca [m]"],
                 rerun_on=("inlet_elev_m", "grade_draw_pct", "active", "kind"),
                 column_config={**ROAD_COLS, "inlet_elev_m": st.column_config.NumberColumn(
                     "rzędna wlotu [m]", help="pochylnia: rzędna pierwszego narysowanego punktu (wlotu). Droga "
-                                             "pozioma: zwykle puste – jej rzędna wynika ze styku z pochylnią; wpisz "
+                                             "płaska: zwykle puste – jej rzędna wynika ze styku z pochylnią; wpisz "
                                              "tylko dla drogi bez pochylni (np. poziom górny). Puste = z sieci."),
+                               "level_pick": st.column_config.SelectboxColumn(
+                                   "poziom", options=[FROM_RAMP] + level_names(site),
+                                   help="droga płaska: wybierz poziom – droga dostanie jego rzędną. "
+                                        f"„{FROM_RAMP}” = rzędna ze styku z pochylnią (kasuje wpisaną). "
+                                        "Pochylnia: poziom jej wlotu."),
                                "rzędna początku [m]": st.column_config.NumberColumn(format="%.1f"),
                                "rzędna końca [m]": st.column_config.NumberColumn(format="%.1f")})
+            uids, df0 = st.session_state[f"tbl_roads_{st.session_state.obj_ver}"]
+            before = dict(zip(uids, df0["level_pick"]))  # what the table showed, not what levels say now
+            changed = False
+            for r in site["roads"]:
+                pick = r.pop("level_pick", None)
+                if pick is None or pick == before.get(r["uid"]):
+                    continue
+                r["inlet_elev_m"] = None if pick == FROM_RAMP else level_elev(site, pick)
+                changed = True
+            if changed:
+                st.session_state.obj_ver += 1
+                st.rerun()
             if net.get("warnings"):
                 for w in net["warnings"]:
                     st.warning(w)

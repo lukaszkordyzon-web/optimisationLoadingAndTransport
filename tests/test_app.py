@@ -375,3 +375,20 @@ def test_calibration_on_a_table_of_shifts():
     cal = at.session_state["raw"]["calibration"]
     assert cal["n_shifts"] == 12 and abs(cal["measured"]["tonnes_t"] - sum(tonnes) / 12) < 0.01
     assert any("na **12 zmianach**" in c.value for c in at.caption)
+
+
+def test_road_level_is_chosen_in_the_table():
+    """Picking a level for a flat road gives it that level's height; '(ze styku z pochylnią)' clears it."""
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    site = at.session_state["site"]
+    ver = at.session_state["obj_ver"]
+    uids, df = at.session_state[f"tbl_roads_{ver}"]
+    i = next(k for k, r in enumerate(site["roads"]) if r["uid"] == uids[k] and r["kind"] == "droga"
+             and not r.get("inlet_elev_m"))
+    other = next(lv for lv in site["levels"] if lv["name"] != df["level_pick"][i])
+    at.session_state[f"roads_{ver}"] = {"edited_rows": {i: {"level_pick": other["name"]}}, "added_rows": [],
+                                        "deleted_rows": []}
+    at.run()
+    assert not at.exception, at.exception
+    road = next(r for r in at.session_state["site"]["roads"] if r["uid"] == uids[i])
+    assert road["inlet_elev_m"] == other["elev_m"] and "level_pick" not in road

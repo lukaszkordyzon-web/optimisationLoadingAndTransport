@@ -254,32 +254,52 @@ class RoadGraph:
             v = u
         return list(reversed(edges))
 
+    def is_flat(self, ri: int) -> bool:
+        road = self.roads[ri]
+        g = road.get("grade_draw_pct", road.get("grade_pct", 0.0))
+        return abs(float(g or 0.0)) < 0.05
+
+    def road_name(self, ri: int) -> str:
+        return self.roads[ri].get("name") or self.roads[ri].get("id") or f"droga {ri + 1}"
+
     def ramp_anchors(self) -> list[tuple[int, float]]:
-        """Ramps with a known inlet elevation (first drawn point): extra fixed heights for the network."""
+        """Roads with a typed elevation (first drawn point – a ramp's inlet, or the height of a flat road):
+        extra fixed heights for the network."""
+        return [(n, z) for n, z, _ in self._anchors()]
+
+    def _anchors(self) -> list[tuple[int, float, str]]:
         out = []
-        for road in self.roads:
+        for ri, road in enumerate(self.roads):
             z = road.get("inlet_elev_m")
-            if z is None or z == "" or not road.get("coords"):
+            if z is None or z == "" or not road.get("coords") or (isinstance(z, float) and math.isnan(z)):
                 continue
             p = tuple(road["coords"][0])
             n = min(range(len(self.nodes)), key=lambda i: haversine_m(self.nodes[i], p), default=None)
             if n is not None:
-                out.append((n, float(z)))
+                kind = "rzędna wlotu" if not self.is_flat(ri) else "wpisana rzędna"
+                out.append((n, float(z), f"„{self.road_name(ri)}” ({kind} {float(z):.0f} m)"))
         return out
+
+    FLAT_COST = 1000.0  # heights travel along ramps first; a flat road only passes on the height where it meets one
 
     def elevations(self, root: int, root_elev: float, anchors: list[tuple[int, float]] | None = None,
                    root_fixed: bool = True) -> tuple[dict[int, float], list[str]]:
-        """Node elevations along the road grades, from the crusher and from every ramp inlet with a given
-        elevation (each node takes its height from the nearest such point). Flat roads therefore get the
-        height of the place where they meet a ramp. Returns elevations and warnings where the drawn grades
-        do not agree with the known heights (> 3 m)."""
-        anchors = self.ramp_anchors() if anchors is None else list(anchors)
-        if root_fixed or not anchors:  # the crusher's height counts only if set (or nothing else is known)
-            anchors = [(root, root_elev)] + anchors
+        """Node elevations along the road grades, from the crusher and from every road with a typed elevation.
+        Heights travel along the ramps first (inlet + grade × distance); a flat road takes the height where it
+        meets a ramp and keeps it. Returns elevations and warnings where the drawn grades do not agree with the
+        known heights (> 3 m), naming where each of the two heights came from."""
+        if anchors is None:
+            src_anchors = self._anchors()
+        else:
+            src_anchors = [(n, z, f"punkt o rzędnej {z:.0f} m") for n, z in anchors]
+        if root_fixed or not src_anchors:  # the crusher's height counts only if set (or nothing else is known)
+            src_anchors = [(root, root_elev, f"kruszarki (rzędna {root_elev:.0f} m)")] + src_anchors
         adj = self.adj()
-        elev, dist, pq = {}, {}, []
-        for n, z in anchors:
-            elev[n], dist[n] = z, 0.0
+        elev, dist, src, pq = {}, {}, {}, []
+        for n, z, label in src_anchors:
+            if n in dist:
+                continue  # two typed heights in one point: the first one counts
+            elev[n], dist[n], src[n] = z, 0.0, label
             pq.append((0.0, n))
         heapq.heapify(pq)
         while pq:
@@ -287,19 +307,32 @@ class RoadGraph:
             if d > dist.get(u, math.inf):
                 continue
             for v, w, ri in adj.get(u, []):
-                if d + w < dist.get(v, math.inf):
-                    dist[v] = d + w
+                c = w * (self.FLAT_COST if self.is_flat(ri) else 1.0)
+                if d + c < dist.get(v, math.inf):
+                    dist[v] = d + c
                     elev[v] = elev[u] + self.dz(u, v, w, ri)
-                    heapq.heappush(pq, (d + w, v))
+                    src[v] = src[u]
+                    heapq.heappush(pq, (d + c, v))
         warnings = []
         for (a, b), (w, ri) in self.edges.items():
             if a in elev and b in elev:
                 g = self.dz(a, b, w, ri)
                 if abs(elev[b] - elev[a] - g) > 3:
-                    name = self.roads[ri].get("name") or self.roads[ri].get("id")
-                    kind = "płaska, a jej końce wyszły" if g == 0 else "jej nachylenie nie zgadza się z rzędnymi –"
-                    warnings.append(f"Droga „{name}”: {kind} na różnych wysokościach ({elev[a]:.0f} / {elev[b]:.0f} m) – "
-                                    "sprawdź nachylenia i rzędne wlotów pochylni")
+                    name, z = self.road_name(ri), f"{elev[a]:.0f} / {elev[b]:.0f} m"
+                    if src[a] != src[b]:  # two typed heights (or the crusher) disagree along the grades
+                        warnings.append(
+                            f"Droga „{name}”: wysokości się nie zgadzają – z {src[a]} wychodzi tu {elev[a]:.0f} m, "
+                            f"a z {src[b]} {elev[b]:.0f} m. Popraw nachylenie pochylni albo wpisaną rzędną (drodze "
+                            "płaskiej rzędnej zwykle nie wpisuj – bierze ją ze styku z pochylnią).")
+                    elif g == 0:
+                        warnings.append(
+                            f"Droga „{name}”: płaska, a łączy dwa miejsca na różnych wysokościach ({z}, obie z "
+                            f"{src[a]}) – albo ma nachylenie (wpisz je), albo jej koniec dotknął innej drogi "
+                            "(odsuń go na mapie).")
+                    else:
+                        warnings.append(
+                            f"Droga „{name}”: jej nachylenie nie zgadza się z rzędnymi ({z}, z {src[a]}) – "
+                            "sprawdź nachylenia pochylni na tej trasie.")
         return elev, sorted(set(warnings))
 
 
@@ -1011,53 +1044,43 @@ def _network_elev(site: dict):
         anchors = g.ramp_anchors()
         if not anchors:
             return g, {}
-        elev, _ = g.elevations(anchors[0][0], anchors[0][1], anchors[1:])
+        elev, _ = g.elevations(anchors[0][0], anchors[0][1], root_fixed=False)
     return g, elev
 
 
 def auto_levels(site: dict) -> list[dict]:
-    """Levels from the flat roads. Flat roads connected to each other form one level; its height is the height
-    where they meet a ramp (or the elevation typed in for one of them)."""
+    """Levels from the flat roads: each flat road is at the height where it meets a ramp (or the height typed in
+    for it); flat roads at the same height (within LEVEL_SNAP_M) form one level."""
     g, elev = _network_elev(site)
     if g is None or not elev:
         return []
-    flat = {ri for ri, r in enumerate(g.roads) if abs(float(r.get("grade_draw_pct") or 0.0)) < 0.05}
+    flat = [ri for ri in range(len(g.roads)) if g.is_flat(ri)]
     nodes_of: dict[int, set] = {}
     for (a, b), (_, ri) in g.edges.items():
         nodes_of.setdefault(ri, set()).update((a, b))
-    # connected groups of flat roads (sharing a node)
-    parent = {ri: ri for ri in flat}
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-    flat_l = sorted(flat)
-    for i, a in enumerate(flat_l):
-        for b in flat_l[i + 1:]:
-            if nodes_of.get(a, set()) & nodes_of.get(b, set()):
-                parent[find(a)] = find(b)
-    groups: dict[int, list[int]] = {}
-    for ri in flat_l:
-        groups.setdefault(find(ri), []).append(ri)
     sloped_nodes = set().union(*(nodes_of.get(ri, set()) for ri in range(len(g.roads)) if ri not in flat)) \
         if len(flat) < len(g.roads) else set()
     found: list[dict] = []
-    for members in groups.values():
-        typed = [float(g.roads[ri]["inlet_elev_m"]) for ri in members if g.roads[ri].get("inlet_elev_m") not in (None, "")]
-        nodes = set().union(*(nodes_of.get(ri, set()) for ri in members))
+    for ri in flat:
+        typed = g.roads[ri].get("inlet_elev_m")
+        nodes = nodes_of.get(ri, set())
         contact = [elev[n] for n in nodes & sloped_nodes if n in elev]
-        zs = typed or contact or [elev[n] for n in nodes if n in elev]
-        if not zs:
-            continue
-        z = round(max(zs) if typed or contact else sum(zs) / len(zs), 1)
-        names = [g.roads[ri].get("name") or g.roads[ri].get("id") for ri in members]
+        if typed not in (None, "") and not (isinstance(typed, float) and math.isnan(typed)):
+            z = float(typed)
+        elif contact:
+            z = max(contact)
+        else:
+            zs = [elev[n] for n in nodes if n in elev]
+            if not zs:
+                continue
+            z = sum(zs) / len(zs)
+        z = round(z, 1)
+        name = g.road_name(ri)
         lv = next((x for x in found if abs(x["elev_m"] - z) <= LEVEL_SNAP_M), None)
         if lv is None:
-            found.append({"name": f"Poziom {z:+.0f}", "elev_m": z, "auto": True, "roads": names})
+            found.append({"name": f"Poziom {z:+.0f}", "elev_m": z, "auto": True, "roads": [name]})
         else:
-            lv["roads"] += names
+            lv["roads"].append(name)
     return sorted(found, key=lambda x: -x["elev_m"])
 
 
