@@ -289,30 +289,43 @@ def _fit_model(raw: dict, sc, real_t: float) -> None:
 
 
 def _blast_hours(raw: dict) -> None:
-    """Hours of the blasting works on a blast day (the scenario's `blasting`)."""
+    """Hours of the blasting works on a blast day (the scenario's `blasting`): the firing at an hour and how long it
+    takes – the end is worked out, so it can never come before the start."""
     bl = raw.get("blasting") or {}
 
-    def tm(key, default):
+    def tm(key, default) -> dt.time:
         try:
             return dt.datetime.strptime(str(bl.get(key) or default), "%H:%M").time()
         except ValueError:
             return dt.datetime.strptime(default, "%H:%M").time()
+
+    def mins(t: dt.time) -> int:
+        return t.hour * 60 + t.minute
+
     v = st.session_state.get("ver", 0)
+    f0, f1 = mins(tm("fire_from", "11:00")), mins(tm("fire_to", "11:20"))
     c = st.columns(2)
-    new = {"crew_arrive": c[0].time_input("Ekipa strzałowa od", tm("crew_arrive", "09:00"), key=f"k2_bl_ca_{v}",
-                                          step=dt.timedelta(minutes=15)),
-           "crew_leave": c[1].time_input("Ekipa do", tm("crew_leave", "11:40"), key=f"k2_bl_cl_{v}",
-                                         step=dt.timedelta(minutes=15)),
-           "fire_from": c[0].time_input("Strzał od", tm("fire_from", "11:00"), key=f"k2_bl_ff_{v}",
-                                        step=dt.timedelta(minutes=5)),
-           "fire_to": c[1].time_input("Strzał do", tm("fire_to", "11:20"), key=f"k2_bl_ft_{v}",
-                                      step=dt.timedelta(minutes=5))}
-    new = {k: x.strftime("%H:%M") for k, x in new.items()}
-    new["evacuation_min"] = float(c[0].number_input("Ewakuacja przed [min]", 0.0, 120.0,
-                                                    float(bl.get("evacuation_min") or 10.0), 5.0, format="%.0f",
-                                                    key=f"k2_bl_ev_{v}"))
+    fire = c[0].time_input("Strzał o", tm("fire_from", "11:00"), key=f"k2_bl_ff_{v}", step=dt.timedelta(minutes=5))
+    dur = int(c[1].number_input("Strzał trwa [min]", 5, 240, max(5, f1 - f0) if f1 > f0 else 20, 5,
+                                key=f"k2_bl_dur_{v}"))
+    crew_a = c[0].time_input("Ekipa przyjeżdża", tm("crew_arrive", "09:00"), key=f"k2_bl_ca_{v}",
+                             step=dt.timedelta(minutes=15))
+    crew_l = c[1].time_input("Ekipa odjeżdża", tm("crew_leave", "11:40"), key=f"k2_bl_cl_{v}",
+                             step=dt.timedelta(minutes=15))
+    evac = float(c[0].number_input("Ewakuacja przed strzałem [min]", 0.0, 120.0, float(bl.get("evacuation_min") or 10.0),
+                                   5.0, format="%.0f", key=f"k2_bl_ev_{v}"))
+    end = mins(fire) + dur
+    new = {"fire_from": fire.strftime("%H:%M"), "fire_to": f"{end // 60 % 24:02d}:{end % 60:02d}",
+           "crew_arrive": crew_a.strftime("%H:%M"), "crew_leave": crew_l.strftime("%H:%M"), "evacuation_min": evac}
+    c[1].markdown(f'<div class="k2-note" style="padding-top:30px">strzał <b>{new["fire_from"]}–{new["fire_to"]}</b>, '
+                  f'wyrobisko zamknięte od {(mins(fire) - int(evac)) // 60:02d}:{(mins(fire) - int(evac)) % 60:02d}</div>',
+                  unsafe_allow_html=True)
+    if mins(crew_a) > mins(fire) - evac:
+        st.warning("Ekipa przyjeżdża po rozpoczęciu ewakuacji – ustaw wcześniejszy przyjazd.")
+    if mins(crew_l) < end:
+        st.warning("Ekipa odjeżdża przed końcem strzału – ustaw późniejszy odjazd.")
     if any(str(bl.get(k)) != str(x) for k, x in new.items() if k != "evacuation_min") or \
-            float(bl.get("evacuation_min") or 10.0) != new["evacuation_min"]:
+            float(bl.get("evacuation_min") or 10.0) != evac:
         r = copy.deepcopy(raw)
         r.setdefault("blasting", {}).update(new)
         state.set_raw(r)
