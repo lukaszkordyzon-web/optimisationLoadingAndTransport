@@ -1,8 +1,8 @@
 # Kruszyk – wersja 1 (archiwum)
 
-Znacznik w repozytorium: **`kruszyk-v1-archiwum`**. Wersja 1 to aplikacja `app.py` (Streamlit) z modułami „Analiza zmiany” i
-„Planowanie produkcji”. Zostaje nietknięta – można do niej wrócić (`git checkout kruszyk-v1-archiwum`) albo coś z niej
-wyjąć. Nowa aplikacja powstaje obok i korzysta z tego samego silnika.
+Wersja 1 = commit **`c77720b`** na gałęzi `claude/confident-wright-xg92g2` (lokalnie także znacznik
+`kruszyk-v1-archiwum`). To aplikacja `app.py` (Streamlit) z modułami „Analiza zmiany” i „Planowanie produkcji”. Można do
+niej wrócić (`git checkout c77720b`) albo coś z niej wyjąć. Nowa aplikacja powstaje obok i korzysta z tego samego silnika.
 
 ## Co zostaje (silnik – pakiet `kruszyk/`)
 
