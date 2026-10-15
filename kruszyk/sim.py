@@ -167,8 +167,16 @@ class Simulation:
         for ex in self.excavators.values():
             by_blast.setdefault(ex.cfg.blast, []).append(ex)
         for exs in by_blast.values():
+            qs = [ex.cfg.quota_t for ex in exs]
+            tot = sum(q for q in qs if q is not None)
             for ex in exs:
-                ex.remaining_t /= len(exs)
+                q = ex.cfg.quota_t
+                if all(x is not None for x in qs):  # the plan's tonnes: the pile shared in their proportion
+                    ex.remaining_t = min(q, ex.remaining_t * q / tot) if tot > 0 else 0.0
+                else:
+                    ex.remaining_t /= len(exs)
+                    if q is not None:
+                        ex.remaining_t = min(ex.remaining_t, q)
                 ex.initial_t = ex.remaining_t
                 if len(ex.cfg.dig_routes) > 1 and ex.cfg.relocate_every_t > 0:
                     ex.next_reloc_t = ex.cfg.relocate_every_t

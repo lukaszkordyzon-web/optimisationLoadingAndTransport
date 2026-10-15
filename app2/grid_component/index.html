@@ -10,62 +10,74 @@
   table { border-collapse: collapse; font: 500 12px 'IBM Plex Mono', ui-monospace, monospace; user-select: none; }
   th { background: #F7F8FA; padding: 8px 4px; border-bottom: 1px solid #D9DDE3; border-left: 1px solid #EEF0F3;
        white-space: nowrap; font-weight: 600; min-width: var(--cw); }
-  th.off { background: #EEF0F3; color: #5B6573; }
-  td { padding: 8px 4px; text-align: center; border-left: 1px solid #EEF0F3; border-bottom: 1px solid #EEF0F3;
-       white-space: nowrap; min-width: var(--cw); height: 34px; }
-  td.name { position: sticky; left: 0; z-index: 1; background: #fff; text-align: left; padding: 8px 10px;
+  td { padding: 7px 4px; text-align: center; border-left: 1px solid #EEF0F3; border-bottom: 1px solid #EEF0F3;
+       white-space: nowrap; min-width: var(--cw); height: 32px; }
+  td.name { position: sticky; left: 0; z-index: 1; background: #fff; text-align: left; padding: 7px 10px;
             font: 700 12px 'IBM Plex Sans', sans-serif; min-width: 170px; }
+  tr.sum td.name, tr.pile td.name, tr.rig td.name { font-weight: 500; color: #3A4452; }
   tr.group td { background: #F7F8FA; color: #4A5562; font: 700 11px 'IBM Plex Sans', sans-serif; letter-spacing: .06em;
                 text-align: left; padding: 6px 10px; height: auto; }
-  td.ex { cursor: pointer; }
-  td.ex:hover { box-shadow: inset 0 0 0 2px #1B2733; }
-  td.red { background: #FDE2E2 !important; color: #8C0E20 !important; box-shadow: inset 0 0 0 2px #B3122A; }
+  td.ed { cursor: pointer; }
+  td.ed:hover { box-shadow: inset 0 0 0 2px #1B2733; }
+  td.red { box-shadow: inset 0 0 0 2px #B3122A; color: #8C0E20 !important; font-weight: 700; }
   td.sel { box-shadow: inset 0 0 0 3px #1B2733 !important; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: #3A4452; margin-top: 8px; }
   .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; }
   .hint { font-size: 13px; color: #4A5562; margin-top: 6px; }
-  #pop { position: absolute; z-index: 20; display: none; width: 340px; background: #fff; border: 1px solid #C3C9D1;
+  #pop { position: absolute; z-index: 20; display: none; width: 360px; background: #fff; border: 1px solid #C3C9D1;
          border-radius: 10px; box-shadow: 0 8px 24px rgba(16,24,40,.18); padding: 12px; }
-  #pop .t { font-weight: 700; font-size: 15px; }
+  #pop .t { font-weight: 700; font-size: 15px; padding-right: 24px; }
   #pop .s { font-size: 12px; color: #4A5562; margin: 2px 0 8px; }
-  #pop button { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%;
-                padding: 9px 10px; margin-bottom: 6px; border-radius: 8px; border: 1px solid #C3C9D1; background: #fff;
-                font: 400 13px 'IBM Plex Sans', sans-serif; color: #1B2733; cursor: pointer; text-align: left; }
-  #pop button b { font-family: 'IBM Plex Mono', monospace; }
-  #pop button.cur { background: #1B2733; border-color: #1B2733; color: #fff; }
-  #pop button.wait { background: #F3F4F6; border-style: dashed; color: #4A5562; }
-  #pop button.busy { background: #F3F4F6; color: #4A5562; }
-  #pop button.new { border-style: dashed; border-color: #8A93A0; }
-  #pop button:hover { box-shadow: inset 0 0 0 2px #B3122A; }
-  #pop .x { position: absolute; top: 6px; right: 8px; border: 0; background: none; width: auto; padding: 4px 8px;
-            font-size: 18px; margin: 0; color: #4A5562; }
+  #pop button.o { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%;
+                  padding: 8px 10px; margin-bottom: 6px; border-radius: 8px; border: 1px solid #C3C9D1; background: #fff;
+                  font: 400 13px 'IBM Plex Sans', sans-serif; color: #1B2733; cursor: pointer; text-align: left; }
+  #pop button.o b { font-family: 'IBM Plex Mono', monospace; }
+  #pop button.o.cur { box-shadow: inset 0 0 0 2px #1B2733; }
+  #pop button.o:hover { box-shadow: inset 0 0 0 2px #B3122A; }
+  #pop button.stand { background: #F3F4F6; color: #4A5562; }
+  #pop .row { display: flex; gap: 8px; align-items: center; margin: 4px 0 10px; font-size: 13px; }
+  #pop input { width: 110px; padding: 7px 8px; border: 1px solid #C3C9D1; border-radius: 8px; font: 600 14px 'IBM Plex Mono', monospace; }
+  #pop .ok { margin-left: auto; padding: 8px 14px; border-radius: 8px; border: 0; background: #B3122A; color: #fff;
+             font: 600 13px 'IBM Plex Sans', sans-serif; cursor: pointer; }
+  #pop .x { position: absolute; top: 6px; right: 8px; border: 0; background: none; padding: 4px 8px; font-size: 18px;
+            color: #4A5562; cursor: pointer; }
+  #pop .lbl { font-size: 12px; color: #4A5562; margin: 6px 0 4px; font-weight: 600; }
 </style>
 </head>
 <body>
 <div class="wrap"><table id="grid"></table></div>
 <div class="legend">
+  <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>koparka: obszar i tys. t</span>
+  <span><i style="background:#DCE8F7;border:1px solid #A9C1E2"></i>wozidło: do której koparki</span>
   <span><i style="background:#EDEFF2;border:1px solid #C3C9D1"></i>wiercenie</span>
   <span><i style="background:#1B2733"></i>strzał</span>
   <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek leży (kt = tys. t)</span>
-  <span><i style="background:#FDE2E2;border:2px solid #B3122A"></i>konflikt – najedź, żeby zobaczyć dlaczego</span>
+  <span><i style="background:#fff;border:2px solid #B3122A"></i>coś się nie zgadza – najedź, żeby zobaczyć</span>
 </div>
-<div class="hint">Kliknij komórkę koparki albo przeciągnij po kilku – wybierz usyp z listy. Wiertnice i odstrzały układają się same.</div>
+<div class="hint">Kliknij komórkę koparki albo wozidła – albo przeciągnij po kilku dniach (wozidła: także po kilku wierszach) – i wybierz z listy.</div>
 <div id="pop"></div>
 <script>
 const send = (type, extra) => window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*');
-let D = null, anchor = null, sel = null, dragging = false;
+let D = null, sel = null, anchor = null, dragging = false;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const height = () => send('streamlit:setFrameHeight', { height: document.body.scrollHeight + (document.getElementById('pop').style.display === 'block' ? 260 : 8) });
+const pop = document.getElementById('pop');
+const height = () => send('streamlit:setFrameHeight', { height: document.body.scrollHeight + (pop.style.display === 'block' ? 340 : 8) });
+const editable = r => r.kind === 'ex' || r.kind === 'tr';
+
+function inSel(ri, j) {
+  if (!sel) return false;
+  const r0 = Math.min(sel.r0, sel.r1), r1 = Math.max(sel.r0, sel.r1);
+  return ri >= r0 && ri <= r1 && j >= Math.min(sel.a, sel.b) && j <= Math.max(sel.a, sel.b);
+}
 
 function render() {
-  document.documentElement.style.setProperty('--cw', D.day ? '74px' : '58px');
-  let h = '<tr><th style="position:sticky;left:0;z-index:2"></th>' + D.heads.map((x, j) => `<th class="${D.off[j] ? 'off' : ''}">${esc(x)}</th>`).join('') + '</tr>';
+  document.documentElement.style.setProperty('--cw', D.day ? '70px' : '58px');
+  let h = '<tr><th style="position:sticky;left:0;z-index:2"></th>' + D.heads.map(x => `<th>${esc(x)}</th>`).join('') + '</tr>';
   D.rows.forEach((r, ri) => {
     if (r.kind === 'group') { h += `<tr class="group"><td colspan="${D.heads.length + 1}">${esc(r.name)}</td></tr>`; return; }
-    h += `<tr><td class="name">${esc(r.name)}</td>`;
+    h += `<tr class="${r.kind}"><td class="name">${esc(r.name)}</td>`;
     r.cells.forEach((c, j) => {
-      const inSel = sel && r.kind === 'ex' && sel.ex === r.name && j >= Math.min(sel.a, sel.b) && j <= Math.max(sel.a, sel.b);
-      const cls = [r.kind === 'ex' ? 'ex' : '', c.red ? 'red' : '', inSel ? 'sel' : ''].join(' ');
+      const cls = [editable(r) ? 'ed' : '', c.red ? 'red' : '', inSel(ri, j) ? 'sel' : ''].join(' ');
       h += `<td class="${cls}" data-r="${ri}" data-j="${j}" title="${esc(c.title || '')}" style="background:${c.bg};color:${c.fg};${c.bold ? 'font-weight:700;' : ''}">${esc(c.text)}</td>`;
     });
     h += '</tr>';
@@ -74,61 +86,77 @@ function render() {
   height();
 }
 
-function cellOf(e) { const td = e.target.closest('td.ex'); return td ? { r: D.rows[+td.dataset.r], j: +td.dataset.j, td } : null; }
+function cellOf(e) { const td = e.target.closest('td.ed'); return td ? { ri: +td.dataset.r, j: +td.dataset.j, td } : null; }
 const grid = document.getElementById('grid');
 grid.addEventListener('mousedown', e => {
   const c = cellOf(e); if (!c) return;
   e.preventDefault();
-  if (e.shiftKey && anchor && anchor.ex === c.r.name) sel = { ex: c.r.name, a: anchor.j, b: c.j };
-  else { sel = { ex: c.r.name, a: c.j, b: c.j }; anchor = { ex: c.r.name, j: c.j }; }
+  const kind = D.rows[c.ri].kind;
+  if (e.shiftKey && anchor && anchor.kind === kind) sel = { kind, r0: kind === 'tr' ? anchor.ri : c.ri, r1: c.ri, a: anchor.j, b: c.j };
+  else { sel = { kind, r0: c.ri, r1: c.ri, a: c.j, b: c.j }; anchor = { kind, ri: c.ri, j: c.j }; }
+  if (kind === 'ex') sel.r0 = sel.r1 = c.ri;
   dragging = true; hidePop(); render();
 });
 grid.addEventListener('mouseover', e => {
   if (!dragging) return;
-  const c = cellOf(e); if (!c || c.r.name !== sel.ex) return;
-  if (sel.b !== c.j) { sel.b = c.j; render(); }
+  const c = cellOf(e); if (!c || D.rows[c.ri].kind !== sel.kind) return;
+  const r1 = sel.kind === 'tr' ? c.ri : sel.r0;
+  if (sel.b !== c.j || sel.r1 !== r1) { sel.b = c.j; sel.r1 = r1; render(); }
 });
-window.addEventListener('mouseup', e => {
+window.addEventListener('mouseup', () => {
   if (!dragging) return;
   dragging = false;
-  const td = grid.querySelector(`td.sel[data-j="${Math.max(sel.a, sel.b)}"]`) || grid.querySelector('td.sel');
-  showPop(td);
+  const tds = grid.querySelectorAll('td.sel');
+  showPop(tds[tds.length - 1]);
 });
 
 function shifts() { const a = Math.min(sel.a, sel.b), b = Math.max(sel.a, sel.b); return [D.groups[a][0], D.groups[b][D.groups[b].length - 1]]; }
+function rowsSel() { const out = []; for (let r = Math.min(sel.r0, sel.r1); r <= Math.max(sel.r0, sel.r1); r++) if (D.rows[r].kind === sel.kind) out.push(D.rows[r]); return out; }
+function range() { const [s0, s1] = shifts(); return s0 === s1 ? D.labels[s0] : `${D.labels[s0]} – ${D.labels[s1]}`; }
+function emit(v) { send('streamlit:setComponentValue', { value: Object.assign(v, { nonce: Date.now() }), dataType: 'json' }); hidePop(); }
+
 function showPop(td) {
-  if (!sel) return;
+  if (!sel || !td) return;
   const [s0, s1] = shifts();
-  const range = s0 === s1 ? D.labels[s0] : `${D.labels[s0]} – ${D.labels[s1]}`;
-  const now = D.grid[sel.ex][s0];
-  const others = Object.keys(D.grid).filter(x => x !== sel.ex);
-  let h = `<button class="x" aria-label="Zamknij" onclick="hidePop()">×</button><div class="t">${esc(sel.ex)}</div><div class="s">${esc(range)} · skąd ładuje:</div>`;
-  D.piles.forEach(p => {
-    let cls = '', note = '';
-    const busy = others.find(x => D.grid[x].slice(s0, s1 + 1).includes(p.id));
-    const left = p.left ? p.left[s0] : null;
-    if (p.isNew) { cls = 'new'; note = 'NOWY odstrzał – program doda wiercenie i strzał'; }
-    else if (p.avail !== null && p.avail > s0) { cls = 'wait'; note = 'dostępny od ' + D.labels[Math.min(p.avail, D.labels.length - 1)]; }
-    else if (left !== null && left <= 1) { cls = 'wait'; note = 'wybrany do końca'; }
-    else if (busy) { cls = 'busy'; note = 'ładuje też ' + busy; }
-    else note = left !== null ? `leży ok. ${(left / 1000).toFixed(1)} tys. t` : 'dostępny';
-    if (p.id === now) { cls = 'cur'; note = 'teraz: ' + note; }
-    h += `<button class="${cls}" data-p="${esc(p.id)}"><b>${esc(p.id)}</b><span>${esc(note)}</span></button>`;
-  });
-  const pop = document.getElementById('pop');
+  const unit = D.day ? 'na dzień' : 'na zmianę';
+  let h = '<button class="x" aria-label="Zamknij" onclick="hidePop()">×</button>';
+  if (sel.kind === 'ex') {
+    const row = rowsSel()[0], ex = D.exs.find(x => x.id === row.name) || { allowed: D.areas.map(a => a.id), rate: 0 };
+    const cur = row.cells[Math.min(sel.a, sel.b)].v || { a: '', t: 0 };
+    const perUnit = D.day ? D.spd : 1;
+    const t0 = cur.t ? cur.t * perUnit : Math.round((ex.rate || 1000) * 0.9 / 100) * 100 * perUnit;
+    h += `<div class="t">${esc(row.name)}</div><div class="s">${esc(range())}</div>`;
+    h += `<div class="lbl">Ile ton ${unit}</div><div class="row"><input id="tin" type="number" min="0" step="100" value="${Math.round(t0)}">`;
+    h += `<span>t</span>${ex.rate ? `<span style="color:#4A5562">(ładuje ok. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
+    h += '<div class="lbl">Skąd ładuje</div>';
+    D.areas.filter(a => ex.allowed.includes(a.id)).forEach(a => {
+      h += `<button class="o ${a.id === cur.a ? 'cur' : ''}" data-a="${esc(a.id)}" style="background:${a.bg}"><b>${esc(a.id)}</b><span>${esc(a.info)}</span></button>`;
+    });
+    h += `<button class="o stand ${cur.a ? '' : 'cur'}" data-a="postój"><b>postój</b><span>koparka nie pracuje</span></button>`;
+  } else {
+    const rows = rowsSel();
+    h += `<div class="t">${esc(rows.map(r => r.name).join(', '))}</div><div class="s">${esc(range())} · jeździ do:</div>`;
+    D.exs.forEach(x => { h += `<button class="o" data-x="${esc(x.id)}" style="background:${x.bg}"><b>${esc(x.id)}</b><span>wozi z tej koparki</span></button>`; });
+    h += '<button class="o stand" data-x="nie jeździ"><b>nie jeździ</b><span>postój, serwis, brak kierowcy</span></button>';
+  }
   pop.innerHTML = h;
   pop.style.display = 'block';
   const r = td.getBoundingClientRect();
-  pop.style.left = Math.max(4, Math.min(window.innerWidth - 350, r.left + window.scrollX - 120)) + 'px';
+  pop.style.left = Math.max(4, Math.min(window.innerWidth - 370, r.left + window.scrollX - 120)) + 'px';
   pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
-  pop.querySelectorAll('button[data-p]').forEach(b => b.onclick = () => {
-    const [a, z] = shifts();
-    send('streamlit:setComponentValue', { value: { ex: sel.ex, a, b: z, pile: b.dataset.p, nonce: Date.now() }, dataType: 'json' });
-    hidePop();
-  });
+  if (sel.kind === 'ex') {
+    const row = rowsSel()[0];
+    pop.querySelectorAll('button[data-a]').forEach(b => b.onclick = () => {
+      const v = Math.max(0, +document.getElementById('tin').value || 0);
+      emit({ kind: 'ex', ex: row.name, a: s0, b: s1, area: b.dataset.a, t: D.day ? v / D.spd : v });
+    });
+  } else {
+    const ids = rowsSel().map(r => r.name);
+    pop.querySelectorAll('button[data-x]').forEach(b => b.onclick = () => emit({ kind: 'tr', ids, a: s0, b: s1, ex: b.dataset.x }));
+  }
   height();
 }
-function hidePop() { document.getElementById('pop').style.display = 'none'; height(); }
+function hidePop() { pop.style.display = 'none'; height(); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { sel = null; hidePop(); render(); } });
 
 let lastJson = null;

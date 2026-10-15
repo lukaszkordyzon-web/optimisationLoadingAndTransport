@@ -69,6 +69,7 @@ class Excavator:
     then_crusher_routes: dict = field(default_factory=dict)
     then_move_min: float = 0.0      # driving time between the piles
     then_below_t: float = 0.0       # move when less than this is left (the rest stays for the others)
+    quota_t: float | None = None    # tonnes to load on this shift (the month plan); None = as much as there is
 
     def may_work(self, pile_id: str) -> bool:
         return not self.areas or pile_id in self.areas or pile_id.split("/")[0] in self.areas

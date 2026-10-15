@@ -20,8 +20,9 @@ def test_whole_flow_on_the_start_mine():
     assert not at.exception, at.exception
     at.radio(key="k2_nav").set_value("② Harmonogram").run()
     assert not at.exception, at.exception
-    grid = at.session_state["grid"]
-    assert set(grid) == {"K-1", "K-2"} and all(len(c) == 6 for c in grid.values())
+    work = at.session_state["work"]
+    assert set(work["ex"]) == {"K-1", "K-2"} and all(len(c) == 6 for c in work["ex"].values())
+    assert len(work["tr"]) == 6 and all(x in ("K-1", "K-2") for c in work["tr"].values() for x in c)
     at.button(key="k2_approve").click().run()
     assert at.session_state["k2_nav"] == "③ Symulacja"
     at.button(key="k2_month_go").click().run()
@@ -34,7 +35,7 @@ def test_whole_flow_on_the_start_mine():
     assert any("Koszt tony" in x.label for x in at.metric)
 
 
-def test_schedule_editing_moves_an_excavator():
+def test_schedule_editing_sets_area_tonnes_and_trucks():
     at = AppTest.from_file(APP, default_timeout=600)
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 3, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
@@ -42,7 +43,13 @@ def test_schedule_editing_moves_an_excavator():
     at.radio(key="k2_nav").set_value("② Harmonogram").run()
     at.selectbox(key="k2_e_ex").set_value("K-2").run()
     at.selectbox(key="k2_e_from").set_value(2).run()
-    at.selectbox(key="k2_e_pile").set_value("U-02").run()
+    at.selectbox(key="k2_e_area").set_value("O1").run()
+    at.number_input(key="k2_e_t").set_value(1200.0).run()
     at.button(key="k2_e_set").click().run()
     assert not at.exception, at.exception
-    assert at.session_state["grid"]["K-2"][2:] == ["U-02"] * 4
+    assert at.session_state["work"]["ex"]["K-2"][2:] == [{"a": "O1", "t": 1200.0}] * 4
+    at.multiselect(key="k2_t_ids").set_value(["WZ-01", "WZ-02"]).run()
+    at.selectbox(key="k2_t_ex").set_value("nie jeździ").run()
+    at.button(key="k2_t_set").click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["work"]["tr"]["WZ-01"] == [""] * 6

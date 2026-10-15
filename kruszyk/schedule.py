@@ -32,7 +32,7 @@ def area_of(pid: str, areas: dict) -> tuple[str, int] | None:
 
 
 def plan_blasts(grid: dict[str, list[str]], areas: list[dict], rigs: list[dict], n: int, cap_t: float = math.inf,
-                fire_shifts: int = 1, t_per_m: float = 50.0) -> dict[str, dict]:
+                fire_shifts: int = 1, t_per_m: float = 50.0, skip=frozenset()) -> dict[str, dict]:
     """Drilling and firing of every new pile the grid uses. Returns {pile: {area, t, m, need, avail, fire, drill,
     late}}: `avail` = first shift the pile can be loaded (the planner's first use, or later when it cannot be
     ready), `fire` = the shifts of the blast (evacuation, firing, airing) just before it, `drill` = [(rig, shift)]."""
@@ -50,6 +50,8 @@ def plan_blasts(grid: dict[str, list[str]], areas: list[dict], rigs: list[dict],
         for k in range(ks[-1], 1, -1):
             later, earlier = f"{a}/{k}", f"{a}/{k - 1}"
             need[earlier] = min(need.get(earlier, n), need.get(later, n))
+    for p in skip:  # piles that lie there already (nothing to drill or fire)
+        need.pop(p, None)
     rig_m = {r["id"]: float(r.get("m_per_shift") or 250.0) for r in rigs if r.get("in_work", True)}
     busy: dict[str, set] = {r: set() for r in rig_m}
     out: dict[str, dict] = {}

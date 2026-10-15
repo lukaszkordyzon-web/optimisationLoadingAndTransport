@@ -20,7 +20,7 @@ import pandas as pd
 
 from .config import Scenario, _routes
 from .sim import simulate
-from .site import BLAST_TIMES, _crusher_routes, area_strips, build_route, centroid, loading_point, poly_distance_m
+from .site import BLAST_TIMES, _crusher_routes, area_layout, build_route, centroid, loading_point, poly_distance_m
 
 WEEKDAYS = ["pon", "wt", "śr", "czw", "pt", "sob", "nd"]
 
@@ -116,6 +116,20 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
     for e in sc.excavators:
         pile_route.setdefault(e.blast, e.route)
         pile_croutes.setdefault(e.blast, dict(e.crusher_routes))
+    for b in sc.blasts:  # a pile nobody loads at the start (e.g. what lies in an area): its own route
+        poly = next((p.get("polygon") for p in (sc.site or {}).get("piles", []) if p.get("id") == b.id), None)
+        if b.id in pile_route or not poly or len(poly) < 3:
+            continue
+        load_at = loading_point(sc.site, poly)
+        try:
+            sc.routes[f"P-{b.id}"] = _routes({"r": build_route(sc.site, load_at, f"P-{b.id}")})["r"]
+        except ValueError:
+            continue
+        raw_routes: dict = {}
+        croutes = _crusher_routes(sc.site, load_at, f"P-{b.id}", raw_routes)
+        for rid in croutes.values():
+            sc.routes[rid] = _routes({"r": raw_routes[rid]})["r"]
+        pile_route[b.id], pile_croutes[b.id] = f"P-{b.id}", croutes
     ex_croutes = {e.id: dict(e.crusher_routes) for e in sc.excavators}
     taken = {p: any(c.takes(p) for c in sc.crushers) for p in left}  # some crusher accepts this material
     ex_pile = {e.id: e.blast for e in sc.excavators}
@@ -139,11 +153,11 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
     # extraction areas: blasts are fired automatically, strip after strip, when the area runs short of material
     areas = []
     for a in sc.areas:
-        reserve = float(a.get("reserves_t") or 0)
-        size = max(blast_t(a), 1.0)
-        n = min(60, max(1, math.ceil(reserve / size))) if reserve > 0 else 0
-        strips = area_strips(sc.site or {}, a["polygon"], n) if sc.site and n else []
-        areas.append({"cfg": a, "reserve": reserve, "strips": strips, "next": 0, "last_day": -10_000})
+        strips = area_layout(sc.site, a, cap_t) if sc.site else []
+        # with `start_t` the first strip is the pile lying there at the start (A/1): the blasts start at A/2
+        first = 1 if a.get("start_t") is not None and strips else 0
+        areas.append({"cfg": a, "reserve": float(a.get("reserves_t") or 0), "strips": strips, "next": first,
+                      "last_day": -10_000})
     blast_log: list[dict] = []
     warnings: list[str] = []
     for p in planned.values():
@@ -282,7 +296,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                             "fragmentation": float(a.get("fragmentation", 0.3)), "psd": a.get("psd"),
                             "loose_density_t_m3": a.get("loose_density_t_m3"), "polygon": poly,
                             **{k: a[k] for k in BLAST_TIMES if a.get(k)}}
-            left[pid], pile_route[pid], pile_croutes[pid] = t, f"P-{pid}", croutes
+            left[pid], pile_route[pid], pile_croutes[pid] = left.get(pid, 0.0) + t, f"P-{pid}", croutes
             taken[pid] = any(c.takes(pid) for c in sc.crushers)
             share[pid] = a.get("target_share")
             blasted[pid] = t
@@ -369,10 +383,17 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
 
         if frozen:
             want = frozen["ex"][i] if i < len(frozen["ex"]) else {}
+            moved = []
             for e in sc.excavators:
                 target = want.get(e.id, ex_pile[e.id])
                 if target != ex_pile[e.id] and target in pile_route:
+                    moved.append((ex_pile[e.id], target))
                     relocate(e, target)
+            for old, new in moved:  # the rest of a pile left behind in the same area is loaded with the next one
+                if (old.rsplit("/", 1)[0] == new.rsplit("/", 1)[0] and "/" in old and old in left
+                        and old not in ex_pile.values()):
+                    left[new] = left.get(new, 0.0) + left[old]
+                    left[old] = 0.0
         elif plan.move_excavators:
             for e in sc.excavators:
                 if left[ex_pile[e.id]] >= MIN_PILE_T:
@@ -404,6 +425,23 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
         worked = {ex_pile[x] for x in ex_pile if left[ex_pile[x]] >= MIN_PILE_T}
         for b in v.blasts:
             b.target_share = share.get(b.id) if b.id in worked and share.get(b.id) else None
+        quota = frozen["quota"][i] if frozen and i < len(frozen.get("quota") or []) else None
+        if quota is not None:  # the tonnes the plan gives every excavator on this shift (none = it stands)
+            for e in v.excavators:
+                e.quota_t = float(quota.get(e.id, 0.0))
+        drive = frozen["trucks"][i] if frozen and i < len(frozen.get("trucks") or []) else None
+        if drive is not None:  # which excavator every truck drives to on this shift ("" = it does not drive)
+            for f in v.trucks:
+                if f.id in drive:
+                    if drive[f.id] and drive[f.id] in ex_pile:
+                        f.excavators, f.blend, f.assign_locked = [drive[f.id]], {}, True
+                    else:
+                        f.count = 0
+            if v.truck_count == 0:  # nobody drives: the trucks stay, the excavators have nothing to load
+                for f in v.trucks:
+                    f.count = 1
+                for e in v.excavators:
+                    e.quota_t = 0.0
         v.stockpile.initial_t = stock
         v.blasting.enabled = bool(sc.blasting.enabled and blasted)
         timed = next((planned[p] for p in blasted if p in planned and planned[p].get("fire_from")), None)
@@ -456,6 +494,10 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                 dig_step[e.id] += int(res.excavator_steps.get(e.id, 0))
         idle_empty = []
         for e in k["excavators"]:
+            if v.excavator(e["excavator"]).quota_t is not None:  # stops when it has loaded its tonnes
+                if v.excavator(e["excavator"]).quota_t > 0 and v.blast(ex_pile[e["excavator"]]).tonnage_t <= 1:
+                    idle_empty.append(f"{e['excavator']} (od rana)")
+                continue
             if v.blast(ex_pile[e["excavator"]]).tonnage_t <= 1:
                 idle_empty.append(f"{e['excavator']} (od rana)")
             elif e.get("blast_done_at_h") is not None and e["blast_done_at_h"] < sc.shift_hours - 0.5:

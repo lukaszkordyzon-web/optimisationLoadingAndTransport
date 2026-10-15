@@ -15,7 +15,6 @@ from . import state, theme
 ADD = {  # what the planner adds -> (mode of the map module, drawing tool)
     "Droga / rampa": ("Droga / rampa", "linia"),
     "Mijanka": ("Mijanka", "znacznik na drodze"),
-    "Usyp (leży dziś)": ("Usyp (materiał)", "wielokąt"),
     "Obszar wydobycia": ("Obszar wydobycia (strzały automatycznie)", "wielokąt"),
     "Koparka": ("Koparka", "znacznik"),
     "Kruszarka": ("Kruszarka", "znacznik"),
@@ -35,10 +34,6 @@ def _attrs(kind: str, site: dict) -> dict:
         one = st.checkbox("Jeden pas (mijanki)", r == "rampa", key="k2_add_one")
         return {"kind": r, "name": f"{r} {len(site['roads']) + 1}", "grade_draw_pct": DIRS[d] * g + 0.0,
                 "speed_limit_kmh": 25.0 if r == "rampa" else 40.0, "single_lane": one}
-    if kind == "Usyp (leży dziś)":
-        t = st.number_input("Ile ton leży", 0.0, 1_000_000.0, 10_000.0, 1000.0, key="k2_add_t")
-        mat = st.selectbox("Materiał", MATERIALS, key="k2_add_mat")
-        return {"material": mat, "tonnage_t": t, "psd": PRESETS[DEFAULT_PRESET], "loose_density_t_m3": 1.75}
     if kind == "Obszar wydobycia":
         size = st.number_input("Wielkość odstrzału [t]", 1000.0, 100_000.0, 12_000.0, 1000.0, key="k2_add_bt")
         tpm = st.number_input("t/mb", 5.0, 200.0, 30.0, 1.0, key="k2_add_tpm")

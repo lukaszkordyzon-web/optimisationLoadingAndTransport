@@ -699,10 +699,10 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
     site.pop("blast", None)      # the blast place comes from the planned blast itself
     sync_levels(site)
     normalize_roads(site)
-    piles = site.get("piles", [])
+    piles = site.get("piles", []) or area_start_piles(site)  # no piles drawn: what lies in the areas
     excavators = site.get("excavators", [])
     if not piles:
-        raise ValueError("Na mapie nie ma usypów")
+        raise ValueError("Na mapie nie ma obszarów wydobycia ani usypów")
     if not excavators:
         raise ValueError("Na mapie nie ma koparek")
     new = dict(raw)
@@ -1051,6 +1051,36 @@ def area_strips(site: dict, polygon: list, n: int) -> list[list]:
         if d(strips[-1]) < d(strips[0]):
             strips.reverse()
     return strips
+
+
+def area_layout(site: dict, area: dict, cap_t: float = math.inf) -> list[list]:
+    """The strips of an extraction area in firing order, one per blast. With `start_t` set (the material lying in
+    the area at the start – the pile A/1) the first strip is that pile and the blasts take the strips after it."""
+    size = max(min(float(area.get("blast_max_t") or 20000.0), cap_t), 1.0)
+    reserve = float(area.get("reserves_t") or 0)
+    n = min(60, max(1, math.ceil(reserve / size))) if reserve > 0 else 0
+    if area.get("start_t") is not None:
+        n += 1
+    return area_strips(site, area["polygon"], n) if n and len(area.get("polygon") or []) >= 3 else []
+
+
+def area_start_piles(site: dict, cap_t: float = math.inf) -> list[dict]:
+    """The pile A/1 of every extraction area: what lies there at the start (`start_t`), on its first strip."""
+    out = []
+    for a in site.get("areas", []):
+        if not a.get("active", True) or len(a.get("polygon") or []) < 3:
+            continue
+        a.setdefault("start_t", 0.0)
+        strips = area_layout(site, a, cap_t)
+        if not strips:
+            continue
+        p = {"id": f"{a['id']}/1", "material": a.get("material", ""), "tonnage_t": float(a["start_t"] or 0.0),
+             "fragmentation": float(a.get("fragmentation", 0.3)), "polygon": strips[0]}
+        for k in ("psd", "loose_density_t_m3"):
+            if a.get(k):
+                p[k] = a[k]
+        out.append(p)
+    return out
 
 
 def poly_distance_m(a: list, b: list) -> float:

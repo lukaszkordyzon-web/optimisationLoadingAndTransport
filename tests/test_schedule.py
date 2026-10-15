@@ -70,3 +70,47 @@ def test_tonnes_the_schedule_gives():
 
     grid = {"K-1": ["U-01"] * 4}
     assert hauled_plan(grid, {}, {"U-01": 2500}, {"K-1": 1000}, 4) == [1000, 1000, 500, 0]  # no more than lies there
+
+
+def test_work_plan_numbers_piles_of_an_area_and_blasts_them_in_time():
+    from kruszyk import workplan
+
+    work = {"start": {"A": 3000.0}, "ex": {"K-1": [{"a": "A", "t": 1000.0}] * 10}, "tr": {"WZ-01": ["K-1"] * 10}}
+    ev = workplan.evaluate(work, AREAS, RIG, 10, fire=1)
+    assert ev["grid"]["K-1"][:3] == ["A/1"] * 3 and ev["grid"]["K-1"][3] == "A/2"  # 3000 t lie there: 3 shifts
+    assert ev["blasts"]["A/2"]["avail"] == 3 and not ev["blasts"]["A/2"]["late"]  # fired just in time
+    assert ev["planned"] == [1000.0] * 10 and not ev["issues"]
+    fr = workplan.frozen(work, ev, 10)
+    assert fr["quota"][0] == {"K-1": 1000.0} and fr["trucks"][0] == {"WZ-01": "K-1"} and fr["blasts"][3] == ["A/2"]
+
+
+def test_work_plan_issues():
+    from kruszyk import workplan
+
+    work = {"start": {"A": 0.0}, "ex": {"K-1": [{"a": "A", "t": 3000.0}] * 2, "K-2": [{"a": "", "t": 0.0}] * 2},
+            "tr": {"WZ-01": ["K-2"] * 2}}
+    ev = workplan.evaluate(work, AREAS, RIG, 2, fire=1, rates={"K-1": 1500.0})
+    kinds = {i["kind"] for i in ev["issues"]}
+    assert {workplan.LATE, workplan.OVER, workplan.NO_TRUCKS, workplan.IDLE_TRUCK} <= kinds
+
+
+def test_month_follows_the_work_plan():
+    from kruszyk import workplan
+    import yaml
+
+    raw = yaml.safe_load(DEMO.read_text(encoding="utf-8"))
+    sc = load_scenario(DEMO)
+    n, cap = 4, sc.blasting.max_blast_t()
+    work = {"start": {"O2": 3000.0, "O3": 7000.0},
+            "ex": {"K-1": [{"a": "O2", "t": 1000.0}] * n, "K-2": [{"a": "O3", "t": 1500.0}] * 2 + [{"a": "", "t": 0}] * 2},
+            "tr": {f.id: (["K-1"] * n if j < 3 else ["K-2"] * 2 + [""] * 2) for j, f in enumerate(sc.trucks)}}
+    ev = workplan.evaluate(work, sc.areas, raw["drills"], n, cap)
+    from kruszyk.config import scenario_from_dict
+
+    sim = scenario_from_dict(workplan.scenario_raw(raw, work, ev["grid"], cap))
+    p = PeriodPlan(start=dt.date(2026, 11, 2), days=2, shifts_per_day=2)
+    p.frozen = workplan.frozen(work, ev, n)
+    df = run_period(today(sim), p, seed=1)
+    assert all(df["wywiezione_t"] <= 2500 + 40)  # never more than the plan's tonnes (+ the last truckload)
+    assert df["z_O3/1_t"].iloc[2:].sum() == 0  # K-2 stands on the 2nd day
+    assert df["z_O2/1_t"].sum() + df.get("z_O2/2_t", 0 * df["z_O2/1_t"]).sum() > 0

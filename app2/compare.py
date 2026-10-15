@@ -48,7 +48,10 @@ def month(appr) -> dict | None:
         go_ = st.button("Policz miesiąc i naucz sygnały", type="primary", key="k2_month_go")
     if not go_:
         return None
-    sc = state.scenario()
+    from kruszyk.config import scenario_from_dict
+    import yaml
+
+    sc = scenario_from_dict(yaml.safe_load(appr["raw"]))  # the mine as the plan puts it: piles in the areas
     plan = period_plan(appr["plan"])
     plan.frozen = appr["frozen"]
     bar = st.progress(0.0, "Miesiąc jak dziś…")
@@ -175,10 +178,17 @@ def step_result() -> None:
     m[4].metric("Stanie w kolejkach", f"{num(q1)} h", f"{num(q1 - q0)} h (dziś {num(q0)} h)", delta_color="inverse")
 
     target = float(p.get("target_t") or 0)
-    if target:
-        st.markdown(f'<div class="k2-box" style="background:#fff;border:1px solid #D9DDE3">'
-                    f"<b>Cel miesiąca {num(target)} t:</b> jak dziś {100 * t0 / target:.0f} % · "
-                    f"z sygnałami {100 * t1 / target:.0f} %</div>", unsafe_allow_html=True)
+    planned = float(appr.get("planned_t") or 0)
+    if target or planned:
+        txt = []
+        if planned:
+            txt.append(f"<b>Plan harmonogramu {num(planned)} t:</b> jak dziś wywiezione {100 * t0 / planned:.0f} % · "
+                       f"z sygnałami {100 * t1 / planned:.0f} %")
+        if target:
+            txt.append(f"<b>Cel miesiąca {num(target)} t:</b> jak dziś {100 * t0 / target:.0f} % · "
+                       f"z sygnałami {100 * t1 / target:.0f} %")
+        st.markdown('<div class="k2-box" style="background:#fff;border:1px solid #D9DDE3">' + "<br>".join(txt) + "</div>",
+                    unsafe_allow_html=True)
     c1_, c2_ = st.columns([3, 2])
     with c1_, card("chart"):
         theme.h4("Koszt narastająco")
