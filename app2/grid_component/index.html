@@ -14,7 +14,7 @@
        white-space: nowrap; min-width: var(--cw); height: 32px; }
   td.name { position: sticky; left: 0; z-index: 1; background: #fff; text-align: left; padding: 7px 10px;
             font: 700 12px 'IBM Plex Sans', sans-serif; min-width: 170px; }
-  tr.sum td.name, tr.pile td.name, tr.rig td.name { font-weight: 500; color: #3A4452; }
+  tr.sum td.name, tr.pile td.name, tr.rig td.name, tr.drx td.name { font-weight: 500; color: #3A4452; }
   tr.group td { background: #F7F8FA; color: #4A5562; font: 700 11px 'IBM Plex Sans', sans-serif; letter-spacing: .06em;
                 text-align: left; padding: 6px 10px; height: auto; }
   td.ed { cursor: pointer; }
@@ -52,7 +52,7 @@
 <div class="wrap"><table id="grid"></table></div>
 <div class="legend">
   <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>zlecenie wiertnicy / koparka: obszar i tys. t</span>
-  <span><i style="background:repeating-linear-gradient(135deg,#fff 0 4px,#E0B990 4px 6px);border:1px solid #E0B990"></i>wiertnica wierci dalej zlecenie</span>
+  <span><i style="background:repeating-linear-gradient(135deg,#fff 0 4px,#E0B990 4px 6px);border:1px solid #E0B990"></i>co wiertnica wierci danego dnia (⟶ zostaje na kolejne dni)</span>
   <span><i style="background:#DCE8F7;border:1px solid #A9C1E2"></i>wozidło: do której koparki</span>
   <span><i style="background:#1B2733"></i>✸ strzał: numer usypu·kt – kliknij, żeby przesunąć</span>
   <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek leży (kt = tys. t)</span>
@@ -163,14 +163,14 @@ function showPop(td) {
   if (sel.kind === 'ex' || sel.kind === 'dr') {
     const isRig = sel.kind === 'dr';
     const row = rowsSel()[0];
-    const ex = (isRig ? D.rigs : D.exs).find(x => x.id === row.name) || { allowed: D.areas.map(a => a.id), rate: 0 };
+    const ex = (isRig ? D.rigs : D.exs).find(x => x.id === (row.id || row.name)) || { allowed: D.areas.map(a => a.id), rate: 0 };
     const cur = row.cells[Math.min(sel.a, sel.b)].v || { a: '', t: 0 };
     const perUnit = D.day ? D.spd : 1;
     const areas = D.areas.filter(a => ex.allowed.includes(a.id));
     choice = cur.a || (areas[0] || {}).id || 'postój';
     const rate = isRig ? ((ex.rates || {})[choice] || 0) : ex.rate;
     const t0 = cur.t ? cur.t * perUnit : Math.round((rate || 1000) * (isRig ? 1 : 0.9) / 100) * 100 * perUnit;
-    h += `<div class="t">${esc(row.name)}</div><div class="s">${esc(range())}</div>`;
+    h += `<div class="t">${esc(row.id || row.name)}</div><div class="s">${esc(range())}</div>`;
     h += `<div class="lbl">${isRig ? 'Zlecenie: ile ton odwiercić' + (D.day ? ' (od tego dnia)' : '') : 'Ile ton ' + unit}</div><div class="row"><input id="tin" type="number" min="0" step="100" value="${Math.round(isRig ? (cur.t || rate * perUnit) : t0)}">`;
     h += `<span>t</span>${!isRig && ex.rate ? `<span style="color:#4A5562">(ładuje ok. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
     h += `<div class="lbl">${isRig ? 'Gdzie wierci' : 'Skąd ładuje'}</div>`;
@@ -182,7 +182,7 @@ function showPop(td) {
     if (isRig) h += `<button class="o stand" data-a="bez zlecenia"><b>bez zlecenia</b><span>wierci dalej to, co ma, albo czeka</span></button>`;
     apply = () => {
       const v = Math.max(0, +document.getElementById('tin').value || 0);
-      emit(Object.assign({ kind: sel.kind, ex: row.name, a: s0, b: s1, area: choice, t: D.day && !isRig ? v / D.spd : v }, scope()));
+      emit(Object.assign({ kind: sel.kind, ex: row.id || row.name, a: s0, b: s1, area: choice, t: D.day && !isRig ? v / D.spd : v }, scope()));
     };
   } else {
     const rows = rowsSel();

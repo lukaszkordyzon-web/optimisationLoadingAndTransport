@@ -437,38 +437,45 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             return ""
         return f
 
-    def rig_row(rid):
-        """Orders the planner gave (strong colour) and the drilling that carries them on (light, with an arrow)."""
-        rr, out = ev["rig_rows"][rid], []
+    def rig_rows(rid):
+        """Two rows of a rig: the orders the planner gives, and what the rig really drills on every day – an order
+        bigger than a day goes on into the next days, orders wait in a queue."""
+        rr, orders_row, drill_row = ev["rig_rows"][rid], [], []
         for g in groups:
             orders = [rr[i]["order"] for i in g if rr[i]["order"]]
+            vals = {"a": orders[0][0] if orders else "", "t": sum(t for _, t in orders)}
+            if orders:
+                bg, fg = acol.get(orders[-1][0], ("#FFFFFF", "#1B2733"))
+                orders_row.append(cell(" + ".join(f"{a} {_kt(t)}" for a, t in orders), bg, fg,
+                                       f"{rid}: zlecenie " + ", ".join(f"{a} {_num(t)} t" for a, t in orders), bold=True,
+                                       v=vals))
+            elif any(rr[i]["stop"] for i in g):
+                orders_row.append(cell(STAND, "#F3F4F6", "#5B6573", f"{rid}: postój", v=vals))
+            else:
+                orders_row.append(cell("", "#FFFFFF", "#8A93A0", f"{rid}: bez nowego zlecenia", v=vals))
             drill: dict[str, float] = {}
             for i in g:
                 for a, d in rr[i]["drill"]:
                     drill[a] = drill.get(a, 0.0) + d
             drive = sum(rr[i]["drive_h"] for i in g)
             wait = rr[g[-1]]["waiting"]
-            title = (f"{rid}: " + (f"zlecenie {', '.join(f'{a} {_num(t)} t' for a, t in orders)} · " if orders else "")
-                     + (f"wierci {', '.join(f'{a} {_num(d)} t' for a, d in drill.items())}" if drill else "nie wierci")
-                     + (f" · przejazd {drive * 60:.0f} min" if drive else "") + (f" · zostaje {_num(wait)} t" if wait else ""))
-            vals = {"a": orders[0][0] if orders else "", "t": orders[0][1] if orders else 0}
-            if orders:
-                bg, fg = acol.get(orders[-1][0], ("#FFFFFF", "#1B2733"))
-                out.append(cell(" + ".join(f"{a} {_kt(t)}" for a, t in orders), bg, fg, title, bold=True, v=vals))
-            elif any(rr[i]["stop"] for i in g):
-                out.append(cell(STAND, "#F3F4F6", "#5B6573", f"{rid}: postój", v=vals))
-            elif drill:
+            title = (f"{rid} wierci: " + (", ".join(f"{a} {_num(d)} t" for a, d in drill.items()) if drill else "nic")
+                     + (f" · przejazd {drive * 60:.0f} min" if drive else "")
+                     + (f" · zostaje na kolejne dni {_num(wait)} t" if wait > 1 else ""))
+            if drill:
                 a = next(iter(drill))
                 bg, fg = acol.get(a, ("#FFFFFF", "#1B2733"))
-                out.append(cell(f"→ {'/'.join(drill)} {_kt(sum(drill.values()))}", "#FFFFFF", fg, title,
-                                v=vals, bd=bg))
+                text = f"{'/'.join(drill)} {_kt(sum(drill.values()))}" + (f" ⟶{_kt(wait)}" if wait > 1 else "")
+                drill_row.append(cell(text, "#FFFFFF", fg, title, bd=bg))
             else:
-                out.append(cell("–", "#FFFFFF", "#8A93A0", f"{rid}: wolna", v=vals))
-        return out
+                drill_row.append(cell("–", "#FFFFFF", "#8A93A0", title))
+        return orders_row, drill_row
 
-    rows = [{"kind": "group", "name": "WIERTNICE – zlecenia: obszar i tony · ustawiasz Ty"}]
+    rows = [{"kind": "group", "name": "WIERTNICE – zlecenia ustawiasz Ty, wiercenie liczy program"}]
     for r in rigs:
-        rows.append({"kind": "dr", "name": r["id"], "cells": rig_row(r["id"])})
+        orders_row, drill_row = rig_rows(r["id"])
+        rows.append({"kind": "dr", "name": f"{r['id']} · zlecenia", "id": r["id"], "cells": orders_row})
+        rows.append({"kind": "drx", "name": "↳ wierci [kt]", "cells": drill_row})
     rows.append({"kind": "group", "name": "STRZAŁY – z odwierconych ton · kliknij, żeby przesunąć"})
     for a_id in area_ids:
         out = []
