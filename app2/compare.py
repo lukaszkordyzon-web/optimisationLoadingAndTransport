@@ -2,10 +2,8 @@
 the driving signals learned by RL (the same orders, other driving). Same shifts, weather and breakdowns."""
 from __future__ import annotations
 
-import copy
 import hashlib
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -14,12 +12,11 @@ import streamlit.components.v1 as components
 from kruszyk.anim import split_html
 from kruszyk.compare import sign_threshold
 from kruszyk.period import run_period
-from kruszyk.rl import explain_signals, today, train_signals, with_signals
+from kruszyk.rl import today, train_signals, with_signals
 from kruszyk.sim import simulate
-from ui import card
-
-from . import state
+from . import state, theme
 from .plan import labels, period_plan
+from .theme import card
 
 SEED = 0
 QUICK = {"iterations": 2, "population": 4, "episodes": 1}  # tests: session flag "k2_quick"
@@ -44,9 +41,12 @@ def month(appr) -> dict | None:
     res = st.session_state.get("month")
     if res and res["key"] == key:
         return res
-    st.caption("Najpierw program liczy miesiąc jak dziś, uczy się na nim sygnałów jazdy i liczy ten sam miesiąc z "
-               "sygnałami – zwykle 1–3 min.")
-    if not st.button("🚀 Policz miesiąc i naucz sygnały", type="primary", key="k2_month_go"):
+    with card("monthgo"):
+        theme.h4("Policz miesiąc")
+        theme.note("Program liczy miesiąc jak dziś według zatwierdzonego harmonogramu, uczy się na nim sygnałów jazdy "
+                   "i liczy ten sam miesiąc z sygnałami – zwykle 1–3 min.")
+        go_ = st.button("Policz miesiąc i naucz sygnały", type="primary", key="k2_month_go")
+    if not go_:
         return None
     sc = state.scenario()
     plan = period_plan(appr["plan"])
@@ -80,8 +80,27 @@ def _split(state_yaml: str, params: tuple, seed: int) -> str:
     return split_html(a, b, "Jak dziś", "Z sygnałami RL")
 
 
+def signal_boxes(p: dict) -> str:
+    """The driving signals in plain words, as boxes."""
+    m, sd, cp = p["arrival_margin_s"], p["max_slowdown"], p["crusher_pacing"]
+    when = ("chwilę przed zwolnieniem koparki" if m > 5 else "chwilę po zwolnieniu koparki" if m < -5
+            else "dokładnie, gdy koparka się zwolni")
+    rows = [("Prędkość pod koparkę:", f"dojedź {when} – bez stania w kolejce (najwyżej {100 * sd:.0f} % wolniej, "
+                                      "nigdy ponad limit)."),
+            ("Przed kruszarką:", "nie zwalniaj – kosz nadąża." if cp < 0.15 else
+             "zwolnij, gdy kosz jest pełny – zamiast czekać na biegu jałowym."),
+            ("Postój:", "wozidła nie stają – każde jeździ bez przerwy." if p.get("truck_park_queue_min", -1) < 0 else
+             f"„stań i wyłącz silnik”, gdy kurs skończyłby się kolejką dłuższą niż {p['truck_park_queue_min']:.0f} min; "
+             f"zawsze jeździ co najmniej {100 * p['truck_min_working_share']:.0f} % wozideł każdej koparki."),
+            ("Operator koparki:", "nabierz łyżkę przed podstawieniem wozidła.")]
+    return "".join(f'<div class="k2-box"><b>{a}</b> {b}</div>' for a, b in rows)
+
+
 def step_simulation() -> None:
-    st.markdown("## Symulacja: jak dziś i z sygnałami RL")
+    head = st.columns([4, 1.4], vertical_alignment="bottom")
+    with head[0]:
+        theme.header("Symulacja: jak dziś i z sygnałami RL", "Ta sama zmiana z miesiąca obok siebie – te same zlecenia "
+                                                             "sztygara, pogoda i awarie. Zmienia się tylko sposób jazdy.")
     appr = _approved()
     if not appr:
         return
@@ -91,34 +110,52 @@ def step_simulation() -> None:
     from kruszyk.config import dump_scenario
 
     a, b, lab = res["today"], res["signals"], res["labels"]
-    opts = list(range(len(a)))
-
-    def fmt(i: int) -> str:
+    n = len(a)
+    i = int(st.session_state.get("k2_shift_i", 0)) % n
+    with card("shiftbar"):
+        c = st.columns([0.5, 2.4, 0.5, 4], vertical_alignment="center")
+        if c[0].button("‹", key="k2_prev", width="stretch", help="poprzednia zmiana"):
+            st.session_state.k2_shift_i = (i - 1) % n
+            st.rerun()
         d = b["koszt_na_t"].iloc[i] - a["koszt_na_t"].iloc[i]
-        return f"{lab[i]} · {a['wywiezione_t'].iloc[i]:,.0f} t · {d:+.2f} zł/t z RL".replace(",", " ")
-    with card("k2_shiftpick"):
-        c = st.columns([4, 1])
-        i = c[0].selectbox("Zmiana do obejrzenia", opts, format_func=fmt, key="k2_shift")
-        c[1].metric("Zmian w miesiącu", len(a))
+        c[1].markdown(f'<div style="text-align:center"><div class="k2-note">Zmiana {i + 1} z {n}</div>'
+                      f'<div style="font-weight:700;font-size:16px">{lab[i]}</div></div>', unsafe_allow_html=True)
+        if c[2].button("›", key="k2_next", width="stretch", help="następna zmiana"):
+            st.session_state.k2_shift_i = (i + 1) % n
+            st.rerun()
+        c[3].markdown(f'<div class="k2-note" style="text-align:right">jak dziś {a["wywiezione_t"].iloc[i]:,.0f} t · '
+                      f'{a["koszt_na_t"].iloc[i]:.2f} zł/t &nbsp;|&nbsp; z RL {b["wywiezione_t"].iloc[i]:,.0f} t · '
+                      f'{b["koszt_na_t"].iloc[i]:.2f} zł/t ({d:+.2f})</div>'.replace(",", " "), unsafe_allow_html=True)
     st_yaml = dump_scenario(res["states"][i])
     page = _split(st_yaml, tuple(sorted(res["params"].items())), SEED + 7919 * i)  # the seed of that shift in the month
     components.html(page, height=900, scrolling=True)
-    c = st.columns([3, 1])
-    c[0].caption("Lewa i prawa strona: ta sama zmiana z miesiąca – te same zlecenia sztygara, pogoda i awarie. "
-                 "Po prawej kierowcy dostają sygnały jazdy (komunikaty pod mapą).")
-    if c[1].button("Cały miesiąc →", key="k2_to_result", width="stretch"):
-        st.session_state.nav_next = "④ Wynik"
-        st.rerun()
+    with head[1]:
+        if st.button("Cały miesiąc →", type="primary", key="k2_to_result", width="stretch"):
+            st.session_state.nav_next = "④ Wynik"
+            st.rerun()
 
 
 def step_result() -> None:
-    st.markdown("## Wynik miesiąca")
+    head = st.columns([4, 2], vertical_alignment="bottom")
+    appr = st.session_state.get("approved")
+    res = st.session_state.get("month")
+    with head[0]:
+        sub = ""
+        if res and appr and res["key"] == _month_key(appr):
+            sub = (f"{res['labels'][0]} – {res['labels'][-1]} · {len(res['today'])} zmian · ten sam harmonogram, strzały, "
+                   "pogoda i awarie. Wozidła jeżdżą tam, gdzie wysyła sztygar – zmienia się tylko sposób jazdy.")
+        theme.header("Ten sam miesiąc: jak dziś i z sygnałami RL", sub)
     appr = _approved()
     if not appr:
         return
     res = month(appr)
     if not res:
         return
+    p = st.session_state.get("k2_plan", {})
+    with head[1]:
+        st.markdown('<div style="text-align:right">' + theme.chip("Harmonogram zamrożony") + " " +
+                    theme.chip("Model zgodny z realną produkcją" if p.get("real_t") else "Model bez kontroli realnej produkcji",
+                               ok=bool(p.get("real_t"))) + "</div>", unsafe_allow_html=True)
     a, b = res["today"], res["signals"]
     t0, t1 = float(a["wywiezione_t"].sum()), float(b["wywiezione_t"].sum())
     c0, c1 = float(a["koszt_zl"].sum()), float(b["koszt_zl"].sum())
@@ -129,50 +166,57 @@ def step_result() -> None:
 
     def num(x: float) -> str:
         return f"{x:,.0f}".replace(",", " ")
-    st.caption(f"{res['labels'][0]} – {res['labels'][-1]} · {n} zmian · ten sam zatwierdzony harmonogram, strzały, "
-               "pogoda i awarie. Wozidła jadą tam, gdzie wysyła sztygar – zmienia się tylko sposób jazdy.")
     m = st.columns(5)
     m[0].metric("Oszczędność w miesiącu", f"{num((z0 - z1) * t1)} zł", help="(koszt tony dziś − z sygnałami) × tony z sygnałami")
-    m[1].metric("Koszt tony", f"{z1:.2f} zł/t", f"{z1 - z0:+.2f} zł/t vs dziś", delta_color="inverse")
-    m[2].metric("Paliwo", f"{num(f1)} l", f"{100 * (f1 / f0 - 1):+.1f} %" if f0 else None, delta_color="inverse")
-    m[3].metric("Wywiezione", f"{num(t1)} t", f"{100 * (t1 / t0 - 1):+.1f} %" if t0 else None)
-    m[4].metric("Stanie w kolejkach", f"{num(q1)} h", f"{num(q1 - q0)} h", delta_color="inverse")
+    m[1].metric("Koszt tony", f"{z1:.2f} zł/t", f"{z1 - z0:+.2f} zł/t (dziś {z0:.2f})", delta_color="inverse")
+    m[2].metric("Paliwo", f"{num(f1)} l", f"{100 * (f1 / f0 - 1):+.1f} % (dziś {num(f0)} l)" if f0 else None,
+                delta_color="inverse")
+    m[3].metric("Wywiezione", f"{num(t1)} t", f"{100 * (t1 / t0 - 1):+.1f} % (dziś {num(t0)} t)" if t0 else None)
+    m[4].metric("Stanie w kolejkach", f"{num(q1)} h", f"{num(q1 - q0)} h (dziś {num(q0)} h)", delta_color="inverse")
 
+    target = float(p.get("target_t") or 0)
+    if target:
+        st.markdown(f'<div class="k2-box" style="background:#fff;border:1px solid #D9DDE3">'
+                    f"<b>Cel miesiąca {num(target)} t:</b> jak dziś {100 * t0 / target:.0f} % · "
+                    f"z sygnałami {100 * t1 / target:.0f} %</div>", unsafe_allow_html=True)
     c1_, c2_ = st.columns([3, 2])
-    with c1_, card("k2_chart"):
+    with c1_, card("chart"):
+        theme.h4("Koszt narastająco")
         fig = go.Figure()
-        for name, d, color in (("jak dziś", a, "#8A93A0"), ("z sygnałami RL", b, "#B3122A")):
-            cum = d["koszt_zl"].cumsum() / 1000
-            fig.add_scatter(x=res["labels"], y=cum, mode="lines", name=name, line=dict(color=color, width=3))
-        fig.update_layout(height=320, margin=dict(t=40, b=10), title="Koszt narastająco [tys. zł]",
-                          legend=dict(orientation="h", y=-0.25), xaxis=dict(showticklabels=False))
+        for name, d, color in (("jak dziś", a, "#8A93A0"), ("z sygnałami", b, "#B3122A")):
+            fig.add_scatter(x=res["labels"], y=d["koszt_zl"].cumsum() / 1000, mode="lines", name=name,
+                            line=dict(color=color, width=3))
+        fig.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h", y=1.12),
+                          xaxis=dict(showticklabels=False), yaxis_title="tys. zł", plot_bgcolor="#FFFFFF")
         st.plotly_chart(fig, width="stretch")
-        week = pd.DataFrame({"tydzień": [pd.Timestamp(d).strftime("%G-W%V") for d in a["data"]],
-                             "t_dzis": a["wywiezione_t"], "t_rl": b["wywiezione_t"], "k_dzis": a["koszt_zl"],
-                             "k_rl": b["koszt_zl"], "taniej": (b["koszt_na_t"] < a["koszt_na_t"]).astype(int)})
-        g = week.groupby("tydzień", sort=False).sum(numeric_only=True)
-        g["zl_t_dzis"] = g["k_dzis"] / g["t_dzis"]
-        g["zl_t_rl"] = g["k_rl"] / g["t_rl"]
-        g["zmian"] = week.groupby("tydzień", sort=False).size()
-        st.dataframe(g[["t_dzis", "t_rl", "zl_t_dzis", "zl_t_rl", "taniej", "zmian"]].round(2), width="stretch",
-                     column_config={"t_dzis": "tony dziś", "t_rl": "tony z RL", "zl_t_dzis": "zł/t dziś",
-                                    "zl_t_rl": "zł/t z RL", "taniej": "zmian taniej", "zmian": "zmian"})
+        week = pd.DataFrame({"w": [pd.Timestamp(d).strftime("%d.%m") for d in a["data"]],
+                             "wk": [pd.Timestamp(d).isocalendar().week for d in a["data"]],
+                             "t0": a["wywiezione_t"], "t1": b["wywiezione_t"], "k0": a["koszt_zl"], "k1": b["koszt_zl"],
+                             "win": (b["koszt_na_t"] < a["koszt_na_t"]).astype(int)})
+        rows = []
+        for _, g in week.groupby("wk", sort=False):
+            rows.append([f"{g['w'].iloc[0]}–{g['w'].iloc[-1]}", f"{num(g['t0'].sum())} / {num(g['t1'].sum())}",
+                         f"{g['k0'].sum() / g['t0'].sum():.2f} / {g['k1'].sum() / g['t1'].sum():.2f}",
+                         f"{int(g['win'].sum())} z {len(g)}"])
+        st.markdown(theme.table([("Tydzień", ""), ("Tony dziś / z RL", "n"), ("zł/t dziś / z RL", "n"),
+                                 ("Zmian taniej", "n")], rows, numeric={1, 2, 3}, sans={0}), unsafe_allow_html=True)
     with c2_:
-        with card("k2_signals"):
-            st.markdown("#### 📱 Sygnały dla kierowców")
-            st.markdown("  \n".join(explain_signals(res["params"])))
+        with card("signals"):
+            theme.h4("Sygnały dla kierowców")
+            st.markdown(signal_boxes(res["params"]), unsafe_allow_html=True)
             s = res["setup"]
-            st.caption(f"Nauczone na {s['shifts']} zmianach symulacji, w sytuacjach z {s['states']} zmian tego "
-                       "miesiąca jak dziś (pełne usypy, końcówki, przejazdy koparek, deszcz, awarie).")
-        with card("k2_sure"):
+            theme.note(f"Nauczone na {s['shifts']} zmianach symulacji, w sytuacjach z {s['states']} zmian tego miesiąca "
+                       "(pełne usypy, końcówki, przejazdy koparek, deszcz, awarie).")
+        with card("sure"):
             wins = int((b["koszt_na_t"] < a["koszt_na_t"]).sum())
             need = sign_threshold(n)
-            st.markdown("#### Pewność wyniku")
-            verdict = ("różnica pewna" if wins >= need else "taniej z RL za rzadko, by mówić o pewnej różnicy"
-                       if wins > n - need else "z RL drożej")
-            st.markdown(f"Taniej z sygnałami na **{wins} z {n}** zmian – {verdict} (próg: {need} z {n}).")
+            theme.h4("Pewność wyniku")
+            verdict = ("różnica pewna" if wins >= need else "za mało, by mówić o pewnej różnicy" if wins > n - need
+                       else "z sygnałami drożej")
+            st.markdown(f'<div style="font-size:14px">Taniej z sygnałami na <b>{wins} z {n}</b> zmian – {verdict} '
+                        f"(próg: {need} z {n}).</div>", unsafe_allow_html=True)
         out = pd.DataFrame({"zmiana": res["labels"], "t_dzis": a["wywiezione_t"], "t_rl": b["wywiezione_t"],
                             "zl_t_dzis": a["koszt_na_t"], "zl_t_rl": b["koszt_na_t"], "paliwo_dzis": a["paliwo_l"],
                             "paliwo_rl": b["paliwo_l"]})
-        st.download_button("⬇️ Pobierz wyniki zmian (CSV)", out.to_csv(index=False).encode("utf-8"), "wynik_miesiaca.csv",
+        st.download_button("Pobierz wyniki zmian (CSV)", out.to_csv(index=False).encode("utf-8"), "wynik_miesiaca.csv",
                            "text/csv", key="k2_csv", width="stretch")

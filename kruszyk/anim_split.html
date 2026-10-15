@@ -88,12 +88,21 @@
 const D = __DATA__;
 const el = id => document.getElementById(id);
 const fmt = (v, d = 0) => v === null || v === undefined ? '–' : v.toLocaleString('pl-PL', { minimumFractionDigits: d, maximumFractionDigits: d });
-const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const GEO = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/';
+const WHITE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+function baseLayers(map) {
+  const orto = L.tileLayer.wms(GEO + 'ORTO/WMS/HighResolution', { layers: 'Raster', format: 'image/jpeg', maxZoom: 21, attribution: 'Geoportal.gov.pl (GUGiK)' });
+  const relief = L.tileLayer.wms(GEO + 'NMT/GRID1/WMS/ShadedRelief', { layers: 'Raster', format: 'image/png', maxZoom: 21, attribution: 'Geoportal.gov.pl (GUGiK)' });
+  const plan = L.tileLayer(WHITE, { maxZoom: 22 });
+  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19 });
+  orto.addTo(map);
+  L.control.layers({ 'Ortofoto (Geoportal)': orto, 'Relief terenu (Geoportal)': relief, 'Plan': plan, 'Satelita Esri (zapas)': esri }).addTo(map);
+}
 const maps = [];
 
 function makeSide(key, S) {
   const map = L.map(key + '-map', { zoomControl: true, attributionControl: false });
-  L.tileLayer(ESRI, { maxZoom: 21, maxNativeZoom: 19 }).addTo(map);
+  baseLayers(map);
   const bounds = [];
   const N = S.net;
   N.roads.forEach(r => {

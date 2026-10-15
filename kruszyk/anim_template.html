@@ -83,10 +83,17 @@
 <script>
 const D = __DATA__;
 const map = L.map('map', { zoomControl: true });
-const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  { maxZoom: 21, maxNativeZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics' }).addTo(map);
-const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap' });
-L.control.layers({ 'Satelita': sat, 'Mapa': osm }).addTo(map);
+const GEO = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/';
+const WHITE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+function baseLayers(map) {
+  const orto = L.tileLayer.wms(GEO + 'ORTO/WMS/HighResolution', { layers: 'Raster', format: 'image/jpeg', maxZoom: 21, attribution: 'Geoportal.gov.pl (GUGiK)' });
+  const relief = L.tileLayer.wms(GEO + 'NMT/GRID1/WMS/ShadedRelief', { layers: 'Raster', format: 'image/png', maxZoom: 21, attribution: 'Geoportal.gov.pl (GUGiK)' });
+  const plan = L.tileLayer(WHITE, { maxZoom: 22 });
+  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19 });
+  orto.addTo(map);
+  L.control.layers({ 'Ortofoto (Geoportal)': orto, 'Relief terenu (Geoportal)': relief, 'Plan': plan, 'Satelita Esri (zapas)': esri }).addTo(map);
+}
+baseLayers(map);
 L.control.scale({ imperial: false }).addTo(map);
 
 const bounds = [];

@@ -7,20 +7,23 @@ import pandas as pd
 import streamlit as st
 
 from kruszyk import catalog
-from ui import card
-
-from . import state
+from . import state, theme
+from .theme import card
 
 MAP, MACHINES = "Mapa", "Maszyny"
 
 
 def step_mine() -> None:
-    st.markdown("## Kopalnia")
-    tab = st.radio("Widok", [MAP, MACHINES], horizontal=True, key="k2_mine_tab", label_visibility="collapsed")
+    c = st.columns([3, 2], vertical_alignment="bottom")
+    with c[0]:
+        theme.header("Kopalnia", "Rysujesz na ortofoto – punkty przyczepiają się do dróg i obiektów. Model maszyny z "
+                                 "katalogu wpisuje typowe parametry, popraw na Wasze realne.")
+    with c[1]:
+        tab = st.radio("Widok", [MAP, MACHINES], horizontal=True, key="k2_mine_tab", label_visibility="collapsed")
     if tab == MAP:
-        from app_map import render_map_tab
+        from .mapview import map_screen
 
-        render_map_tab(state.raw(), state.set_raw, simple=True, schedule=True)
+        map_screen()
     else:
         machines()
 
@@ -35,15 +38,13 @@ def _num(v, default=0.0) -> float:
 def machines() -> None:
     raw = copy.deepcopy(state.raw())
     v = st.session_state.get("ver", 0)
-    st.caption("Model z katalogu wpisuje typowe parametry – popraw na Wasze realne wartości. Zmiany wchodzą do "
-               "obliczeń po kliknięciu **Zapisz maszyny**.")
 
     # ---------------------------------------------------------------- trucks
-    with card("k2_trucks"):
+    with card("trucks"):
         trucks = raw.get("trucks", [])
         n = sum(int(t.get("count", 1)) for t in trucks)
         cap = sum(int(t.get("count", 1)) * float(t.get("payload_t", 0)) for t in trucks)
-        st.markdown(f"#### Wozidła · {n} szt. · {cap:,.0f} t ładowności".replace(",", " "))
+        theme.h2(f"Wozidła <span class='k2-note' style='font-weight:400'>razem <b>{n} szt.</b> · {cap:,.0f} t ładowności</span>".replace(",", " "))
         df = pd.DataFrame([{"id": t.get("id", ""), "model": t.get("model", ""), "sztuk": int(t.get("count", 1)),
                             "ladownosc_t": t.get("payload_t"), "masa_t": t.get("empty_mass_t"), "moc_kw": t.get("power_kw"),
                             "vmax_kmh": t.get("max_speed_kmh"), "pal_pelny": t.get("fuel_lph_loaded"),
@@ -83,8 +84,8 @@ def machines() -> None:
         st.rerun()
 
     # ---------------------------------------------------------------- excavators
-    with card("k2_ex"):
-        st.markdown("#### Koparki i ładowarki")
+    with card("ex"):
+        theme.h2("Koparki i ładowarki")
         exs = raw.get("excavators", [])
         df = pd.DataFrame([{"id": e["id"], "lyzka_m3": e.get("bucket_m3"), "cykl_s": e.get("swing_cycle_s"),
                             "wypelnienie": e.get("fill_factor", 0.9), "podstawienie_s": e.get("spot_time_s", 40.0)} for e in exs])
@@ -102,8 +103,8 @@ def machines() -> None:
 
     c1, c2 = st.columns([3, 2])
     # ---------------------------------------------------------------- crushers
-    with c1, card("k2_cr"):
-        st.markdown("#### Kruszarki")
+    with c1, card("cr"):
+        theme.h2("Kruszarki")
         cr = raw.setdefault("crusher", {})
         extra = raw.get("crushers_extra") or []
         rows = [{"id": cr.get("id", "C-1"), "wydajnosc": cr.get("capacity_tph"), "kosz": cr.get("hopper_t"),
@@ -117,8 +118,8 @@ def machines() -> None:
             c_.update({"capacity_tph": _num(r["wydajnosc"], 400), "hopper_t": _num(r["kosz"], 100),
                        "dump_time_s": _num(r["wyladunek_s"], 60), "kwh_per_t": _num(r["kwh_t"], 1.1)})
     # ---------------------------------------------------------------- drill rigs
-    with c2, card("k2_rigs"):
-        st.markdown("#### Wiertnice")
+    with c2, card("rigs"):
+        theme.h2("Wiertnice")
         rigs = raw.get("drills") or [{"id": "W-1", "in_work": True, "m_per_shift": 250.0, "speed_kmh": 2.0}]
         ed = st.data_editor(pd.DataFrame([{"id": r["id"], "w_pracy": bool(r.get("in_work", True)),
                                            "mb_zm": r.get("m_per_shift", 250.0), "kmh": r.get("speed_kmh", 2.0)} for r in rigs]),
@@ -130,8 +131,8 @@ def machines() -> None:
                          for i, (_, r) in enumerate(ed.iterrows())]
 
     # ---------------------------------------------------------------- costs
-    with card("k2_costs"):
-        st.markdown("#### Koszty")
+    with card("costs"):
+        theme.h2("Koszty")
         co = raw.setdefault("costs", {})
         c = st.columns(6)
         fields = [("truck_per_h", "wozidło [zł/h]", 300.0), ("excavator_per_h", "koparka [zł/h]", 900.0),

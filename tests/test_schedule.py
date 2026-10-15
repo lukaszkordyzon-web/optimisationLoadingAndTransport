@@ -63,3 +63,10 @@ def test_proposed_schedule_frozen_month_follows_it_exactly():
                 assert followed[i][ex] == pile, (i, ex, pile, followed[i])
     b = run_period(today(sc), p, seed=1)  # the frozen plan: nothing is decided on the way – runs repeat exactly
     assert list(a["wywiezione_t"]) == list(b["wywiezione_t"])
+
+
+def test_tonnes_the_schedule_gives():
+    from kruszyk.schedule import hauled_plan
+
+    grid = {"K-1": ["U-01"] * 4}
+    assert hauled_plan(grid, {}, {"U-01": 2500}, {"K-1": 1000}, 4) == [1000, 1000, 500, 0]  # no more than lies there

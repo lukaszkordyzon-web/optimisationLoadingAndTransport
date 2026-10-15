@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'IBM Plex Sans', system-ui, sans-serif; color: #1B2733; background: transparent; }
+  .wrap { overflow-x: auto; border: 1px solid #E3E6EA; border-radius: 8px; background: #fff; }
+  table { border-collapse: collapse; font: 500 12px 'IBM Plex Mono', ui-monospace, monospace; user-select: none; }
+  th { background: #F7F8FA; padding: 8px 4px; border-bottom: 1px solid #D9DDE3; border-left: 1px solid #EEF0F3;
+       white-space: nowrap; font-weight: 600; min-width: var(--cw); }
+  th.off { background: #EEF0F3; color: #5B6573; }
+  td { padding: 8px 4px; text-align: center; border-left: 1px solid #EEF0F3; border-bottom: 1px solid #EEF0F3;
+       white-space: nowrap; min-width: var(--cw); height: 34px; }
+  td.name { position: sticky; left: 0; z-index: 1; background: #fff; text-align: left; padding: 8px 10px;
+            font: 700 12px 'IBM Plex Sans', sans-serif; min-width: 170px; }
+  tr.group td { background: #F7F8FA; color: #4A5562; font: 700 11px 'IBM Plex Sans', sans-serif; letter-spacing: .06em;
+                text-align: left; padding: 6px 10px; height: auto; }
+  td.ex { cursor: pointer; }
+  td.ex:hover { box-shadow: inset 0 0 0 2px #1B2733; }
+  td.red { background: #FDE2E2 !important; color: #8C0E20 !important; box-shadow: inset 0 0 0 2px #B3122A; }
+  td.sel { box-shadow: inset 0 0 0 3px #1B2733 !important; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: #3A4452; margin-top: 8px; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; }
+  .hint { font-size: 13px; color: #4A5562; margin-top: 6px; }
+  #pop { position: absolute; z-index: 20; display: none; width: 340px; background: #fff; border: 1px solid #C3C9D1;
+         border-radius: 10px; box-shadow: 0 8px 24px rgba(16,24,40,.18); padding: 12px; }
+  #pop .t { font-weight: 700; font-size: 15px; }
+  #pop .s { font-size: 12px; color: #4A5562; margin: 2px 0 8px; }
+  #pop button { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%;
+                padding: 9px 10px; margin-bottom: 6px; border-radius: 8px; border: 1px solid #C3C9D1; background: #fff;
+                font: 400 13px 'IBM Plex Sans', sans-serif; color: #1B2733; cursor: pointer; text-align: left; }
+  #pop button b { font-family: 'IBM Plex Mono', monospace; }
+  #pop button.cur { background: #1B2733; border-color: #1B2733; color: #fff; }
+  #pop button.wait { background: #F3F4F6; border-style: dashed; color: #4A5562; }
+  #pop button.busy { background: #F3F4F6; color: #4A5562; }
+  #pop button.new { border-style: dashed; border-color: #8A93A0; }
+  #pop button:hover { box-shadow: inset 0 0 0 2px #B3122A; }
+  #pop .x { position: absolute; top: 6px; right: 8px; border: 0; background: none; width: auto; padding: 4px 8px;
+            font-size: 18px; margin: 0; color: #4A5562; }
+</style>
+</head>
+<body>
+<div class="wrap"><table id="grid"></table></div>
+<div class="legend">
+  <span><i style="background:#EDEFF2;border:1px solid #C3C9D1"></i>wiercenie</span>
+  <span><i style="background:#1B2733"></i>strzał</span>
+  <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek leży (kt = tys. t)</span>
+  <span><i style="background:#FDE2E2;border:2px solid #B3122A"></i>konflikt – najedź, żeby zobaczyć dlaczego</span>
+</div>
+<div class="hint">Kliknij komórkę koparki albo przeciągnij po kilku – wybierz usyp z listy. Wiertnice i odstrzały układają się same.</div>
+<div id="pop"></div>
+<script>
+const send = (type, extra) => window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*');
+let D = null, anchor = null, sel = null, dragging = false;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const height = () => send('streamlit:setFrameHeight', { height: document.body.scrollHeight + (document.getElementById('pop').style.display === 'block' ? 260 : 8) });
+
+function render() {
+  document.documentElement.style.setProperty('--cw', D.day ? '74px' : '58px');
+  let h = '<tr><th style="position:sticky;left:0;z-index:2"></th>' + D.heads.map((x, j) => `<th class="${D.off[j] ? 'off' : ''}">${esc(x)}</th>`).join('') + '</tr>';
+  D.rows.forEach((r, ri) => {
+    if (r.kind === 'group') { h += `<tr class="group"><td colspan="${D.heads.length + 1}">${esc(r.name)}</td></tr>`; return; }
+    h += `<tr><td class="name">${esc(r.name)}</td>`;
+    r.cells.forEach((c, j) => {
+      const inSel = sel && r.kind === 'ex' && sel.ex === r.name && j >= Math.min(sel.a, sel.b) && j <= Math.max(sel.a, sel.b);
+      const cls = [r.kind === 'ex' ? 'ex' : '', c.red ? 'red' : '', inSel ? 'sel' : ''].join(' ');
+      h += `<td class="${cls}" data-r="${ri}" data-j="${j}" title="${esc(c.title || '')}" style="background:${c.bg};color:${c.fg};${c.bold ? 'font-weight:700;' : ''}">${esc(c.text)}</td>`;
+    });
+    h += '</tr>';
+  });
+  document.getElementById('grid').innerHTML = h;
+  height();
+}
+
+function cellOf(e) { const td = e.target.closest('td.ex'); return td ? { r: D.rows[+td.dataset.r], j: +td.dataset.j, td } : null; }
+const grid = document.getElementById('grid');
+grid.addEventListener('mousedown', e => {
+  const c = cellOf(e); if (!c) return;
+  e.preventDefault();
+  if (e.shiftKey && anchor && anchor.ex === c.r.name) sel = { ex: c.r.name, a: anchor.j, b: c.j };
+  else { sel = { ex: c.r.name, a: c.j, b: c.j }; anchor = { ex: c.r.name, j: c.j }; }
+  dragging = true; hidePop(); render();
+});
+grid.addEventListener('mouseover', e => {
+  if (!dragging) return;
+  const c = cellOf(e); if (!c || c.r.name !== sel.ex) return;
+  if (sel.b !== c.j) { sel.b = c.j; render(); }
+});
+window.addEventListener('mouseup', e => {
+  if (!dragging) return;
+  dragging = false;
+  const td = grid.querySelector(`td.sel[data-j="${Math.max(sel.a, sel.b)}"]`) || grid.querySelector('td.sel');
+  showPop(td);
+});
+
+function shifts() { const a = Math.min(sel.a, sel.b), b = Math.max(sel.a, sel.b); return [D.groups[a][0], D.groups[b][D.groups[b].length - 1]]; }
+function showPop(td) {
+  if (!sel) return;
+  const [s0, s1] = shifts();
+  const range = s0 === s1 ? D.labels[s0] : `${D.labels[s0]} – ${D.labels[s1]}`;
+  const now = D.grid[sel.ex][s0];
+  const others = Object.keys(D.grid).filter(x => x !== sel.ex);
+  let h = `<button class="x" aria-label="Zamknij" onclick="hidePop()">×</button><div class="t">${esc(sel.ex)}</div><div class="s">${esc(range)} · skąd ładuje:</div>`;
+  D.piles.forEach(p => {
+    let cls = '', note = '';
+    const busy = others.find(x => D.grid[x].slice(s0, s1 + 1).includes(p.id));
+    const left = p.left ? p.left[s0] : null;
+    if (p.isNew) { cls = 'new'; note = 'NOWY odstrzał – program doda wiercenie i strzał'; }
+    else if (p.avail !== null && p.avail > s0) { cls = 'wait'; note = 'dostępny od ' + D.labels[Math.min(p.avail, D.labels.length - 1)]; }
+    else if (left !== null && left <= 1) { cls = 'wait'; note = 'wybrany do końca'; }
+    else if (busy) { cls = 'busy'; note = 'ładuje też ' + busy; }
+    else note = left !== null ? `leży ok. ${(left / 1000).toFixed(1)} tys. t` : 'dostępny';
+    if (p.id === now) { cls = 'cur'; note = 'teraz: ' + note; }
+    h += `<button class="${cls}" data-p="${esc(p.id)}"><b>${esc(p.id)}</b><span>${esc(note)}</span></button>`;
+  });
+  const pop = document.getElementById('pop');
+  pop.innerHTML = h;
+  pop.style.display = 'block';
+  const r = td.getBoundingClientRect();
+  pop.style.left = Math.max(4, Math.min(window.innerWidth - 350, r.left + window.scrollX - 120)) + 'px';
+  pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  pop.querySelectorAll('button[data-p]').forEach(b => b.onclick = () => {
+    const [a, z] = shifts();
+    send('streamlit:setComponentValue', { value: { ex: sel.ex, a, b: z, pile: b.dataset.p, nonce: Date.now() }, dataType: 'json' });
+    hidePop();
+  });
+  height();
+}
+function hidePop() { document.getElementById('pop').style.display = 'none'; height(); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { sel = null; hidePop(); render(); } });
+
+let lastJson = null;
+window.addEventListener('message', e => {
+  if (!e.data || e.data.type !== 'streamlit:render') return;
+  const js = JSON.stringify(e.data.args.data);
+  if (js === lastJson) return;  // the same data again (e.g. after a height change): keep the open list
+  lastJson = js;
+  D = e.data.args.data;
+  sel = null;
+  hidePop();
+  render();
+});
+send('streamlit:componentReady', { apiVersion: 1 });
+</script>
+</body>
+</html>

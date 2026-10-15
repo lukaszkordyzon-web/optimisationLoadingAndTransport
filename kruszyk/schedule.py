@@ -149,6 +149,30 @@ def depletion(grid: dict[str, list[str]], blasts: dict[str, dict], start_t: dict
     return out
 
 
+def hauled_plan(grid: dict[str, list[str]], blasts: dict[str, dict], start_t: dict[str, float],
+                rates: dict[str, float], n: int) -> list[float]:
+    """Tonnes the schedule gives on every shift (estimate with today's loading per shift; a pile gives no more than
+    lies on it)."""
+    left = dict(start_t)
+    out = []
+    for i in range(n):
+        for p, b in blasts.items():
+            if b["avail"] == i:
+                left[p] = left.get(p, 0.0) + b["t"]
+        on: dict[str, float] = {}
+        for ex, cells in grid.items():
+            p = cells[i] if i < len(cells) else ""
+            if p and left.get(p, 0.0) > 1.0 and not (p in blasts and blasts[p]["avail"] > i):
+                on[p] = on.get(p, 0.0) + rates.get(ex, 0.0)
+        got = 0.0
+        for p, r in on.items():
+            take = min(r, left[p])
+            left[p] -= take
+            got += take
+        out.append(got)
+    return out
+
+
 def propose(excavators: list, start_t: dict[str, float], areas: list[dict], rates: dict[str, float], n: int,
             cap_t: float = math.inf) -> dict[str, list[str]]:
     """A first schedule to start from: every excavator stays on its pile while it lasts, then takes the next blast

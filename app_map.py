@@ -19,6 +19,12 @@ from kruszyk.site import (SNAP_M, along_m, level_elev, analyze_site, normalize_r
 
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 ESRI_ATTR = "Esri, Maxar, Earthstar Geographics"
+# Polish orthophoto and shaded terrain from Geoportal (GUGiK, open data) – the default background
+GEOPORTAL_ORTO = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution"
+GEOPORTAL_RELIEF = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/NMT/GRID1/WMS/ShadedRelief"
+GEOPORTAL_ATTR = "Geoportal.gov.pl (GUGiK)"
+WHITE_TILE = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/"
+              "PchI7wAAAABJRU5ErkJggg==")
 MATERIALS = ["wapień", "dolomit", "piaskowiec", "granit", "bazalt", "melafir", "żwir", "piasek", "nadkład", "inny"]
 ROAD_COLORS = {"rampa": "#d500f9", "droga": "#ffffff"}  # good contrast on light quarry imagery
 PLANNED_COLOR = "#9e9e9e"
@@ -130,8 +136,13 @@ def get_site(raw: dict) -> dict:
 def base_map(site: dict, height_zoom: int | None = None) -> folium.Map:
     m = folium.Map(location=site["center"], zoom_start=height_zoom or site.get("zoom", 16), tiles=None,
                    max_zoom=21, control_scale=True)
-    folium.TileLayer(ESRI, attr=ESRI_ATTR, name="Satelita", max_zoom=21, max_native_zoom=19).add_to(m)
-    folium.TileLayer("OpenStreetMap", name="Mapa", max_zoom=21, max_native_zoom=19).add_to(m)
+    folium.WmsTileLayer(GEOPORTAL_ORTO, layers="Raster", fmt="image/jpeg", name="Ortofoto (Geoportal)",
+                        attr=GEOPORTAL_ATTR, max_zoom=21, overlay=False).add_to(m)
+    folium.WmsTileLayer(GEOPORTAL_RELIEF, layers="Raster", fmt="image/png", name="Relief terenu (Geoportal)",
+                        attr=GEOPORTAL_ATTR, max_zoom=21, overlay=False).add_to(m)
+    folium.TileLayer(WHITE_TILE, attr=" ", name="Plan (bez podkładu)", max_zoom=22).add_to(m)
+    folium.TileLayer("OpenStreetMap", name="Mapa (OSM)", max_zoom=21, max_native_zoom=19).add_to(m)
+    folium.TileLayer(ESRI, attr=ESRI_ATTR, name="Satelita Esri (zapas)", max_zoom=21, max_native_zoom=19).add_to(m)
     return m
 
 
@@ -1175,8 +1186,81 @@ def editing_map(site: dict) -> folium.Map:
                        "circle": False, "rectangle": False, "circlemarker": False},
          edit_options={"edit": False}).add_to(m)
     _ClearSketches().add_to(m)
+    _Snapping().add_to(m)
     folium.LayerControl().add_to(m)
     return m
+
+
+class _Snapping(folium.MacroElement):
+    """Points drawn near what is already on the map stick to it: a click within 14 px of a road point, a pile corner,
+    an excavator or the crusher takes exactly that point; near a road stretch – the point on the stretch (a branch
+    road meets it). A ring shows where the point will stick."""
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        (function () {
+          var map = {{ this._parent.get_name() }};
+          var PX = 14;
+          var ring = L.circleMarker([0, 0], { radius: 9, color: '#B3122A', weight: 3, fill: false, interactive: false });
+          function shapes() {
+            var out = [];
+            map.eachLayer(function (l) {
+              if (l === ring || (l.options && l.options.interactive === false)) return;
+              if (l instanceof L.Polyline) {
+                var ll = l.getLatLngs();
+                while (ll.length && Array.isArray(ll[0])) ll = ll[0];
+                if (ll.length) out.push({ pts: ll, closed: l instanceof L.Polygon });
+              } else if (l instanceof L.Marker || l instanceof L.CircleMarker) {
+                out.push({ pts: [l.getLatLng()], closed: false });
+              }
+            });
+            return out;
+          }
+          function snap(latlng, own) {
+            var p = map.latLngToLayerPoint(latlng), best = null, bd = PX;
+            var all = shapes();
+            all.forEach(function (s) { s.pts.forEach(function (q) {
+              if (own && own.indexOf(q) >= 0) return;
+              var d = p.distanceTo(map.latLngToLayerPoint(q));
+              if (d < bd) { bd = d; best = q; }
+            }); });
+            if (best) return { ll: L.latLng(best.lat, best.lng), hit: true };
+            bd = PX * 0.8;
+            all.forEach(function (s) {
+              var n = s.pts.length;
+              for (var i = 0; i + 1 < n + (s.closed ? 1 : 0); i++) {
+                var a = map.latLngToLayerPoint(s.pts[i]), b = map.latLngToLayerPoint(s.pts[(i + 1) % n]);
+                var c = L.LineUtil.closestPointOnSegment(p, a, b), d = p.distanceTo(c);
+                if (d < bd) { bd = d; best = map.layerPointToLatLng(c); }
+              }
+            });
+            return best ? { ll: best, hit: true } : { ll: latlng, hit: false };
+          }
+          var drawing = false;
+          map.on('draw:drawstart', function () { drawing = true; });
+          map.on('draw:drawstop', function () { drawing = false; map.removeLayer(ring); });
+          map.on('mousemove', function (e) {
+            if (!drawing) return;
+            var r = snap(e.latlng);
+            if (r.hit) { ring.setLatLng(r.ll); if (!map.hasLayer(ring)) ring.addTo(map); }
+            else if (map.hasLayer(ring)) map.removeLayer(ring);
+          });
+          if (L.Draw && L.Draw.Polyline) {
+            var addVertex = L.Draw.Polyline.prototype.addVertex;
+            L.Draw.Polyline.prototype.addVertex = function (latlng) {
+              var own = this._poly ? this._poly.getLatLngs() : [];
+              return addVertex.call(this, snap(latlng, own.slice(0, Math.max(0, own.length - 0))).ll);
+            };
+          }
+          if (L.Draw && L.Draw.Marker) {
+            var move = L.Draw.Marker.prototype._onMouseMove;
+            L.Draw.Marker.prototype._onMouseMove = function (e) {
+              e.latlng = snap(e.latlng).ll;
+              return move.call(this, e);
+            };
+          }
+        })();
+        {% endmacro %}
+    """)
 
 
 class _ClearSketches(folium.MacroElement):
