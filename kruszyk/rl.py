@@ -283,3 +283,97 @@ def explain(weights: list[float]) -> pd.DataFrame:
         effect = "unika" if w > 0.05 else ("preferuje" if w < -0.05 else "obojętne")
         rows.append({"cecha": name, "waga": round(w, 3), "wpływ": effect})
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------------------------- driving signals
+# The trucks go where the foreman sends them (as today); the system only tells the driver HOW and WHEN to drive:
+# the speed (arrive when the excavator is free, slow down instead of queueing at the crusher) and when to wait
+# with the engine off. The policy learns these few settings; a month with them is compared with a month without.
+SIGNAL_PARAMS = ADVISOR_PARAMS + ["postój: kolejka pod kruszarką, od której czekać [min]",
+                                  "postój: min. udział wozideł w pracy"]
+SIGNAL_KEYS = ["arrival_margin_s", "max_slowdown", "crusher_pacing", "truck_park_queue_min", "truck_min_working_share"]
+KEEP_T = 5.0  # every 1 % of tonnes below today's costs 5 % on the objective: cheaper must not mean less
+
+
+def decode_signals(x) -> dict:
+    """Unbounded learned numbers -> the five signal settings. x = 0: the hand-made speed rules, no waiting."""
+    x = np.asarray(x, dtype=float)
+    ex = decode_excavators(np.concatenate([[0.0, 0.0, 0.0], x[3:5]]))
+    return decode_advisor(x[:3]) | {k: ex[k] for k in ("truck_park_queue_min", "truck_min_working_share")}
+
+
+def with_signals(sc: Scenario, params: dict | None = None) -> Scenario:
+    """The scenario driven with the signals (destinations as today)."""
+    v = copy.deepcopy(sc)
+    v.dispatch, v.advisor.enabled = "signals", True
+    for k, val in (params or decode_signals(np.zeros(len(SIGNAL_KEYS)))).items():
+        setattr(v.advisor if hasattr(v.advisor, k) else v.excavator_policy, k, val)
+    return v
+
+
+def today(sc: Scenario) -> Scenario:
+    v = copy.deepcopy(sc)
+    v.dispatch = "natural"
+    return v
+
+
+def _run(cases: list[tuple[Scenario, int]], params: dict | None) -> list[dict]:
+    return [kpi_row(simulate(with_signals(s, params) if params is not None else today(s), seed=seed).kpi)
+            for s, seed in cases]
+
+
+def signals_objective(rows: list[dict], base: list[dict]) -> float:
+    """Cost per tonne over the shifts, made worse by tonnes hauled below today's on the same shifts."""
+    t, t0 = sum(r["hauled_t"] for r in rows), sum(r["hauled_t"] for r in base)
+    if t <= 0:
+        return 1e6
+    short = max(0.0, 1 - t / t0) if t0 else 0.0
+    return sum(r["cost_total"] for r in rows) / t * (1 + KEEP_T * short)
+
+
+@dataclass
+class SignalsResult:
+    params: dict
+    history: pd.DataFrame
+    setup: dict
+
+
+def train_signals(states: list[Scenario], iterations: int = 8, population: int = 10, episodes: int = 3,
+                  seed: int = 0, callback: Callable[[int, int, dict], None] | None = None) -> SignalsResult:
+    """Learn the signal settings (CEM) on shifts starting from `states` – the situations of a month worked as
+    today (full piles, last tonnes of a pile, an excavator after a move …). Every iteration practises on other
+    shifts; all candidates of an iteration on the same ones, compared with today's driving on them."""
+    rng = np.random.default_rng(seed)
+    dim = len(SIGNAL_KEYS)
+    mu, sigma = np.zeros(dim), np.ones(dim)
+    n_elite = max(2, population // 4)
+    history = []
+    for it in range(iterations):
+        cases = [(states[int(rng.integers(len(states)))], 50_000 + 1000 * it + e) for e in range(episodes)]
+        base = _run(cases, None)
+        cand = mu + sigma * rng.standard_normal((population, dim))
+        cand[0] = mu
+        scored = sorted(((signals_objective(_run(cases, decode_signals(x)), base), k) for k, x in enumerate(cand)))
+        elite = np.array([cand[k] for _, k in scored[:n_elite]])
+        mu = elite.mean(axis=0)
+        sigma = elite.std(axis=0) + max(0.05, 0.5 * (1 - it / max(iterations - 1, 1)))
+        a = aggregate(base)
+        row = {"runda": it + 1, "dzis_zl_t": a["cost_per_t"], "sygnaly_zl_t": scored[0][0]}
+        history.append(row)
+        if callback:
+            callback(it + 1, iterations, row)
+    return SignalsResult(params=decode_signals(mu), history=pd.DataFrame(history),
+                         setup={"iterations": iterations, "population": population, "episodes": episodes,
+                                "states": len(states), "shifts": iterations * (population + 1) * episodes})
+
+
+def explain_signals(p: dict) -> list[str]:
+    """The learned signals in plain words."""
+    out = explain_advisor(p)
+    if p.get("truck_park_queue_min", -1.0) < 0:
+        out.append("⏸️ Wozidła nie czekają na postoju – każde jeździ bez przerwy.")
+    else:
+        out.append(f"⏸️ Gdy po kursie wozidło stałoby pod kruszarką dłużej niż **{p['truck_park_queue_min']:.0f} min**, "
+                   f"dostaje sygnał „czekaj, silnik wyłączony”. Zawsze jeździ co najmniej "
+                   f"**{100 * p['truck_min_working_share']:.0f} %** wozideł.")
+    return out

@@ -318,7 +318,7 @@ class Spotting:
         return {**SPOT_MODES[key], **(self.times.get(key) or {})}
 
 
-DISPATCH_MODES = ("natural", "fixed", "dynamic", "rl")
+DISPATCH_MODES = ("natural", "fixed", "dynamic", "rl", "signals")
 
 
 # breakdowns when nothing is known about a machine: failures per month and their total hours (assumptions)

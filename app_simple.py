@@ -516,8 +516,20 @@ def _fleet_section(base_yaml: str, vyaml: str, seed: int) -> None:
             st.info(f"Dziś pracuje {now} wozideł – dołożenie do {rec['pelna_produkcja']} podnosi produkcję.")
 
 
+SIGNALS, FULL = "📱 Sygnały jazdy (dokąd – decyduje sztygar)", "🧠 Pełny przydział (zaawansowane)"
+
+
 def step_optimize(base_raw: dict, base_yaml: str | None, seed: int):
     st.markdown("### ⑥ Optymalizacja RL – decyzje na żywo")
+    mode = st.radio("Co robi RL", [SIGNALS, FULL], horizontal=True, key="rl_mode", label_visibility="collapsed")
+    if mode == SIGNALS:
+        if base_yaml is None:
+            st.info("Najpierw opisz i zapisz kopalnię w kroku **① Kopalnia**.")
+            return
+        from app_signals import step_signals
+
+        step_signals(base_raw, base_yaml, seed)
+        return
     st.markdown(
         "Program **uczy się sam** decyzji na zmianie, żeby **koszt na tonę był jak najniższy**. Ćwiczy na setkach "
         "symulowanych zmian i z rundy na rundę wybiera lepsze reguły. Wynik porównujemy zawsze z **dziś**. Po wdrożeniu "

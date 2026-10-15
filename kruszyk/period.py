@@ -93,9 +93,11 @@ def _blends_ok(sc: Scenario, ex_pile: dict, ex_id: str, pile: str) -> bool:
     return True
 
 
-def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpis: list | None = None) -> pd.DataFrame:
+def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpis: list | None = None,
+               states: list | None = None) -> pd.DataFrame:
     """One row per shift. `progress(i, n)` is called after every shift (for a progress bar); `kpis` collects
-    the full KPIs of every shift."""
+    the full KPIs of every shift, `states` the scenario each shift starts from (piles left, excavators' places,
+    repairs carried over) – the situations a policy can practise on."""
     from .config import Blast
     from .site import haversine_m
 
@@ -397,6 +399,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
             elif e.dig_routes:  # continue along the face where the excavator stopped
                 k = min(dig_step[e.id], len(e.dig_routes) - 1)
                 e.route, e.dig_routes = e.dig_routes[k], e.dig_routes[k:]
+        if states is not None:
+            states.append(copy.deepcopy(v))
         res = simulate(v, seed=seed + 7919 * i)
         k = res.kpi
         if kpis is not None:
@@ -533,6 +537,7 @@ def optimize_period(sc: Scenario, plan: PeriodPlan, goal: str, trucks: list[int]
     for i, (n, sh, sat, disp) in enumerate(combos):
         v = sc.with_truck_count(int(n))
         v.dispatch = disp
+        v.advisor.enabled = v.advisor.enabled or disp == "signals"
         p = copy.deepcopy(plan)
         p.shifts_per_day, p.saturdays = int(sh), bool(sat)
         df = run_period(v, p, seed=seed)

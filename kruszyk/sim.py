@@ -126,7 +126,9 @@ class Simulation:
         # no knowledge of queues, of trucks on the way or of when an excavator will be free. Only the system
         # ("dynamic") and the learned policy ("rl") have that information and can give advice.
         self.informed = sc.dispatch in ("rl", "dynamic")
-        self.advice = bool(sc.advisor.enabled) and self.informed
+        # "signals": trucks go where the foreman sent them (as today); the system only gives driving signals –
+        # speed, when to arrive, the operator's last bucket. Only the way of driving differs from today.
+        self.advice = (bool(sc.advisor.enabled) and self.informed) or sc.dispatch == "signals"
         self.rng = np.random.default_rng(sc.seed if seed is None else seed)
         # breakdowns: every machine draws from its own stream, so the same shift brings the same breakdowns
         # whatever the dispatch does (fair comparison of policies; the rest of the shift stays comparable too)
@@ -313,7 +315,7 @@ class Simulation:
         if len(ok) <= 1:
             return ok[0] if ok else self.main
         fleet, rr = truck.fleet, self.sc.rolling_resistance_pct
-        if self.sc.dispatch == "natural":
+        if self.sc.dispatch in ("natural", "signals"):
             near = min(ok, key=lambda u: self._route_to(last, u.cfg.id).length_m)
             seen = {u.cfg.id: self.expected_dump_wait_s(tonnes, unit=u) for u in ok}  # what the queues look like now
             other = min(ok, key=lambda u: seen[u.cfg.id])
@@ -722,7 +724,7 @@ class Simulation:
         self.decisions += 1
         mode = self.sc.dispatch
         home = self.excavators.get(truck.home_excavator)
-        if mode in ("fixed", "natural"):
+        if mode in ("fixed", "natural", "signals"):
             # a breakdown or a finished pile is reported on the radio: the foreman sends the trucks to another
             # excavator (without knowing where they would be loaded sooner)
             working = [ex for ex in active if not self._broken(ex)] or active
@@ -1083,12 +1085,16 @@ class Simulation:
     def _park_truck(self, truck: TruckState):
         """Learned rule: rather than drive a cycle only to queue at the crusher, park with the engine off."""
         pol, env = self.sc.excavator_policy, self.env
-        if self.sc.dispatch != "rl" or pol.truck_park_queue_min < 0:
+        if self.sc.dispatch not in ("rl", "signals") or pol.truck_park_queue_min < 0:
             return
-        n = len(self.trucks)
+        # with the driving signals the trucks keep their excavators: the share is kept for every excavator's own
+        # trucks, so that waiting does not starve one pile (and spoil the feed mix)
+        group = ([t for t in self.trucks if t.home_excavator == truck.home_excavator]
+                 if self.sc.dispatch == "signals" else self.trucks)
+        n = len(group)
         may_park = n - max(1, math.ceil(pol.truck_min_working_share * n))
         t0 = env.now
-        while (sum(t.parked for t in self.trucks) - truck.parked < may_park
+        while (sum(t.parked for t in group) - truck.parked < may_park
                and self._crusher_backlog_s(truck) > pol.truck_park_queue_min * 60
                and env.now + pol.truck_park_check_min * 60 < self.work_end):
             truck.parked = True

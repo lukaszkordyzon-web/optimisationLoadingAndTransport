@@ -342,6 +342,7 @@ def test_rl_without_gain_is_not_used():
 
 def test_rl_training_in_the_app():
     at = AppTest.from_file(APP, default_timeout=600).run()
+    at.radio(key="rl_mode").set_value("🧠 Pełny przydział (zaawansowane)").run()
     next(b for b in at.button if "Optymalizuj decyzje" in b.label).click().run()
     assert not at.exception, at.exception
     entry = at.session_state["rl_by_target"]["stan obecny"]
@@ -432,3 +433,19 @@ def test_schedule_asks_where_the_excavator_goes_only_when_its_pile_runs_out():
     at.session_state["per_days"] = 1  # one day: nothing runs out, nothing to ask
     at.run()
     assert not [sb for sb in at.selectbox if sb.key and sb.key.startswith("per_next_")]
+
+
+def test_driving_signals_month_with_and_without():
+    """⑥ by default: trucks go where the foreman sends them; the system only gives driving signals. One click
+    learns them and computes the same month with and without."""
+    at = AppTest.from_file(APP, default_timeout=600)
+    at.session_state["signals_quick"] = True
+    at.run()
+    at.button(key="signals_go").click().run()
+    assert not at.exception, at.exception
+    res = at.session_state["signals"]
+    a, b = res["today"], res["signals"]
+    assert len(a) == len(b) > 0 and list(a["data"]) == list(b["data"])  # the same shifts
+    assert set(res["params"]) >= {"max_slowdown", "truck_park_queue_min"}
+    assert any("Ten sam miesiąc" in m.value for m in at.markdown)
+    assert at.session_state["raw"].get("signals")

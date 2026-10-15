@@ -60,11 +60,13 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     from app_calibration import status_line
 
     status_line(sc)
+    cmp_disp = "signals" if base_raw.get("signals") else "rl"  # the driving signals win over the full RL dispatch
     with c2:
-        if sc.rl_weights:
-            compare_rl = st.toggle("📱 Porównaj z systemem przydziału na żywo (RL)", True, key="per_rl",
-                                   help="Ten sam plan policzony drugi raz z przydziałem i zaleceniami nauczonymi w "
-                                        "module „Analiza zmiany” – widać, ile ton i złotych na okres daje wdrożenie.")
+        if base_raw.get("signals") or sc.rl_weights:
+            compare_rl = st.toggle("📱 Porównaj z sygnałami jazdy (RL)" if cmp_disp == "signals" else
+                                   "📱 Porównaj z systemem przydziału na żywo (RL)", True, key="per_rl",
+                                   help="Ten sam plan policzony drugi raz z tym, czego RL nauczył się w kroku ⑥ – "
+                                        "widać, ile ton i złotych na okres daje wdrożenie.")
         else:
             compare_rl = False
             st.caption("📱 Polityka RL nie jest jeszcze nauczona – zrób to w module **Analiza zmiany → ⑥ Optymalizacja RL**, "
@@ -229,7 +231,7 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
     n = len(plan.shifts())
     st.caption(f"{len(plan.working_days())} dni roboczych × {shifts} = **{n} zmian** · liczy się ok. {max(1, n // 3)} s")
     with t_goal:
-        _goal_tab(sc, plan, seed, compare_rl)
+        _goal_tab(sc, plan, seed, cmp_disp if compare_rl else None)
     with t_prod:
         _production_tab(base_raw, sc, plan, n)
 
@@ -243,7 +245,8 @@ def step_period(base_raw: dict, base_yaml: str | None, seed: int) -> None:
         df_rl = None
         if compare_rl:
             sc_rl = copy.deepcopy(sc)
-            sc_rl.dispatch = "rl"
+            sc_rl.dispatch = cmp_disp
+            sc_rl.advisor.enabled = sc_rl.advisor.enabled or cmp_disp == "signals"
             df_rl = run_period(sc_rl, plan, seed=seed,
                                progress=lambda i, k: bar.progress(0.5 + i / k / 2, f"z systemem RL: zmiana {i} z {k}"))
         bar.empty()
@@ -656,7 +659,7 @@ def _blast_schedule(meta: dict, sc) -> None:
         st_folium(m, height=460, use_container_width=True, returned_objects=[], key="period_blast_map")
 
 
-def _goal_tab(sc, plan: PeriodPlan, seed: int, compare_rl: bool) -> None:
+def _goal_tab(sc, plan: PeriodPlan, seed: int, compare_rl: str | None) -> None:
     """Main goal of the period and automatic choice of the plan (fleet, shifts, Saturdays); RL shown alongside."""
     st.caption("Wybierz, **na czym Ci najbardziej zależy**, i co program może zmieniać. Policzy okres dla każdej "
                "kombinacji (ta sama pogoda i awarie dla wszystkich – uczciwe porównanie) i ułoży ranking planów. "
@@ -677,7 +680,7 @@ def _goal_tab(sc, plan: PeriodPlan, seed: int, compare_rl: bool) -> None:
     shifts = c[1].multiselect("Zmian na dobę", [1, 2, 3], [plan.shifts_per_day], key="goal_shifts")
     sats = c[2].multiselect("Soboty", ["bez sobót", "z sobotami"], ["z sobotami" if plan.saturdays else "bez sobót"],
                             key="goal_sats")
-    disp = ["natural"] + (["rl"] if compare_rl else [])
+    disp = ["natural"] + ([compare_rl] if compare_rl else [])
     combos = len(trucks) * len(shifts) * len(sats) * len(disp)
     if compare_rl:
         st.caption("Każdy plan liczony dwa razy: jak dziś i z systemem RL – ranking według wersji „jak dziś”.")
@@ -698,8 +701,8 @@ def _goal_tab(sc, plan: PeriodPlan, seed: int, compare_rl: bool) -> None:
 def _goal_results(res: pd.DataFrame, goal: str, target_t: float, deadline) -> None:
     def name(r) -> str:
         return f"{r['wozidla']} wozideł · {r['zmian_na_dobe']} zm./dobę · {'z sobotami' if r['soboty'] else 'bez sobót'}"
-    with_rl = res[res["przydzial"] == "rl"]
-    res = res[res["przydzial"] != "rl"].reset_index(drop=True)
+    with_rl = res[res["przydzial"] != "natural"]
+    res = res[res["przydzial"] == "natural"].reset_index(drop=True)
     res["miejsce"] = range(1, len(res) + 1)
     best = res.iloc[0]
     ok = goal != "deadline" or (best["cel_osiagniety"] is not None and best["cel_osiagniety"] <= deadline)
@@ -720,15 +723,13 @@ def _goal_results(res: pd.DataFrame, goal: str, target_t: float, deadline) -> No
         if goal == "deadline" and r["cel_osiagniety"] is not None:
             line += f", cel osiągnięty {r['cel_osiagniety'].strftime('%d.%m')}"
         if r["koszt_na_t"] >= best["koszt_na_t"]:
-            line += (" – przy tym planie przydział wozideł nie ma pola manewru (zwykle ogranicza kruszarka albo "
-                     "przestoje), więc RL nic nie daje; różnica to losowość zmian.")
+            line += " – przy tym planie RL nie obniża kosztu (te same zmiany, pogoda i awarie w obu wersjach)."
         st.info(line)
     # what limits production: if very different fleets give (almost) the same tonnes, it's the material
     top = res[(res["zmian_na_dobe"] == best["zmian_na_dobe"]) & (res["soboty"] == best["soboty"])]
     if top["wozidla"].nunique() > 1 and top["wywiezione_t"].max() < 1.03 * top["wywiezione_t"].min():
-        st.info("💡 Przy tych samych zmianach różna liczba wozideł daje prawie tyle samo ton – **ograniczeniem jest "
-                "urobek (strzały), nie flota**. Więcej ton da częstszy / większy strzał albo nowe miejsce strzału, "
-                "a mniej wozideł obniży koszt.")
+        st.info("💡 Przy tych samych zmianach różna liczba wozideł daje prawie tyle samo ton – **ograniczeniem nie "
+                "jest flota**, tylko kruszarka, koparki albo urobek. Mniej wozideł obniży koszt.")
     show = res.drop(columns=["_df", "_score"]).copy()
     show["plan"] = [name(r) for _, r in res.iterrows()]
     show["cel_osiagniety"] = show["cel_osiagniety"].map(lambda d: d.strftime("%d.%m") if d is not None else "–")
