@@ -60,3 +60,24 @@ def test_schedule_editing_sets_area_tonnes_and_trucks():
     at.button(key="k2_d_set").click().run()
     assert not at.exception, at.exception
     assert at.session_state["work"]["dr"]["W-2"] == [{"a": "O1", "t": 5000.0}] + [{"a": "", "t": 0.0}] * 5
+
+
+def test_a_copy_of_the_schedule_is_compared_with_the_base():
+    at = AppTest.from_file(APP, default_timeout=900)
+    at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
+                                   "real_t": 0.0}
+    at.run()
+    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.button(key="k2_var_copy").click().run()
+    assert not at.exception, at.exception
+    assert list(at.session_state["variants"]) == ["A", "B"] and at.session_state["k2seg_variant"] == "B"
+    assert at.session_state["variants"]["B"] == at.session_state["variants"]["A"]
+    at.multiselect(key="k2_t_ids").set_value(["WZ-01", "WZ-02"]).run()
+    at.selectbox(key="k2_t_ex").set_value("nie jeździ").run()
+    at.button(key="k2_t_set").click().run()  # B: two trucks fewer
+    assert at.session_state["variants"]["B"]["tr"]["WZ-01"] == [""] * 4
+    assert at.session_state["variants"]["A"]["tr"]["WZ-01"] != [""] * 4  # the base stays as it was
+    at.button(key="k2_var_cmp").click().run()
+    assert not at.exception, at.exception
+    cmp = at.session_state["k2_cmp"]
+    assert set(cmp) == {"A", "B"} and cmp["A"]["t"] > 0 and cmp["A"]["plan_t"] == cmp["B"]["plan_t"]

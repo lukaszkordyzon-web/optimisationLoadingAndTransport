@@ -116,7 +116,12 @@ def _work(sc, raw: dict, n: int, cap: float, rigs: list, fire: int) -> tuple[dic
     start, near = workplan.nearest_areas(raw.get("site") or {})
     rates = rates_per_shift(raw, sc, near, cap)
     trucks = [f.id for f in sc.trucks if f.id and f.count]
-    w = st.session_state.get("work")
+    vs = st.session_state.setdefault("variants", {})
+    act = st.session_state.get("k2seg_variant") or "A"
+    if act not in vs:
+        act = next(iter(vs), "A")
+        st.session_state.k2seg_variant = act
+    w = vs.get(act, st.session_state.get("work"))
     if w is None or set(w.get("ex") or {}) != {e.id for e in sc.excavators} or set(w.get("tr") or {}) != set(trucks):
         if not start:
             start = {a["id"]: area_blast_t(a, cap) for a in sc.areas}
@@ -124,8 +129,113 @@ def _work(sc, raw: dict, n: int, cap: float, rigs: list, fire: int) -> tuple[dic
     w = workplan.fit(w, n)
     if set(w["dr"]) != {r["id"] for r in rigs}:  # rigs added / removed (or a plan from before the rigs were planned)
         w["dr"] = workplan.propose_drilling(w, sc.areas, rigs, n, cap, fire)
-    st.session_state.work = w
+    st.session_state.work = vs[act] = w  # the variant being edited
     return w, rates
+
+
+# ------------------------------------------------------------------ variants of the schedule
+def _variant_name(name: str, first: str) -> str:
+    return f"{name} (bazowy)" if name == first else name
+
+
+def _copy_variant() -> None:
+    vs = st.session_state.variants
+    act = st.session_state.get("k2seg_variant") or next(iter(vs))
+    name = next(c for c in "BCDEFGHIJKLMNOPQRSTUVWXYZ" if c not in vs)
+    vs[name] = copy.deepcopy(vs[act])
+    st.session_state.k2seg_variant = name
+
+
+def _drop_variant() -> None:
+    vs = st.session_state.variants
+    act = st.session_state.get("k2seg_variant")
+    if len(vs) > 1 and act in vs:
+        del vs[act]
+        st.session_state.k2seg_variant = next(iter(vs))
+
+
+def _diff(a: dict, b: dict, lab: list) -> list[str]:
+    """What a variant changes against the base one, in a few words per machine."""
+    out = []
+    for ar in sorted(set(a["start"]) | set(b["start"])):
+        if float(a["start"].get(ar, 0)) != float(b["start"].get(ar, 0)):
+            out.append(f"{ar}: na start {_num(b['start'].get(ar, 0))} t zamiast {_num(a['start'].get(ar, 0))} t")
+    for part in ("dr", "ex", "tr"):
+        for k in sorted(set(a.get(part) or {}) | set(b.get(part) or {})):
+            ca, cb = (a.get(part) or {}).get(k) or [], (b.get(part) or {}).get(k) or []
+            diff = [i for i in range(min(len(ca), len(cb))) if ca[i] != cb[i]]
+            if diff:
+                out.append(f"{k}: inaczej na {len(diff)} zm. (od {lab[diff[0]]})")
+    if a.get("fire") != b.get("fire"):
+        out.append("inne przesunięcia strzałów")
+    return out or ["bez zmian"]
+
+
+def _month_today(raw: dict, sc, work: dict, p: dict, rigs: list, cap: float) -> dict:
+    """The month of a variant worked as today (the same luck as every other variant – only the plan differs)."""
+    from kruszyk.config import scenario_from_dict
+    from kruszyk.period import run_period
+    from kruszyk.rl import today
+
+    plan = period_plan(p)
+    n = len(plan.shifts())
+    work = workplan.fit(work, n)
+    ev = workplan.evaluate(work, sc.areas, rigs, n, cap, int(p["fire"]), None, travel_h(raw, rigs), sc.shift_hours)
+    sim = scenario_from_dict(workplan.scenario_raw(raw, work, ev["grid"], cap))
+    plan.frozen = workplan.frozen(work, ev, n)
+    df = run_period(today(sim), plan, seed=0)
+    t, cost = float(df["wywiezione_t"].sum()), float(df["koszt_zl"].sum())
+    return {"plan_t": sum(ev["planned"]), "t": t, "cost": cost, "zl_t": cost / t if t else 0.0,
+            "fuel": float(df["paliwo_l"].sum()), "queue": float(df["kolejki_h"].sum()), "issues": len(ev["issues"])}
+
+
+def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
+    vs = st.session_state.variants
+    names = list(vs)
+    first = names[0]
+    with card("variants"):
+        c = st.columns([0.9, 3.2, 1.0, 1.0, 1.8], vertical_alignment="center")
+        c[0].markdown('<div class="k2-h4" style="margin:0">Warianty</div>', unsafe_allow_html=True)
+        with c[1]:
+            st.radio("Wariant", names, horizontal=True, key="k2seg_variant", label_visibility="collapsed",
+                     format_func=lambda x: _variant_name(x, first))
+        c[2].button("⧉ Kopia", key="k2_var_copy", on_click=_copy_variant, width="stretch",
+                    help="Nowy wariant – dokładna kopia tego, który widzisz; zmieniasz w nim, co chcesz.")
+        c[3].button("Usuń", key="k2_var_drop", on_click=_drop_variant, width="stretch", disabled=len(names) < 2)
+        go_ = c[4].button("Porównaj warianty", type="primary", key="k2_var_cmp", width="stretch",
+                          disabled=len(names) < 2,
+                          help="Każdy wariant liczony jak dziś – ten sam miesiąc, pogoda i awarie; różni się tylko plan.")
+        theme.note("Harmonogram poniżej to wybrany wariant. „Kopia” tworzy nowy z tym samym planem – zmieniasz w nim "
+                   "wiercenie, koparki albo wozidła i porównujesz. Potem wybrany wariant zatwierdzasz do porównania z RL.")
+        cache = st.session_state.setdefault("k2_cmp", {})
+        sig = {k: hashlib.md5(repr((state.raw_yaml(), w, p)).encode()).hexdigest() for k, w in vs.items()}
+        if go_:
+            bar = st.progress(0.0, "Liczę warianty…")
+            for j, (k, w) in enumerate(vs.items()):
+                if cache.get(k, {}).get("sig") != sig[k]:
+                    bar.progress(j / len(vs), f"Wariant {k}: miesiąc jak dziś…")
+                    cache[k] = {"sig": sig[k], **_month_today(raw, sc, w, p, rigs, cap)}
+            bar.empty()
+        done = [k for k in names if cache.get(k, {}).get("sig") == sig[k]]
+        if len(done) >= 2:
+            base = cache[first] if first in done else cache[done[0]]
+            rows = []
+            for k in done:
+                r = cache[k]
+                dz, dc = r["zl_t"] - base["zl_t"], r["cost"] - base["cost"]
+                rows.append([_variant_name(k, first), _num(r["plan_t"]), _num(r["t"]), f"{r['zl_t']:.2f}",
+                             "–" if k == first else f"{dz:+.2f}", _num(r["cost"]),
+                             "–" if k == first else f"{dc:+,.0f}".replace(",", " "), _num(r["fuel"]), _num(r["queue"]),
+                             str(r["issues"])])
+            st.markdown(theme.table([("Wariant", ""), ("Plan [t]", "n"), ("Wywiezione [t]", "n"), ("zł/t", "n"),
+                                     ("zł/t vs A", "n"), ("Koszt [zł]", "n"), ("Koszt vs A [zł]", "n"),
+                                     ("Paliwo [l]", "n"), ("Kolejki [h]", "n"), ("Do poprawy", "n")], rows,
+                                    numeric=set(range(1, 10)), sans={0}), unsafe_allow_html=True)
+            for k in done:
+                if k != first:
+                    theme.note(f"<b>{k} względem {first}:</b> " + " · ".join(_diff(vs[first], vs[k], lab)))
+        elif cache and not go_:
+            theme.note("Zmieniłeś coś od ostatniego porównania – kliknij „Porównaj warianty”, żeby policzyć od nowa.")
 
 
 # ------------------------------------------------------------------ screen
@@ -204,6 +314,8 @@ def step_plan() -> None:
         theme.note("W dniu strzału wozidła i koparki schodzą z wyrobiska na czas ewakuacji i strzału; przejazd koparki "
                    "na nowy usyp jest wliczony.")
 
+    _variants_card(raw, sc, p, rigs, cap, lab)
+
     # ---------------------------------------------------------------- the grid
     ev = workplan.evaluate(work, sc.areas, rigs, n, cap, int(p["fire"]), rates, travel_h(raw, rigs), sc.shift_hours)
     total = sum(ev["planned"])
@@ -224,6 +336,7 @@ def step_plan() -> None:
             day_view = st.radio("Dokładność", ["Dzień", "Zmiana"], horizontal=True, key="k2seg_view",
                                 label_visibility="collapsed") == "Dzień"
         if h[2].button("↺ Ułóż propozycję od nowa", key="k2_repropose", width="stretch"):
+            st.session_state.variants[st.session_state.get("k2seg_variant") or "A"] = None
             st.session_state.pop("work", None)
             st.rerun()
         data = _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, int(p["shifts"]))
@@ -269,7 +382,8 @@ def step_plan() -> None:
                 st.error(f"Nie da się policzyć tego planu: {e}")
                 return
             st.session_state.approved = {"key": sig, "frozen": workplan.frozen(work, ev, n), "plan": dict(p),
-                                         "work": copy.deepcopy(work), "raw": yaml_dump(sim_raw), "planned_t": total}
+                                         "work": copy.deepcopy(work), "raw": yaml_dump(sim_raw), "planned_t": total,
+                                         "variant": st.session_state.get("k2seg_variant") or "A"}
             st.session_state.pop("month", None)
             st.session_state.nav_next = "③ Symulacja"
             st.rerun()
