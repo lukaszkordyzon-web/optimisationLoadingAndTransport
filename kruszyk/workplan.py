@@ -131,11 +131,12 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
         rid = r["id"]
         cells = (work.get("dr") or {}).get(rid) or []
         queue: list[list] = []
-        prev, rows, caps = "", [], []
+        prev, rows, caps, seq = "", [], [], 0
         for i in range(n):
             a, t = cell(work, rid, i, "dr")
             if a in by_id and t > 0:
-                queue.append([a, t, t, None])
+                queue.append([a, t, t, None, seq])
+                seq += 1
                 if cap_t < math.inf and t > cap_t + 1:
                     issues.append({"kind": TOO_BIG, "rig": rid, "shift": i, "t": t, "cap": cap_t, "area": a})
             stop = bool(i < len(cells) and cells[i].get("stop"))
@@ -158,11 +159,12 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
                 drilled[qa][i] += d
                 drill_by[qa][i].append(rid)
                 row["drill"].append((qa, d))
+                row.setdefault("orders", []).append((queue[0][4], qa, d))
                 queue[0][1] -= d
                 hours -= d / per_h
                 if queue[0][1] <= 1.0:  # the order is drilled out: it is one blast
-                    qa_, _, t0, first = queue.pop(0)
-                    done_orders.append((i, rid, qa_, t0, first))
+                    qa_, _, t0, first, sq = queue.pop(0)
+                    done_orders.append((i, rid, qa_, t0, first, sq))
             row["waiting"] = sum(q[1] for q in queue)
             for q in queue:
                 queued[q[0]][i] += q[1]
@@ -176,7 +178,8 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
     k = {a: 2 for a in by_id}
     total = {a: 0.0 for a in by_id}
     warned = set()
-    for i, rid, a_id, t, first in sorted(done_orders):
+    pile_of: dict[tuple, str] = {}  # (rig, order number) -> the blast it becomes
+    for i, rid, a_id, t, first, sq in sorted(done_orders):
         a = by_id[a_id]
         reserve = float(a.get("reserves_t") or 0.0)
         if reserve > 0 and total[a_id] + t > reserve + 1:
@@ -189,11 +192,15 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
         total[a_id] += t
         pid = f"{a_id}/{k[a_id]}"
         k[a_id] += 1
+        pile_of[(rid, sq)] = pid
         delay = int((work.get("fire") or {}).get(pid, 0))
         avail = i + 1 + fire + delay
         blasts[pid] = {"area": a_id, "t": round(t), "m": round(t / float(a.get("t_per_m") or 50.0)), "done": i,
                        "fire": list(range(i + 1 + delay, avail)), "avail": avail, "auto": i + 1 + fire, "delay": delay,
                        "rig": rid, "drill": [(rid, x) for x in range(first if first is not None else i, i + 1)]}
+    for rid, rows_ in rig_rows.items():  # what the rig drills, by the blast it will be
+        for row in rows_:
+            row["piles"] = [(pile_of.get((rid, sq), f"{a}/?"), d) for sq, a, d in row.get("orders", [])]
     # ---- excavators: they load only what lies blasted, piles in order
     grid = {ex: [""] * n for ex in work["ex"]}
     quota = {ex: [0.0] * n for ex in work["ex"]}
