@@ -274,12 +274,13 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
     rows = []
     for i, (day, wd, shift_no) in enumerate(shifts):
         blasted = {}
-        def self_blast(ar, a):
-            """Fire the next strip of an extraction area (a new pile with its own route)."""
+        def self_blast(ar, a, tonnes=None):
+            """Fire the next strip of an extraction area (a new pile with its own route); `tonnes` = what the plan
+            drilled (else a blast of the area's size)."""
             pid = f"{a['id']}/{ar['next'] + 1}"
-            poly = ar["strips"][ar["next"]]
+            poly = ar["strips"][min(ar["next"], len(ar["strips"]) - 1)]  # a plan may fire more, smaller blasts
             ar["next"] += 1
-            t = min(blast_t(a), ar["reserve"])
+            t = float(tonnes) if tonnes is not None else min(blast_t(a), ar["reserve"])
             load_at = loading_point(sc.site, poly)
             try:
                 sc.routes[f"P-{pid}"] = _routes({"r": build_route(sc.site, load_at, f"P-{pid}")})["r"]
@@ -316,11 +317,11 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                                       "mw_kg": round(float(planned[pid]["tonnage_t"]) * sc.blasting.powder_factor_kg_t)})
                     continue
                 ar = next((x for x in areas if pid.startswith(f"{x['cfg']['id']}/")), None)
-                if ar is None or pid != f"{ar['cfg']['id']}/{ar['next'] + 1}" or ar["next"] >= len(ar["strips"]):
+                if ar is None or pid != f"{ar['cfg']['id']}/{ar['next'] + 1}" or not ar["strips"]:
                     warnings.append(f"Strzał {pid}: poza kolejnością pasów obszaru – pominięty")
                     continue
                 fired.add(pid)
-                self_blast(ar, ar["cfg"])
+                self_blast(ar, ar["cfg"], (frozen.get("blast_t") or {}).get(pid))
         elif shift_no == 1:  # blasts are fired on the first shift of a working day
             for pid, b in blasts.items():
                 if b.every_days > 0 and wd >= b.first_day and (wd - b.first_day) % b.every_days == 0 and pid in left:

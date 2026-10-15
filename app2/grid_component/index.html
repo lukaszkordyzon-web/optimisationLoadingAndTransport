@@ -51,14 +51,13 @@
 <body>
 <div class="wrap"><table id="grid"></table></div>
 <div class="legend">
-  <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>koparka: obszar i tys. t</span>
+  <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>wiertnica / koparka: obszar i tys. t</span>
   <span><i style="background:#DCE8F7;border:1px solid #A9C1E2"></i>wozidło: do której koparki</span>
-  <span><i style="background:#EDEFF2;border:1px solid #C3C9D1"></i>wiercenie</span>
-  <span><i style="background:#1B2733"></i>strzał</span>
+  <span><i style="background:#1B2733"></i>✸ strzał: numer usypu·kt – kliknij, żeby przesunąć</span>
   <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek leży (kt = tys. t)</span>
   <span><i style="background:#fff;border:2px solid #B3122A"></i>coś się nie zgadza – najedź, żeby zobaczyć</span>
 </div>
-<div class="hint">Kliknij komórkę koparki albo wozidła – albo przeciągnij po kilku dniach (wozidła: także po kilku wierszach) – wybierz z listy i kliknij „Zastosuj” (albo Enter).</div>
+<div class="hint">Kliknij komórkę wiertnicy, koparki albo wozidła – albo przeciągnij po kilku dniach (wozidła: także po kilku wierszach) – wybierz z listy i kliknij „Zastosuj” (albo Enter). Strzały liczy program z odwierconych ton.</div>
 <div id="pop"></div>
 <script>
 const send = (type, extra) => window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*');
@@ -66,7 +65,7 @@ let D = null, sel = null, anchor = null, dragging = false;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pop = document.getElementById('pop');
 const height = () => send('streamlit:setFrameHeight', { height: document.body.scrollHeight + (pop.style.display === 'block' ? 470 : 8) });
-const editable = r => r.kind === 'ex' || r.kind === 'tr';
+const editable = (r, c) => r.kind === 'ex' || r.kind === 'tr' || r.kind === 'dr' || (r.kind === 'fire' && c && c.p);
 
 function inSel(ri, j) {
   if (!sel) return false;
@@ -81,7 +80,7 @@ function render() {
     if (r.kind === 'group') { h += `<tr class="group"><td colspan="${D.heads.length + 1}">${esc(r.name)}</td></tr>`; return; }
     h += `<tr class="${r.kind}"><td class="name">${esc(r.name)}</td>`;
     r.cells.forEach((c, j) => {
-      const cls = [editable(r) ? 'ed' : '', c.red ? 'red' : '', inSel(ri, j) ? 'sel' : ''].join(' ');
+      const cls = [editable(r, c) ? 'ed' : '', c.red ? 'red' : '', inSel(ri, j) ? 'sel' : ''].join(' ');
       h += `<td class="${cls}" data-r="${ri}" data-j="${j}" title="${esc(c.title || '')}" style="background:${c.bg};color:${c.fg};${c.bold ? 'font-weight:700;' : ''}">${esc(c.text)}</td>`;
     });
     h += '</tr>';
@@ -98,12 +97,13 @@ grid.addEventListener('mousedown', e => {
   const kind = D.rows[c.ri].kind;
   if (e.shiftKey && anchor && anchor.kind === kind) sel = { kind, r0: kind === 'tr' ? anchor.ri : c.ri, r1: c.ri, a: anchor.j, b: c.j };
   else { sel = { kind, r0: c.ri, r1: c.ri, a: c.j, b: c.j }; anchor = { kind, ri: c.ri, j: c.j }; }
-  if (kind === 'ex') sel.r0 = sel.r1 = c.ri;
+  if (kind !== 'tr') sel.r0 = sel.r1 = c.ri;
+  if (kind === 'fire') { sel.a = sel.b = c.j; }
   dragging = true; hidePop(); render();
 });
 grid.addEventListener('mouseover', e => {
   if (!dragging) return;
-  const c = cellOf(e); if (!c || D.rows[c.ri].kind !== sel.kind) return;
+  const c = cellOf(e); if (!c || D.rows[c.ri].kind !== sel.kind || sel.kind === 'fire') return;
   const r1 = sel.kind === 'tr' ? c.ri : sel.r0;
   if (sel.b !== c.j || sel.r1 !== r1) { sel.b = c.j; sel.r1 = r1; render(); }
 });
@@ -143,24 +143,44 @@ function showPop(td) {
   const unit = D.day ? 'na dzień' : 'na zmianę';
   let h = '<button class="x" aria-label="Zamknij" onclick="hidePop()">×</button>';
   let apply;
-  if (sel.kind === 'ex') {
-    const row = rowsSel()[0], ex = D.exs.find(x => x.id === row.name) || { allowed: D.areas.map(a => a.id), rate: 0 };
+  if (sel.kind === 'fire') {
+    const row = rowsSel()[0], c = row.cells[sel.a], b = D.blasts[c.p] || {};
+    h += `<div class="t">Strzał ${esc(c.p)}</div><div class="s">${esc(Math.round(b.t))} t · ${esc(b.m)} mb · odwiercone ${esc(b.done)} · urobek od ${esc(b.avail)}${b.delay ? ' · przesunięty o ' + b.delay + ' zm.' : ''}</div>`;
+    h += '<button class="o" data-d="1"><b>o zmianę później</b><span>+1 zmiana</span></button>';
+    if (D.spd > 1) h += `<button class="o" data-d="${D.spd}"><b>o dzień później</b><span>+${D.spd} zmiany</span></button>`;
+    if (b.delay) h += '<button class="o" data-d="-1"><b>o zmianę wcześniej</b><span>−1 zmiana</span></button>';
+    if (b.delay) h += '<button class="o stand" data-d="reset"><b>jak program</b><span>zaraz po odwierceniu</span></button>';
+    pop.innerHTML = h;
+    pop.style.display = 'block';
+    const r = td.getBoundingClientRect();
+    pop.style.left = Math.max(4, Math.min(window.innerWidth - 370, r.left + window.scrollX - 120)) + 'px';
+    pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+    pop.querySelectorAll('button[data-d]').forEach(x => x.onclick = () => emit({ kind: 'fire', pile: c.p, delta: x.dataset.d === 'reset' ? null : +x.dataset.d }));
+    height();
+    return;
+  }
+  if (sel.kind === 'ex' || sel.kind === 'dr') {
+    const isRig = sel.kind === 'dr';
+    const row = rowsSel()[0];
+    const ex = (isRig ? D.rigs : D.exs).find(x => x.id === row.name) || { allowed: D.areas.map(a => a.id), rate: 0 };
     const cur = row.cells[Math.min(sel.a, sel.b)].v || { a: '', t: 0 };
     const perUnit = D.day ? D.spd : 1;
-    const t0 = cur.t ? cur.t * perUnit : Math.round((ex.rate || 1000) * 0.9 / 100) * 100 * perUnit;
     const areas = D.areas.filter(a => ex.allowed.includes(a.id));
     choice = cur.a || (areas[0] || {}).id || 'postój';
+    const rate = isRig ? ((ex.rates || {})[choice] || 0) : ex.rate;
+    const t0 = cur.t ? cur.t * perUnit : Math.round((rate || 1000) * (isRig ? 1 : 0.9) / 100) * 100 * perUnit;
     h += `<div class="t">${esc(row.name)}</div><div class="s">${esc(range())}</div>`;
     h += `<div class="lbl">Ile ton ${unit}</div><div class="row"><input id="tin" type="number" min="0" step="100" value="${Math.round(t0)}">`;
-    h += `<span>t</span>${ex.rate ? `<span style="color:#4A5562">(ładuje ok. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
-    h += '<div class="lbl">Skąd ładuje</div>';
+    h += `<span>t</span>${!isRig && ex.rate ? `<span style="color:#4A5562">(ładuje ok. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
+    h += `<div class="lbl">${isRig ? 'Gdzie wierci' : 'Skąd ładuje'}</div>`;
     areas.forEach(a => {
-      h += `<button class="o ${a.id === choice ? 'cur' : ''}" data-a="${esc(a.id)}" style="background:${a.bg}"><b>${esc(a.id)}</b><span>${esc(a.info)}</span></button>`;
+      const info = isRig ? `wierci ok. ${Math.round(((ex.rates || {})[a.id] || 0) * perUnit / 100) / 10} kt ${unit}` : a.info;
+      h += `<button class="o ${a.id === choice ? 'cur' : ''}" data-a="${esc(a.id)}" style="background:${a.bg}"><b>${esc(a.id)}</b><span>${esc(info)}</span></button>`;
     });
-    h += `<button class="o stand ${choice === 'postój' ? 'cur' : ''}" data-a="postój"><b>postój</b><span>koparka nie pracuje</span></button>`;
+    h += `<button class="o stand ${choice === 'postój' ? 'cur' : ''}" data-a="postój"><b>postój</b><span>${isRig ? 'wiertnica nie wierci' : 'koparka nie pracuje'}</span></button>`;
     apply = () => {
       const v = Math.max(0, +document.getElementById('tin').value || 0);
-      emit(Object.assign({ kind: 'ex', ex: row.name, a: s0, b: s1, area: choice, t: D.day ? v / D.spd : v }, scope()));
+      emit(Object.assign({ kind: sel.kind, ex: row.name, a: s0, b: s1, area: choice, t: D.day ? v / D.spd : v }, scope()));
     };
   } else {
     const rows = rowsSel();
@@ -178,7 +198,7 @@ function showPop(td) {
   const r = td.getBoundingClientRect();
   pop.style.left = Math.max(4, Math.min(window.innerWidth - 370, r.left + window.scrollX - 120)) + 'px';
   pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
-  const attr = sel.kind === 'ex' ? 'data-a' : 'data-x';
+  const attr = sel.kind === 'tr' ? 'data-x' : 'data-a';
   pop.querySelectorAll(`button[${attr}]`).forEach(b => b.onclick = () => pick(b, attr));
   pop.querySelector('#apply').onclick = apply;
   pop.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } };

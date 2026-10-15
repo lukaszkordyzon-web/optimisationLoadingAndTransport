@@ -1,32 +1,37 @@
-"""The month work plan a person sets (Kruszyk 2): on every shift, where every excavator loads (an extraction area) and
-how many tonnes, and which excavator every truck drives to – or that it stands.
+"""The month work plan a person sets (Kruszyk 2), on every shift:
+- every drill rig: in which extraction area it drills and how many tonnes,
+- every excavator: in which area it loads and how many tonnes,
+- every truck: to which excavator it drives – or that it stands.
 
 The program works out the rest:
-- the piles: what lies in an area at the start is its pile A/1; every next blast of the area is a new pile A/2,
-  A/3 … taken in order as the excavators of the area load out the tonnes planned (the rest of a pile is loaded
-  together with the next one);
-- drilling and firing of every blast, backwards from the shift its pile is needed (schedule.plan_blasts);
-- what does not add up: a blast that cannot be ready in time, an area without reserves, an excavator without
-  trucks, a truck sent to an excavator that stands, more tonnes than the excavator can load;
-- the frozen schedule both months follow (PeriodPlan.frozen): piles, blasts, tonnes, trucks.
+- the blasts: the tonnes drilled in an area are fired once they make up a blast of the area's size, or when the
+  rigs leave the area (what is drilled is fired); the material is there after the firing – a blast can be moved
+  later by the planner;
+- the piles: what lies in an area at the start is its pile A/1, every blast is the next pile A/2, A/3 …, loaded in
+  order;
+- an excavator loads only what is blasted: the rest of its tonnes is a shortage;
+- what a rig can drill on a shift (metres per shift × tonnes per metre of the area, less the drive from another
+  area along the roads);
+- what does not add up, and the frozen schedule both months follow (PeriodPlan.frozen).
 """
 from __future__ import annotations
 
 import copy
 import math
 
-from .schedule import area_blast_t, plan_blasts
+from .schedule import area_blast_t
 
-LATE = "late"
+SHORT = "short"
 EXHAUSTED = "exhausted"
 OVER = "over"
+DRILL_OVER = "drill_over"
 NO_TRUCKS = "no_trucks"
 IDLE_TRUCK = "idle_truck"
 
 
-def cell(work: dict, ex: str, i: int) -> tuple[str, float]:
-    """(area, tonnes) of an excavator on a shift; ("", 0) = it stands."""
-    cells = work["ex"].get(ex) or []
+def cell(work: dict, ex: str, i: int, part: str = "ex") -> tuple[str, float]:
+    """(area, tonnes) of an excavator (or, with part="dr", a drill rig) on a shift; ("", 0) = it stands."""
+    cells = (work.get(part) or {}).get(ex) or []
     c = cells[i] if i < len(cells) else {}
     a, t = str(c.get("a") or ""), float(c.get("t") or 0.0)
     return (a, t) if a and t > 0 else ("", 0.0)
@@ -34,22 +39,29 @@ def cell(work: dict, ex: str, i: int) -> tuple[str, float]:
 
 def fit(work: dict, n: int) -> dict:
     """The plan cut or extended (last shift repeated) to n shifts."""
-    out = {"start": dict(work.get("start") or {}), "ex": {}, "tr": {}}
-    for ex, cells in (work.get("ex") or {}).items():
-        cells = list(cells) or [{"a": "", "t": 0.0}]
-        out["ex"][ex] = [dict(c) for c in (cells + [cells[-1]] * n)[:n]]
+    out = {"start": dict(work.get("start") or {}), "ex": {}, "tr": {}, "dr": {}, "fire": dict(work.get("fire") or {})}
+    for part in ("ex", "dr"):
+        for k, cells in (work.get(part) or {}).items():
+            cells = list(cells) or [{"a": "", "t": 0.0}]
+            out[part][k] = [dict(c) for c in (cells + [cells[-1]] * n)[:n]]
     for tid, cells in (work.get("tr") or {}).items():
         cells = list(cells) or [""]
         out["tr"][tid] = (cells + [cells[-1]] * n)[:n]
     return out
 
 
+def rig_rate(rig: dict, area: dict, t_per_m: float = 50.0) -> float:
+    """Tonnes a rig drills on a whole shift in an area."""
+    return float(rig.get("m_per_shift") or 250.0) * float(area.get("t_per_m") or t_per_m)
+
+
 def default(excavators: list, trucks: list[str], areas: list[dict], rates: dict[str, float], n: int,
-            start: dict[str, float], near: dict[str, str] | None = None, cap_t: float = math.inf) -> dict:
+            start: dict[str, float], near: dict[str, str] | None = None, cap_t: float = math.inf,
+            rigs: list[dict] | None = None, fire: int = 1) -> dict:
     """A first plan to start from: every excavator in the area nearest to it (or the first it may work in), at about
-    90 % of what it loads today; the trucks dealt out evenly; what lies in the areas as given."""
+    90 % of what it loads today; the trucks dealt out evenly; the rigs drilling where the material runs short."""
     ids = [a["id"] for a in areas]
-    work = {"start": {a: float(start.get(a, 0.0)) for a in ids}, "ex": {}, "tr": {}}
+    work = {"start": {a: float(start.get(a, 0.0)) for a in ids}, "ex": {}, "tr": {}, "dr": {}, "fire": {}}
     for j, e in enumerate(excavators):
         allowed = [a for a in ids if e.may_work(a)] or ids
         a = (near or {}).get(e.id) if (near or {}).get(e.id) in allowed else (allowed[j % len(allowed)] if allowed else "")
@@ -58,70 +70,151 @@ def default(excavators: list, trucks: list[str], areas: list[dict], rates: dict[
     exs = [e.id for e in excavators]
     for j, tid in enumerate(trucks):
         work["tr"][tid] = [exs[j % len(exs)] if exs else ""] * n
+    work["dr"] = propose_drilling(work, areas, rigs or [], n, cap_t, fire)
     return work
 
 
-def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: float = math.inf, fire: int = 1,
-             rates: dict[str, float] | None = None) -> dict:
-    """Everything that follows from the plan: the pile of every excavator on every shift, the blasts (drilling and
-    firing), what lies on every pile, the tonnes the plan gives per shift, and the issues."""
+def propose_drilling(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: float = math.inf,
+                     fire: int = 1) -> dict:
+    """Drilling that keeps the excavators supplied: on every shift each rig drills (a whole shift) in the area that
+    would run short soonest, one blast ahead; it stands when nothing is needed."""
     by_id = {a["id"]: a for a in areas}
-    grid = {ex: [""] * n for ex in work["ex"]}
-    left: dict[str, list[float]] = {}
-    release: dict[str, int] = {}  # earliest shift the drilling of a pile may start (the area's own rule)
+    need = {a: [0.0] * n for a in by_id}  # tonnes the excavators want, cumulative up to the shift (inclusive)
+    for a in by_id:
+        acc = 0.0
+        for i in range(n):
+            acc += sum(cell(work, ex, i)[1] for ex in work["ex"] if cell(work, ex, i)[0] == a)
+            need[a][i] = acc
+    have = {a: float(work["start"].get(a, 0.0)) for a in by_id}
+    left = {a: float(by_id[a].get("reserves_t") or 0.0) for a in by_id}
+    pending = {a: 0.0 for a in by_id}  # drilled towards the next blast
+    out = {r["id"]: [] for r in rigs}
+    ahead = fire + 2
+    for i in range(n):
+        for r in rigs:
+            best, gap = "", 0.0
+            for a, ar in by_id.items():
+                g = need[a][min(n - 1, i + ahead)] + area_blast_t(ar, cap_t) - have[a]
+                if left[a] > 0 and need[a][-1] > 0 and g > gap:
+                    best, gap = a, g
+            if best:
+                size = area_blast_t(by_id[best], cap_t)
+                t = min(rig_rate(r, by_id[best]), left[best], size - pending[best])  # whole blasts, no remnants
+                t = math.floor(t / 100) * 100 or t
+                pending[best] = (pending[best] + t) % size if pending[best] + t < size - 1 else 0.0
+                have[best] += t
+                left[best] -= t
+                out[r["id"]].append({"a": best, "t": t})
+            else:
+                out[r["id"]].append({"a": "", "t": 0.0})
+    return out
+
+
+def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: float = math.inf, fire: int = 1,
+             rates: dict[str, float] | None = None, travel_h: dict | None = None, shift_h: float = 8.0) -> dict:
+    """Everything that follows from the plan: what the rigs really drill, the blasts, what lies in every area, the
+    pile every excavator loads and how much of its tonnes it gets, the tonnes per shift, and the issues."""
+    by_id = {a["id"]: a for a in areas}
     issues: list[dict] = []
+    # ---- drilling: what every rig can do on every shift (less the drive from another area)
+    drilled = {a: [0.0] * n for a in by_id}
+    drill_by: dict[str, list[list[str]]] = {a: [[] for _ in range(n)] for a in by_id}
+    rig_cap: dict[str, list[float]] = {}
+    for r in rigs:
+        rid = r["id"]
+        caps, prev, over = [], "", []
+        for i in range(n):
+            a, t = cell(work, rid, i, "dr")
+            if not a or a not in by_id:
+                caps.append(0.0)
+                continue
+            drive = (travel_h or {}).get((prev, a), 0.0) if prev and prev != a else 0.0
+            cap = rig_rate(r, by_id[a]) * max(0.0, 1.0 - drive / shift_h)
+            caps.append(cap)
+            if t > 1.05 * cap:
+                over.append(i)
+            drilled[a][i] += min(t, cap)
+            drill_by[a][i].append(rid)
+            prev = a
+        rig_cap[rid] = caps
+        if over:
+            i = over[0]
+            issues.append({"kind": DRILL_OVER, "rig": rid, "shift": i, "shifts": len(over),
+                           "t": cell(work, rid, i, "dr")[1], "cap": caps[i], "area": cell(work, rid, i, "dr")[0]})
+    # ---- blasts: drilled tonnes are fired when they make a blast, or when the drilling of the area stops
+    blasts: dict[str, dict] = {}
     for a_id, a in by_id.items():
-        s = float(work["start"].get(a_id, 0.0))
-        b = area_blast_t(a, cap_t)
+        size = area_blast_t(a, cap_t)
         reserve = float(a.get("reserves_t") or 0.0)
-        most = min(60, math.ceil(reserve / b)) if reserve > 0 else 0  # blasts the area still has
-        cum, done = [], 0.0
+        acc, total, k, since = 0.0, 0.0, 2, 0
         warned = False
         for i in range(n):
-            on = [ex for ex in work["ex"] if cell(work, ex, i)[0] == a_id]
-            d = sum(cell(work, ex, i)[1] for ex in on)
-            cum.append(done)
-            if not on:
-                continue
-            x = done + d / 2  # the pile they load at mid-shift
-            j = 1 if x < s else 2 + int((x - s) // b)
-            if j - 1 > most:
-                j = 1 + most
+            d = drilled[a_id][i]
+            if reserve > 0 and total + d > reserve + 1:
+                d = max(0.0, reserve - total)
                 if not warned:
                     warned = True
-                    issues.append({"kind": EXHAUSTED, "ex": on[0], "shift": i, "pile": f"{a_id}/{j}", "area": a_id})
+                    issues.append({"kind": EXHAUSTED, "area": a_id, "shift": i})
+            acc += d
+            total += d
+            ready = []
+            while acc >= size - 1e-6:
+                ready.append(size)
+                acc -= size
+            stops = acc > 1.0 and (i + 1 >= n or drilled[a_id][i + 1] <= 0)
+            if stops and i + 1 < n:  # the rigs leave the area: what is drilled is fired
+                ready.append(acc)
+                acc = 0.0
+            for t in ready:
+                pid = f"{a_id}/{k}"
+                k += 1
+                delay = int((work.get("fire") or {}).get(pid, 0))
+                avail = i + 1 + fire + delay
+                blasts[pid] = {"area": a_id, "t": round(t), "m": round(t / float(a.get("t_per_m") or 50.0)), "done": i,
+                               "fire": list(range(i + 1 + delay, avail)), "avail": avail, "auto": i + 1 + fire,
+                               "delay": delay,
+                               "drill": [(rid, x) for x in range(since, i + 1) for rid in drill_by[a_id][x]]}
+                since = i + 1
+    # ---- excavators: they load only what lies blasted, piles in order
+    grid = {ex: [""] * n for ex in work["ex"]}
+    quota = {ex: [0.0] * n for ex in work["ex"]}
+    area_left: dict[str, list[float]] = {}
+    short: dict[str, list[float]] = {}
+    for a_id in by_id:
+        s = float(work["start"].get(a_id, 0.0))
+        piles = [(f"{a_id}/1", s, -1)] + sorted(((p, float(b["t"]), b["avail"]) for p, b in blasts.items()
+                                                 if b["area"] == a_id), key=lambda x: x[2])
+        bounds, c = [], 0.0
+        for p, t, av in piles:
+            c += t
+            bounds.append((p, c, av))
+        taken, lying, miss = 0.0, [], [0.0] * n
+        for i in range(n):
+            there = sum(t for _, t, av in piles if av <= i)
+            lying.append(max(0.0, there - taken))
+            on = [ex for ex in work["ex"] if cell(work, ex, i)[0] == a_id]
+            want = sum(cell(work, ex, i)[1] for ex in on)
+            if not on:
+                continue
+            got = min(want, max(0.0, there - taken))
+            miss[i] = want - got
+            x = taken + got / 2 if got > 0 else max(0.0, taken - 1.0)
+            pile = next((p for p, cb, av in bounds if x < cb and av <= i), None)
+            if pile is None:  # nothing blasted yet: it waits where the material will be
+                pile = next((p for p, cb, av in bounds if x < cb), bounds[-1][0])
             for ex in on:
-                grid[ex][i] = f"{a_id}/{j}"
-            done += d
-        used = {int(p.rsplit("/", 1)[1]) for cells in grid.values() for p in cells if p.startswith(f"{a_id}/")}
-        below = a.get("drill_below_t")
-        if below is not None and below == below:  # drilling starts when this little is left to dig in the area
-            for j in sorted(used - {1}):
-                end_prev = s + (j - 2) * b  # what lies in the area before this blast
-                release[f"{a_id}/{j}"] = next((i for i, c in enumerate(cum) if end_prev - c <= float(below)), n)
-        for j in sorted(used | ({1} if s > 0 else set())):
-            lo = 0.0 if j == 1 else s + (j - 2) * b
-            hi = s if j == 1 else lo + b
-            left[f"{a_id}/{j}"] = [max(0.0, min(hi - lo, hi - c)) for c in cum]
-    start_piles = {f"{a}/1" for a in by_id}
-    blasts = plan_blasts(grid, areas, rigs, n, cap_t, fire, skip=start_piles, release=release)
-    for p, bl in blasts.items():  # nothing lies there before the blast
-        if p in left:
-            left[p] = [v if i >= bl["avail"] else 0.0 for i, v in enumerate(left[p])]
-    planned = []
-    for i in range(n):
-        got = 0.0
-        for ex in work["ex"]:
-            p = grid[ex][i]
-            if p and not (p in blasts and blasts[p]["avail"] > i):
-                got += cell(work, ex, i)[1]
-        planned.append(got)
-    seen = set()
-    for ex, cells in grid.items():
-        for i, p in enumerate(cells):
-            if p in blasts and blasts[p]["avail"] > i and (ex, p) not in seen:
-                seen.add((ex, p))
-                issues.append({"kind": LATE, "ex": ex, "shift": i, "pile": p, "avail": blasts[p]["avail"]})
+                grid[ex][i] = pile
+                quota[ex][i] = cell(work, ex, i)[1] * (got / want if want else 0.0)
+            taken += got
+        area_left[a_id] = lying
+        short[a_id] = miss
+        if any(m > 1 for m in miss):
+            i = next(j for j, m in enumerate(miss) if m > 1)
+            exs = sorted({ex for j, m in enumerate(miss) if m > 1 for ex in work["ex"] if cell(work, ex, j)[0] == a_id})
+            issues.append({"kind": SHORT, "area": a_id, "shift": i, "t": sum(miss), "ex": ", ".join(exs),
+                           "shifts": sum(1 for m in miss if m > 1)})
+    planned = [sum(quota[ex][i] for ex in quota) for i in range(n)]
+    # ---- excavators and trucks
     for ex in work["ex"]:
         r = (rates or {}).get(ex, 0.0)
         over = [i for i in range(n) if r and cell(work, ex, i)[1] > 1.1 * r]
@@ -136,17 +229,41 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
         idle = [i for i, x in enumerate(cells[:n]) if x and cell(work, x, i)[1] <= 0]
         if idle:
             issues.append({"kind": IDLE_TRUCK, "truck": tid, "ex": cells[idle[0]], "shift": idle[0], "shifts": len(idle)})
-    return {"grid": grid, "blasts": blasts, "left": left, "planned": planned, "issues": issues}
+    return {"grid": grid, "quota": quota, "blasts": blasts, "area_left": area_left, "short": short,
+            "drilled": drilled, "rig_cap": rig_cap, "planned": planned, "issues": issues}
 
 
 def frozen(work: dict, ev: dict, n: int) -> dict:
-    """The plan for PeriodPlan.frozen: per shift the excavators' piles, the blasts that become ready, the tonnes of
-    every excavator and where every truck drives."""
+    """The plan for PeriodPlan.frozen: per shift the excavators' piles, the blasts that become ready (with their
+    tonnes), the tonnes every excavator gets and where every truck drives."""
     grid, blasts = ev["grid"], ev["blasts"]
     return {"ex": [{ex: cells[i] for ex, cells in grid.items() if cells[i]} for i in range(n)],
-            "blasts": [sorted(p for p, b in blasts.items() if b["avail"] == i) for i in range(n)],
-            "quota": [{ex: cell(work, ex, i)[1] for ex in work["ex"]} for i in range(n)],
+            "blasts": [sorted((p for p, b in blasts.items() if b["avail"] == i),
+                              key=lambda p: (p.rsplit("/", 1)[0], int(p.rsplit("/", 1)[1]))) for i in range(n)],
+            "blast_t": {p: float(b["t"]) for p, b in blasts.items()},
+            "quota": [{ex: ev["quota"][ex][i] for ex in work["ex"]} for i in range(n)],
             "trucks": [{tid: (cells[i] if i < len(cells) else "") for tid, cells in work["tr"].items()} for i in range(n)]}
+
+
+def area_travel_h(site: dict, rigs: list[dict]) -> dict[tuple[str, str], float]:
+    """Hours a rig drives between every two areas along the roads (the slowest rig's speed)."""
+    from .site import build_route, loading_point
+
+    areas = [a for a in site.get("areas", []) if len(a.get("polygon") or []) >= 3 and a.get("active", True)]
+    kmh = min([float(r.get("speed_kmh") or 2.0) for r in rigs] or [2.0])
+    out = {}
+    for a in areas:
+        for b in areas:
+            if a["id"] == b["id"]:
+                continue
+            try:
+                r = build_route(copy.deepcopy(site), loading_point(site, a["polygon"]), "rig",
+                                end=loading_point(site, b["polygon"]), end_name="obszar")
+                km = sum(s["length_m"] for s in r["segments"]) / 1000
+            except ValueError:
+                continue
+            out[(a["id"], b["id"])] = km / max(kmh, 0.1)
+    return out
 
 
 def scenario_raw(raw: dict, work: dict, grid: dict[str, list[str]], cap_t: float = math.inf) -> dict:

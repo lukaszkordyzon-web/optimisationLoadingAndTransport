@@ -72,26 +72,42 @@ def test_tonnes_the_schedule_gives():
     assert hauled_plan(grid, {}, {"U-01": 2500}, {"K-1": 1000}, 4) == [1000, 1000, 500, 0]  # no more than lies there
 
 
-def test_work_plan_numbers_piles_of_an_area_and_blasts_them_in_time():
+def test_drilled_tonnes_are_blasted_and_only_then_loaded():
     from kruszyk import workplan
 
-    work = {"start": {"A": 3000.0}, "ex": {"K-1": [{"a": "A", "t": 1000.0}] * 10}, "tr": {"WZ-01": ["K-1"] * 10}}
-    ev = workplan.evaluate(work, AREAS, RIG, 10, fire=1)
+    rig = [{"id": "W-1", "m_per_shift": 200}]  # 200 mb × 30 t/mb = 6000 t a shift in A
+    work = {"start": {"A": 3000.0}, "ex": {"K-1": [{"a": "A", "t": 1000.0}] * 10}, "tr": {"WZ-01": ["K-1"] * 10},
+            "dr": {"W-1": [{"a": "A", "t": 6000.0}] * 2 + [{"a": "", "t": 0.0}] * 8}}
+    ev = workplan.evaluate(work, AREAS, rig, 10, fire=1)
+    b = ev["blasts"]["A/2"]
+    assert b["t"] == 12000 and b["done"] == 1 and b["fire"] == [2] and b["avail"] == 3  # 2 shifts drilled = 1 blast
     assert ev["grid"]["K-1"][:3] == ["A/1"] * 3 and ev["grid"]["K-1"][3] == "A/2"  # 3000 t lie there: 3 shifts
-    assert ev["blasts"]["A/2"]["avail"] == 3 and not ev["blasts"]["A/2"]["late"]  # fired just in time
     assert ev["planned"] == [1000.0] * 10 and not ev["issues"]
     fr = workplan.frozen(work, ev, 10)
-    assert fr["quota"][0] == {"K-1": 1000.0} and fr["trucks"][0] == {"WZ-01": "K-1"} and fr["blasts"][3] == ["A/2"]
+    assert fr["blasts"][3] == ["A/2"] and fr["blast_t"]["A/2"] == 12000 and fr["quota"][0] == {"K-1": 1000.0}
+
+
+def test_rig_leaving_fires_what_is_drilled_and_a_blast_can_be_moved():
+    from kruszyk import workplan
+
+    rig = [{"id": "W-1", "m_per_shift": 100}]  # 3000 t a shift
+    work = {"start": {"A": 0.0}, "ex": {"K-1": [{"a": "", "t": 0.0}] * 6}, "tr": {},
+            "dr": {"W-1": [{"a": "A", "t": 3000.0}] + [{"a": "", "t": 0.0}] * 5}, "fire": {"A/2": 2}}
+    ev = workplan.evaluate(work, AREAS, rig, 6, fire=1)
+    b = ev["blasts"]["A/2"]
+    assert b["t"] == 3000 and b["auto"] == 2 and b["avail"] == 4 and b["delay"] == 2
 
 
 def test_work_plan_issues():
     from kruszyk import workplan
 
+    rig = [{"id": "W-1", "m_per_shift": 100}]
     work = {"start": {"A": 0.0}, "ex": {"K-1": [{"a": "A", "t": 3000.0}] * 2, "K-2": [{"a": "", "t": 0.0}] * 2},
-            "tr": {"WZ-01": ["K-2"] * 2}}
-    ev = workplan.evaluate(work, AREAS, RIG, 2, fire=1, rates={"K-1": 1500.0})
+            "tr": {"WZ-01": ["K-2"] * 2}, "dr": {"W-1": [{"a": "A", "t": 9000.0}] * 2}}
+    ev = workplan.evaluate(work, AREAS, rig, 2, fire=1, rates={"K-1": 1500.0})
     kinds = {i["kind"] for i in ev["issues"]}
-    assert {workplan.LATE, workplan.OVER, workplan.NO_TRUCKS, workplan.IDLE_TRUCK} <= kinds
+    assert {workplan.SHORT, workplan.OVER, workplan.NO_TRUCKS, workplan.IDLE_TRUCK, workplan.DRILL_OVER} <= kinds
+    assert ev["planned"] == [0.0, 0.0]  # nothing blasted yet: nothing to load
 
 
 def test_month_follows_the_work_plan():
@@ -103,7 +119,7 @@ def test_month_follows_the_work_plan():
     n, cap = 4, sc.blasting.max_blast_t()
     work = {"start": {"O2": 3000.0, "O3": 7000.0},
             "ex": {"K-1": [{"a": "O2", "t": 1000.0}] * n, "K-2": [{"a": "O3", "t": 1500.0}] * 2 + [{"a": "", "t": 0}] * 2},
-            "tr": {f.id: (["K-1"] * n if j < 3 else ["K-2"] * 2 + [""] * 2) for j, f in enumerate(sc.trucks)}}
+            "tr": {f.id: (["K-1"] * n if j < 3 else ["K-2"] * 2 + [""] * 2) for j, f in enumerate(sc.trucks)}, "dr": {}}
     ev = workplan.evaluate(work, sc.areas, raw["drills"], n, cap)
     from kruszyk.config import scenario_from_dict
 
@@ -114,14 +130,3 @@ def test_month_follows_the_work_plan():
     assert all(df["wywiezione_t"] <= 2500 + 40)  # never more than the plan's tonnes (+ the last truckload)
     assert df["z_O3/1_t"].iloc[2:].sum() == 0  # K-2 stands on the 2nd day
     assert df["z_O2/1_t"].sum() + df.get("z_O2/2_t", 0 * df["z_O2/1_t"]).sum() > 0
-
-
-def test_drilling_starts_when_the_area_rule_says():
-    from kruszyk import workplan
-
-    areas = [dict(AREAS[0], drill_below_t=2500.0)]
-    work = {"start": {"A": 3000.0}, "ex": {"K-1": [{"a": "A", "t": 500.0}] * 10}, "tr": {"WZ-01": ["K-1"] * 10}}
-    ev = workplan.evaluate(work, areas, RIG, 10, fire=1)
-    b = ev["blasts"]["A/2"]
-    assert b["drill"][0][1] == 1  # 2500 t left after the 1st shift: drilling starts on the 2nd
-    assert b["avail"] == 4 and not b["late"]  # 2 shifts of drilling + the blast; needed only on the 6th shift

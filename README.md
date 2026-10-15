@@ -16,8 +16,9 @@ streamlit run kruszyk2.py
 ```
 
 Cztery kroki: **① Kopalnia** (mapa: drogi, kruszarka, koparki, obszary wydobycia; maszyny) → **② Harmonogram**
-(Ty ustawiasz pracę: koparka – obszar i tony na dzień, wozidło – do której koparki albo „nie jeździ”; program numeruje
-usypy obszaru – na start leży /1, każdy odstrzał to kolejny – dolicza wiercenie i strzał w porę i pokazuje konflikty) → **③ Symulacja** (ta sama zmiana obok
+(Ty ustawiasz pracę: wiertnica – obszar i tony, koparka – obszar i tony, wozidło – do której koparki albo „nie
+jeździ”; program strzela odwiercone tony, gdy uzbiera się odstrzał – strzał można przesunąć – numeruje usypy obszaru
+– na start leży /1, każdy strzał to kolejny – i pokazuje konflikty, np. koparka bez odstrzelonego urobku) → **③ Symulacja** (ta sama zmiana obok
 siebie: jak dziś i z sygnałami jazdy, z komunikatami dla kierowców) → **④ Wynik** (cały miesiąc). Oba miesiące idą
 według tego samego, zatwierdzonego harmonogramu – różnią się tylko sposobem jazdy. Silnik: `kruszyk/` (wspólny
 z wersją 1), planowanie: `kruszyk/workplan.py` i `kruszyk/schedule.py`, ekrany: `app2/`. Na Streamlit Cloud: *Main file path* = `kruszyk2.py`.

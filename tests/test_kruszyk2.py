@@ -22,6 +22,7 @@ def test_whole_flow_on_the_start_mine():
     assert not at.exception, at.exception
     work = at.session_state["work"]
     assert set(work["ex"]) == {"K-1", "K-2"} and all(len(c) == 6 for c in work["ex"].values())
+    assert set(work["dr"]) == {"W-1", "W-2"}
     assert len(work["tr"]) == 6 and all(x in ("K-1", "K-2") for c in work["tr"].values() for x in c)
     at.button(key="k2_approve").click().run()
     assert at.session_state["k2_nav"] == "③ Symulacja"
@@ -53,3 +54,9 @@ def test_schedule_editing_sets_area_tonnes_and_trucks():
     at.button(key="k2_t_set").click().run()
     assert not at.exception, at.exception
     assert at.session_state["work"]["tr"]["WZ-01"] == [""] * 6
+    at.selectbox(key="k2_d_ex").set_value("W-2").run()
+    at.selectbox(key="k2_d_area").set_value("O1").run()
+    at.number_input(key="k2_d_t").set_value(5000.0).run()
+    at.button(key="k2_d_set").click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["work"]["dr"]["W-2"] == [{"a": "O1", "t": 5000.0}] * 6
