@@ -276,3 +276,25 @@ def test_flat_road_takes_the_height_where_it_leaves_the_ramp():
     site["roads"][3]["inlet_elev_m"] = 250.0
     w = analyze_site(site)["warnings"]
     assert any("rampa 2" in x and "droga 5" in x and "250" in x for x in w), w
+
+
+def test_elevation_of_every_point_gives_each_stretch_its_grade():
+    from kruszyk.site import RoadGraph, analyze_site, auto_levels, haversine_m, normalize_roads, set_road_z, z_at
+
+    site = _branching_site()
+    ramp = site["roads"][0]
+    set_road_z(ramp, [300, 295, 280, 270, 260, 250, 240, 236])  # 5 %, 15 %, 10 %, … 4 % on the 100 m stretches
+    assert ramp["grade_draw_pct"] == pytest.approx(-64 / 7, abs=0.05) and ramp["inlet_elev_m"] == 300
+    info = analyze_site(site)
+    assert not info["warnings"], info["warnings"]
+    g: RoadGraph = info["graph"]
+    for p, z in zip(ramp["coords"], ramp["z"]):
+        n = min(info["elev"], key=lambda i: haversine_m(g.nodes[i], tuple(p)))
+        assert info["elev"][n] == pytest.approx(z, abs=0.01)
+    assert z_at(ramp, ramp["coords"][1]) == pytest.approx(295, abs=0.01)
+    levels = {lv["roads"][0]: lv["elev_m"] for lv in auto_levels(site)}
+    assert levels["droga 3"] == pytest.approx(260, abs=0.1) and levels["droga 5"] == pytest.approx(236, abs=0.1)
+    # a grade typed afterwards (table / form) replaces the point elevations
+    ramp["grade_draw_pct"] = -10.0
+    normalize_roads(site)
+    assert "z" not in ramp

@@ -7,6 +7,7 @@ import folium
 import numpy as np
 import pandas as pd
 import streamlit as st
+from branca.element import Template
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
@@ -570,6 +571,7 @@ def apply_edit_drawing(site: dict, sel: str, g: dict) -> str:
         if g["type"] != "LineString":
             return "⚠️ Aby przerysować drogę / trasę, narysuj linię (/)"
         o["coords"] = _latlon(g["coordinates"])
+        o.pop("z", None)  # the old point elevations belong to the old line
         return f"✅ Przerysowano ({polyline_length_m(o['coords']):.0f} m)"
     if g["type"] != "Polygon":
         return "⚠️ Aby przerysować usyp, narysuj wielokąt (⬠)"
@@ -863,6 +865,68 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
     st.rerun()
 
 
+MAX_RAMP_PCT = 10.0  # steeper stretches are marked in the profile
+
+
+def road_points_editor(o: dict, net: dict) -> None:
+    """Elevation of every drawn point of a road (bend) and its longitudinal profile. With point elevations every
+    stretch has its own grade; without them the road has one grade along its whole length."""
+    import plotly.graph_objects as go
+
+    from kruszyk.site import chainage, road_z, set_road_z
+
+    coords = o["coords"]
+    ch = chainage(coords)
+    given = road_z(o) is not None
+    z = road_z(o) or [_node_elev(net, p) for p in coords]
+    st.markdown("**📈 Punkty drogi – rzędne i profil podłużny**")
+    st.caption(("✍️ Rzędne punktów wpisane – każdy odcinek ma nachylenie z różnicy rzędnych. " if given else
+                "Teraz: jedno nachylenie na całej drodze, rzędne niżej są z niego wyliczone. Popraw rzędne punktów "
+                "załamania i zapisz – każdy odcinek dostanie własne nachylenie. ")
+               + "Punkt 1 = początek rysowania (strzałka na mapie).")
+    df = pd.DataFrame({"punkt": range(1, len(coords) + 1), "odległość [m]": [round(c) for c in ch],
+                       "rzędna [m]": [None if v is None else round(float(v), 2) for v in z]})
+    ed = st.data_editor(df, key=f"rz_{o['uid']}_{st.session_state.obj_ver}", hide_index=True, width="stretch",
+                        disabled=["punkt", "odległość [m]"], num_rows="fixed",
+                        column_config={"rzędna [m]": st.column_config.NumberColumn(format="%.2f", step=0.1)})
+    zz = [None if pd.isna(v) else float(v) for v in ed["rzędna [m]"]]
+    if all(v is not None for v in zz) and len(zz) >= 2:
+        grades = [100 * (zz[i] - zz[i - 1]) / (ch[i] - ch[i - 1]) if ch[i] > ch[i - 1] else 0.0
+                  for i in range(1, len(zz))]
+        fig = go.Figure()
+        for i, g in enumerate(grades):
+            steep = abs(g) > MAX_RAMP_PCT
+            fig.add_scatter(x=[ch[i], ch[i + 1]], y=[zz[i], zz[i + 1]], mode="lines", showlegend=False,
+                            line=dict(color="#c8102e" if steep else "#2f4156", width=5 if steep else 3),
+                            hoverinfo="skip")
+            fig.add_annotation(x=(ch[i] + ch[i + 1]) / 2, y=(zz[i] + zz[i + 1]) / 2, text=f"{g:+.1f} %",
+                               showarrow=False, yshift=12, font=dict(color="#c8102e" if steep else "#2f4156"))
+        fig.add_scatter(x=ch, y=zz, mode="markers+text", text=[str(i + 1) for i in range(len(zz))],
+                        textposition="bottom center", marker=dict(size=8, color="#2f4156"), showlegend=False,
+                        hovertemplate="punkt %{text}: %{x:.0f} m, rzędna %{y:.1f} m<extra></extra>")
+        fig.update_layout(height=260, margin=dict(t=10, b=30, l=10, r=10), xaxis_title="odległość od początku [m]",
+                          yaxis_title="rzędna [m]")
+        st.plotly_chart(fig, width="stretch")
+        if any(abs(g) > MAX_RAMP_PCT for g in grades):
+            st.caption(f"🔴 Odcinki ponad {MAX_RAMP_PCT:g} % – sprawdź, czy wozidła tam wjadą z ładunkiem.")
+    c1, c2 = st.columns([1, 1])
+    if c1.button("💾 Zapisz rzędne punktów", key=f"rz_save_{o['uid']}", type="primary",
+                 disabled=any(v is None for v in zz)):
+        set_road_z(o, zz)
+        st.session_state.obj_ver += 1
+        st.session_state.map_flash = (f"✅ Zapisano rzędne {len(zz)} punktów drogi „{o.get('name') or o.get('id')}” – "
+                                      "zapisz kopalnię, żeby weszły do obliczeń.")
+        st.rerun()
+    if given and c2.button("↺ Jedno nachylenie na całej drodze", key=f"rz_clear_{o['uid']}",
+                           help="usuwa rzędne punktów; zostaje średnie nachylenie drogi"):
+        set_road_z(o, None)
+        st.session_state.obj_ver += 1
+        st.rerun()
+    if any(v is None for v in zz):
+        st.caption("Uzupełnij rzędne wszystkich punktów (brak rzędnej = sieć dróg nie ma jeszcze punktu "
+                   "odniesienia: wpisz rzędną kruszarki albo wlotu pochylni).")
+
+
 def _bends_text(coords: list) -> str:
     from kruszyk.physics import curve_speed_kmh
     from kruszyk.site import group_bends, polyline_bends
@@ -919,6 +983,8 @@ def edit_panel(site: dict) -> None:
             help="+ = droga wznosi się w kierunku strzałki, − = opada")))
         if st.button("⇅ Zamień: w górę ↔ w dół", key=f"esw_{k}", help="Gdy droga została narysowana w złą stronę"):
             o["grade_draw_pct"] = -float(o.get("grade_draw_pct", 0.0)) + 0.0
+            if o.get("z"):
+                o["z"] = list(reversed(o["z"]))
             st.session_state.obj_ver += 1
             st.rerun()
         put("speed_limit_kmh", float(st.number_input("Limit prędkości [km/h]", 5.0, 80.0,
@@ -1108,8 +1174,22 @@ def editing_map(site: dict) -> folium.Map:
                        "polygon": {"shapeOptions": {"color": SKETCH_COLOR}}, "marker": True,
                        "circle": False, "rectangle": False, "circlemarker": False},
          edit_options={"edit": False}).add_to(m)
+    _ClearSketches().add_to(m)
     folium.LayerControl().add_to(m)
     return m
+
+
+class _ClearSketches(folium.MacroElement):
+    """A drawn sketch disappears a moment after it was drawn: by then it has been sent to the app and drawn as
+    an object (or rejected). Otherwise the yellow sketch stays on the map – also after the object is deleted."""
+    _template = Template("""
+        {% macro script(this, kwargs) %}
+        {{ this._parent.get_name() }}.on('draw:created', function (e) {
+            var layer = e.layer;
+            setTimeout(function () { if (layer && layer.remove) { layer.remove(); } }, 2500);
+        });
+        {% endmacro %}
+    """)
 
 
 FROM_RAMP = "(ze styku z pochylnią)"
@@ -1585,7 +1665,7 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
         else:
             st.info("Wybierz typ i parametry, potem narysuj obiekt – **dodaje się sam**. "
                 "Linia = droga/rampa, wielokąt = usyp, znacznik = koparka (albo kruszarka, gdy wybrana).")
-            st.caption("Żółty = szkic (znika po odświeżeniu strony). Dodane: drogi białe, rampy fioletowe, planowane "
+            st.caption("Żółty = szkic (znika chwilę po narysowaniu, gdy obiekt już jest). Dodane: drogi białe, rampy fioletowe, planowane "
                        "szare, usypy niebieskie. Żeby poprawić, przesunąć lub usunąć obiekt – wybierz "
                        "„✏️ Edytuj / przesuń / usuń” i kliknij go na mapie.")
 
@@ -1648,6 +1728,8 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                 st.session_state.pop("info_sel", None)
                 st.rerun()
             object_editor(site, info_sel, raw_for_build)
+            if info_sel.startswith("road:"):
+                road_points_editor(find_obj(site, info_sel), analyze_site(site))
             in_form = {_base_label(f[1]) for f in _form_fields(site, info_sel.split(":", 1)[0], {})} | {"produkt"}
             props = [props[0]] + [p for p in props[1:] if _base_label(p[0]) not in in_form]
             if len(props) > 1:

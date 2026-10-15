@@ -124,6 +124,59 @@ def along_m(coords: list, p) -> tuple[float, float]:
     return best
 
 
+def road_z(road: dict) -> list[float] | None:
+    """Elevations of the road's drawn points (one per point), or None when not given / not matching the line."""
+    z, coords = road.get("z"), road.get("coords") or []
+    if not z or len(z) != len(coords) or any(v is None or v != v for v in z):
+        return None
+    return [float(v) for v in z]
+
+
+def chainage(coords: list) -> list[float]:
+    """Distance from the start of the line to each of its points [m]."""
+    out = [0.0]
+    for a, b in zip(coords, coords[1:]):
+        out.append(out[-1] + haversine_m(tuple(a), tuple(b)))
+    return out
+
+
+def z_at(road: dict, p) -> float | None:
+    """Elevation of a point on the road, linear between its drawn points (None without point elevations)."""
+    z = road_z(road)
+    if z is None:
+        return None
+    ch = chainage(road["coords"])
+    a, _ = along_m(road["coords"], p)
+    k = max(1, min(bisect.bisect_left(ch, a), len(ch) - 1))
+    span = ch[k] - ch[k - 1]
+    t = (a - ch[k - 1]) / span if span > 0 else 0.0
+    return z[k - 1] + max(0.0, min(1.0, t)) * (z[k] - z[k - 1])
+
+
+def z_grade(road: dict) -> float:
+    """Mean grade along the drawing from the point elevations [%] (kept in grade_draw_pct for the tables)."""
+    z = road_z(road)
+    L = polyline_length_m(road["coords"]) if z else 0.0
+    return round(100 * (z[-1] - z[0]) / L, 2) if L > 0 else 0.0
+
+
+def set_road_z(road: dict, z: list[float] | None) -> None:
+    """Store the elevations of the drawn points (None = back to one grade along the road)."""
+    if not z:
+        road.pop("z", None)
+        return
+    road["z"] = [round(float(v), 2) for v in z]
+    road["grade_draw_pct"] = z_grade(road)
+    road["inlet_elev_m"] = road["z"][0]
+
+
+def road_is_flat(road: dict) -> bool:
+    z = road_z(road)
+    if z is not None:
+        return max(z) - min(z) < 0.05
+    return abs(float(road.get("grade_draw_pct", road.get("grade_pct", 0.0)) or 0.0)) < 0.05
+
+
 def bays_on_road(site_or_bays, road: dict) -> list[float]:
     """Positions (m along the road) of the passing bays lying on a single-lane road."""
     bays = site_or_bays.get("passing_bays", []) if isinstance(site_or_bays, dict) else (site_or_bays or [])
@@ -185,6 +238,8 @@ class RoadGraph:
     def dz(self, u: int, v: int, w: float, ri: int) -> float:
         """Height change driving u -> v along a road edge of length w."""
         road = self.roads[ri]
+        if road_z(road) is not None:  # elevations of the drawn points: the height between them is linear
+            return z_at(road, self.nodes[v]) - z_at(road, self.nodes[u])
         if "grade_draw_pct" in road:
             g = float(road.get("grade_draw_pct") or 0.0) * w / 100
             return g if self.first.get((min(u, v), max(u, v)), u) == u else -g
@@ -255,9 +310,7 @@ class RoadGraph:
         return list(reversed(edges))
 
     def is_flat(self, ri: int) -> bool:
-        road = self.roads[ri]
-        g = road.get("grade_draw_pct", road.get("grade_pct", 0.0))
-        return abs(float(g or 0.0)) < 0.05
+        return road_is_flat(self.roads[ri])
 
     def road_name(self, ri: int) -> str:
         return self.roads[ri].get("name") or self.roads[ri].get("id") or f"droga {ri + 1}"
@@ -270,13 +323,14 @@ class RoadGraph:
     def _anchors(self) -> list[tuple[int, float, str]]:
         out = []
         for ri, road in enumerate(self.roads):
-            z = road.get("inlet_elev_m")
+            pts = road_z(road)
+            z = pts[0] if pts else road.get("inlet_elev_m")  # point elevations win over a typed inlet
             if z is None or z == "" or not road.get("coords") or (isinstance(z, float) and math.isnan(z)):
                 continue
             p = tuple(road["coords"][0])
             n = min(range(len(self.nodes)), key=lambda i: haversine_m(self.nodes[i], p), default=None)
             if n is not None:
-                kind = "rzędna wlotu" if not self.is_flat(ri) else "wpisana rzędna"
+                kind = "rzędne punktów, początek" if pts else "rzędna wlotu" if not self.is_flat(ri) else "wpisana rzędna"
                 out.append((n, float(z), f"„{self.road_name(ri)}” ({kind} {float(z):.0f} m)"))
         return out
 
@@ -378,6 +432,12 @@ def normalize_roads(site: dict) -> dict:
     towards the crusher (its last point is nearer the crusher along the network) or away from it."""
     apply_levels(site)
     roads = site.get("roads", [])
+    for r in roads:  # elevations of the drawn points: dropped when the line or its grade was changed meanwhile
+        if "z" not in r:
+            continue
+        z = road_z(r)
+        if z is None or abs(float(r.get("grade_draw_pct", 0.0) or 0.0) - z_grade(r)) > 0.01:
+            r.pop("z")
     legacy = [r for r in roads if "grade_draw_pct" not in r]
     if not legacy:
         return site
@@ -1062,7 +1122,7 @@ def auto_levels(site: dict) -> list[dict]:
         if len(flat) < len(g.roads) else set()
     found: list[dict] = []
     for ri in flat:
-        typed = g.roads[ri].get("inlet_elev_m")
+        typed = (road_z(g.roads[ri]) or [g.roads[ri].get("inlet_elev_m")])[0]
         nodes = nodes_of.get(ri, set())
         contact = [elev[n] for n in nodes & sloped_nodes if n in elev]
         if typed not in (None, "") and not (isinstance(typed, float) and math.isnan(typed)):
@@ -1094,7 +1154,7 @@ def sync_levels(site: dict) -> dict:
     if not site["levels"]:
         site.pop("levels")
         return site
-    flat = [r for r in site.get("roads", []) if r.get("active", True) and abs(float(r.get("grade_draw_pct") or 0)) < 0.05
+    flat = [r for r in site.get("roads", []) if r.get("active", True) and road_is_flat(r)
             and len(r.get("coords", [])) >= 2]
     road_level = {}
     for lv in site["levels"]:

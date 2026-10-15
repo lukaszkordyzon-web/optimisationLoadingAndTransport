@@ -403,3 +403,19 @@ def test_crusher_elevation_is_set_in_its_form():
     assert not at.exception, at.exception
     c = at.session_state["site"]["crusher"]
     assert c["elev_m"] == 512.0 and c["elev_set"]
+
+
+def test_road_point_elevations_are_edited_and_saved():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    road = next(r for r in at.session_state["site"]["roads"] if r["kind"] == "rampa")
+    at.session_state["info_sel"] = f"road:{road['uid']}"
+    at.run()
+    assert not at.exception, at.exception
+    assert any("Punkty drogi" in m.value for m in at.markdown)
+    ver = at.session_state["obj_ver"]
+    at.session_state[f"rz_{road['uid']}_{ver}"] = {"edited_rows": {0: {"rzędna [m]": 520.0}}, "added_rows": [],
+                                                   "deleted_rows": []}
+    at.button(key=f"rz_save_{road['uid']}").click().run()  # the edit and the click in one run
+    assert not at.exception, at.exception
+    saved = next(r for r in at.session_state["site"]["roads"] if r["uid"] == road["uid"])
+    assert saved["z"][0] == 520.0 and len(saved["z"]) == len(saved["coords"]) and saved["inlet_elev_m"] == 520.0
