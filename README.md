@@ -9,6 +9,19 @@ wozideł, odstrzałów, tras z rampami, parametry kruszarki), a symulator generu
 kształcie, w jakim później przyjdą z telefonów (przejazdy odcinków między geofence'ami, stany wozideł,
 załadunki, poziom kosza).
 
+## Kruszyk 2 – miesiąc z sygnałami RL i bez (nowa aplikacja)
+
+```bash
+streamlit run kruszyk2.py
+```
+
+Cztery kroki: **① Kopalnia** (mapa i maszyny) → **② Harmonogram** (Ty planujesz, gdzie ładuje każda koparka;
+program dolicza wiercenie i strzał każdego odstrzału i pokazuje konflikty) → **③ Symulacja** (ta sama zmiana obok
+siebie: jak dziś i z sygnałami jazdy, z komunikatami dla kierowców) → **④ Wynik** (cały miesiąc). Oba miesiące idą
+według tego samego, zatwierdzonego harmonogramu – różnią się tylko sposobem jazdy. Silnik: `kruszyk/` (wspólny
+z wersją 1), planowanie: `kruszyk/schedule.py`, ekrany: `app2/`. Na Streamlit Cloud: *Main file path* = `kruszyk2.py`.
+Wersja 1 (`app.py`) zostaje – opis w `ARCHIWUM.md`.
+
 ## Szybki start
 
 ```bash

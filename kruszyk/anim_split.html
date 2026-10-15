@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>/*LEAFLET_CSS*/</style>
+<script>/*LEAFLET_JS*/</script>
+<style>
+  :root { --ink:#1B2733; --muted:#4A5562; --line:#D9DDE3; --soft:#F7F8FA; --red:#B3122A; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "IBM Plex Sans", system-ui, sans-serif; background:#F3F4F6; color:var(--ink); }
+  .bar { display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; background:#fff; border:1px solid var(--line);
+         border-radius:10px; padding:10px 14px; margin-bottom:10px; }
+  .clock { font: 600 22px "IBM Plex Mono", ui-monospace, monospace; min-width:70px; }
+  button, select { font: 600 14px inherit; padding:8px 14px; border-radius:8px; border:1px solid #C3C9D1; background:#fff;
+                   color:var(--ink); cursor:pointer; }
+  button.main { background:var(--ink); color:#fff; border-color:var(--ink); min-width:110px; }
+  input[type=range] { flex:1 1 260px; }
+  .panes { display:flex; flex-wrap:wrap; gap:12px; }
+  .pane { flex:1 1 480px; min-width:0; background:#fff; border:2px solid var(--line); border-radius:12px; padding:12px;
+          display:flex; flex-direction:column; gap:10px; }
+  .pane.rl { border-color:var(--red); }
+  .tag { display:inline-block; border-radius:999px; padding:5px 12px; font-weight:700; font-size:14px; background:#E3E6EA; }
+  .rl .tag { background:var(--red); color:#fff; }
+  .sub { color:var(--muted); font-size:13px; margin-left:8px; }
+  .kpis { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; }
+  .kpi { border:1px solid #E3E6EA; border-radius:8px; padding:8px 10px; }
+  .kpi .l { font-size:12px; color:var(--muted); }
+  .kpi .v { font: 600 20px "IBM Plex Mono", ui-monospace, monospace; }
+  .rl .kpi.cost .v { color:var(--red); }
+  .map { height:430px; border-radius:8px; }
+  .msgs { min-height:118px; max-height:118px; overflow:hidden; font-size:13px; border:1px solid #E3E6EA; border-radius:8px;
+          padding:6px 10px; background:var(--soft); }
+  .msgs .m { padding:3px 0; border-bottom:1px solid #E3E6EA; }
+  .msgs .m b { font-family:"IBM Plex Mono", ui-monospace, monospace; margin-right:6px; }
+  .msgs .t { color:var(--muted); font-family:"IBM Plex Mono", ui-monospace, monospace; margin-right:6px; }
+  .msgs .none { color:var(--muted); padding:4px 0; }
+  .lbl { background:transparent; border:0; box-shadow:none; color:#fff; font-weight:700; font-size:11px;
+         text-shadow:0 0 3px #000,0 0 3px #000; padding:0; }
+  .lbl::before { display:none; }
+  .ptag { color:#fff; font-weight:700; font-size:12px; text-shadow:0 0 3px #000,0 0 3px #000; white-space:nowrap; }
+  .diff { display:flex; flex-wrap:wrap; gap:8px 24px; align-items:center; background:var(--ink); color:#fff; border-radius:10px;
+          padding:10px 16px; margin-top:10px; font-weight:600; }
+  .diff .n { font: 600 18px "IBM Plex Mono", ui-monospace, monospace; }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; color:var(--muted); }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; border:1px solid #0003; }
+  .banner { position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:1000; padding:5px 12px;
+            border-radius:8px; font-weight:700; color:#fff; display:none; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="clock" id="clock">06:00</span>
+  <button class="main" id="play">▶ Odtwarzaj</button>
+  <button id="reset" aria-label="Od początku zmiany">⟲</button>
+  <select id="speed" aria-label="Prędkość odtwarzania">
+    <option value="60">×60</option><option value="120">×120</option><option value="300" selected>×300</option><option value="600">×600</option>
+  </select>
+  <input type="range" id="time" min="0" step="10" value="0" aria-label="Czas zmiany">
+</div>
+<div class="panes">
+  <section class="pane" id="L">
+    <div><span class="tag" id="L-tag"></span><span class="sub">sztygar, bez sygnałów</span></div>
+    <div class="kpis">
+      <div class="kpi cost"><div class="l">Koszt tony</div><div class="v" id="L-cpt">–</div></div>
+      <div class="kpi"><div class="l">Wywiezione</div><div class="v" id="L-t">0 t</div></div>
+      <div class="kpi"><div class="l">Paliwo</div><div class="v" id="L-f">0 l</div></div>
+      <div class="kpi"><div class="l">W kolejce teraz</div><div class="v" id="L-q">0</div></div>
+    </div>
+    <div style="position:relative"><div class="map" id="L-map"></div><div class="banner" id="L-ban"></div></div>
+    <div class="msgs" id="L-msg"><div class="none">Kierowcy jadą jak dziś – bez komunikatów.</div></div>
+  </section>
+  <section class="pane rl" id="R">
+    <div><span class="tag" id="R-tag"></span><span class="sub">te same zlecenia sztygara, inna jazda</span></div>
+    <div class="kpis">
+      <div class="kpi cost"><div class="l">Koszt tony</div><div class="v" id="R-cpt">–</div></div>
+      <div class="kpi"><div class="l">Wywiezione</div><div class="v" id="R-t">0 t</div></div>
+      <div class="kpi"><div class="l">Paliwo</div><div class="v" id="R-f">0 l</div></div>
+      <div class="kpi"><div class="l">W kolejce teraz</div><div class="v" id="R-q">0</div></div>
+    </div>
+    <div style="position:relative"><div class="map" id="R-map"></div><div class="banner" id="R-ban"></div></div>
+    <div class="msgs" id="R-msg"></div>
+  </section>
+</div>
+<div class="diff">Różnica do tej chwili <span class="n" id="d-cpt">–</span><span class="n" id="d-fuel" style="color:#C9D2DC">–</span>
+  <span class="legend" id="legend" style="margin-left:auto;color:#C9D2DC"></span></div>
+<script>
+const D = __DATA__;
+const el = id => document.getElementById(id);
+const fmt = (v, d = 0) => v === null || v === undefined ? '–' : v.toLocaleString('pl-PL', { minimumFractionDigits: d, maximumFractionDigits: d });
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const maps = [];
+
+function makeSide(key, S) {
+  const map = L.map(key + '-map', { zoomControl: true, attributionControl: false });
+  L.tileLayer(ESRI, { maxZoom: 21, maxNativeZoom: 19 }).addTo(map);
+  const bounds = [];
+  const N = S.net;
+  N.roads.forEach(r => {
+    if (r.active === false) return;
+    L.polyline(r.coords, { color: '#000', weight: 9, opacity: 0.5 }).addTo(map);
+    L.polyline(r.coords, { color: r.kind === 'rampa' ? '#d500f9' : '#ffffff', weight: 5, dashArray: r.single ? '14 6' : null }).addTo(map);
+    r.coords.forEach(p => bounds.push(p));
+  });
+  N.piles.forEach(p => {
+    L.polygon(p.polygon, { color: '#00e5ff', weight: 2, fillOpacity: 0.2 }).addTo(map);
+    const c = p.polygon.reduce((a, q) => [a[0] + q[0] / p.polygon.length, a[1] + q[1] / p.polygon.length], [0, 0]);
+    L.marker(c, { icon: L.divIcon({ className: '', html: `<div class="ptag">${p.id}</div>` }) }).addTo(map);
+  });
+  (N.bays || []).forEach(b => L.marker([b.lat, b.lon], { icon: L.divIcon({ className: '', html: '<div class="ptag">⇆</div>' }) }).addTo(map));
+  const exM = {};
+  N.excavators.forEach(e => { bounds.push([e.lat, e.lon]); exM[e.id] = L.marker([e.lat, e.lon], { icon: L.divIcon({ className: '',
+    html: `<div class="ptag" style="transform:translate(-50%,-28px)">${e.id}</div>` }) }).addTo(map); });
+  if (N.crusher) { bounds.push([N.crusher.lat, N.crusher.lon]);
+    L.marker([N.crusher.lat, N.crusher.lon], { icon: L.divIcon({ className: '', html: `<div class="ptag" style="transform:translate(-50%,-28px)">${N.crusher.id || 'C-1'}</div>` }) }).addTo(map); }
+  (N.crushers || []).forEach(c => { bounds.push([c.lat, c.lon]);
+    L.marker([c.lat, c.lon], { icon: L.divIcon({ className: '', html: `<div class="ptag" style="transform:translate(-50%,-28px)">${c.id}</div>` }) }).addTo(map); });
+  const fit = () => bounds.length ? map.fitBounds(bounds, { padding: [30, 30] }) : map.setView(N.center || [52, 19], N.zoom || 15);
+  fit();
+  new ResizeObserver(() => map.invalidateSize()).observe(el(key + '-map'));
+  const trucks = Object.entries(S.trucks).map(([id, f]) => ({ id, f, i: 0, code: -1,
+    m: L.circleMarker([f[0][1], f[0][2]], { radius: 7, color: '#000', weight: 1, fillOpacity: 1, fillColor: '#aaa' })
+      .bindTooltip(id, { permanent: true, direction: 'right', offset: [6, 0], className: 'lbl' }).addTo(map) }));
+  const tracks = Object.entries(S.excavator_tracks || {}).filter(([id]) => exM[id]).map(([id, f]) => ({ f, m: exM[id], i: 0 }));
+  el(key + '-tag').textContent = S.label;
+  maps.push({ key, S, map, trucks, tracks, queues: new Set(S.queue_codes) });
+}
+
+function locate(o, t) {
+  const f = o.f;
+  if (t < f[o.i][0]) o.i = 0;
+  while (o.i < f.length - 2 && f[o.i + 1][0] <= t) o.i++;
+  const a = f[o.i], b = f[Math.min(o.i + 1, f.length - 1)];
+  if (t >= b[0] || b[0] === a[0]) return [b[1], b[2], t >= b[0] ? b[3] : a[3]];
+  const k = (t - a[0]) / (b[0] - a[0]);
+  return [a[1] + k * (b[1] - a[1]), a[2] + k * (b[2] - a[2]), a[3]];
+}
+
+makeSide('L', D.left);
+makeSide('R', D.right);
+el('legend').innerHTML = ['jazda_pusty', 'jazda_pelny', 'kolejka_kruszarka', 'zaladunek', 'mijanka', 'parking']
+  .map(s => `<span><i style="background:${D.colors[s]}"></i>${D.labels[s]}</span>`).join('');
+el('time').max = D.shift_s;
+
+function clock(t) {
+  const [h0, m0] = (D.start_clock || '06:00').split(':').map(Number);
+  const tot = (h0 * 60 + m0 + Math.floor(t / 60)) % 1440;
+  return `${String(Math.floor(tot / 60)).padStart(2, '0')}:${String(tot % 60).padStart(2, '0')}`;
+}
+
+let t = 0, playing = false, last = null;
+function draw() {
+  const vals = {};
+  maps.forEach(M => {
+    let q = 0;
+    M.trucks.forEach(tr => {
+      const [lat, lon, c] = locate(tr, t);
+      tr.m.setLatLng([lat, lon]);
+      if (c !== tr.code) { tr.code = c; tr.m.setStyle({ fillColor: D.colors[D.states[c]] }); }
+      if (M.queues.has(c)) q++;
+    });
+    M.tracks.forEach(o => { if (t >= o.f[0][0]) { const p = locate(o, t); o.m.setLatLng([p[0], p[1]]); } });
+    const S = M.S.series;
+    el(M.key + '-q').textContent = q;
+    const ban = el(M.key + '-ban'), win = w => w && t >= w[0] && t < w[1];
+    if (win(M.S.closure)) { ban.style.display = 'block'; ban.style.background = '#B3122A'; ban.textContent = 'STRZELANIE – wyrobisko zamknięte'; }
+    else if ((M.S.breaks || []).some(win)) { ban.style.display = 'block'; ban.style.background = '#8A5A00'; ban.textContent = 'Przerwa'; }
+    else ban.style.display = 'none';
+    if (S && S.t) {
+      const i = Math.min(Math.floor(t / 60), S.t.length - 1);
+      el(M.key + '-t').textContent = fmt(S.dumped[i]) + ' t';
+      el(M.key + '-f').textContent = fmt(S.fuel[i]) + ' l';
+      el(M.key + '-cpt').textContent = S.cpt[i] && i > 30 ? fmt(S.cpt[i], 2) + ' zł/t' : '–';
+      vals[M.key] = { cpt: i > 30 ? S.cpt[i] : null, fuel: S.fuel[i] };
+    }
+  });
+  if (D.right.signals && D.right.signals.length) {
+    const shown = D.right.signals.filter(s => s[0] <= t).slice(-5).reverse();
+    el('R-msg').innerHTML = shown.length ? shown.map(s => `<div class="m"><span class="t">${clock(s[0])}</span><b>${s[1]}</b>${s[2]}</div>`).join('')
+      : '<div class="none">Komunikaty dla kierowców pojawią się tutaj.</div>';
+  } else el('R-msg').innerHTML = '<div class="none">Brak komunikatów na tej zmianie.</div>';
+  el('clock').textContent = clock(t);
+  el('time').value = t;
+  const a = vals.L, b = vals.R;
+  if (a && b && a.cpt && b.cpt) {
+    const d = b.cpt - a.cpt;
+    el('d-cpt').textContent = (d > 0 ? '+' : '') + fmt(d, 2) + ' zł/t';
+    el('d-fuel').textContent = (b.fuel - a.fuel > 0 ? '+' : '') + fmt(b.fuel - a.fuel) + ' l paliwa';
+  }
+}
+function loop(ts) {
+  if (playing) {
+    if (last !== null) t = Math.min(D.shift_s, t + (ts - last) / 1000 * Number(el('speed').value));
+    if (t >= D.shift_s) { playing = false; el('play').textContent = '▶ Odtwarzaj'; }
+    draw();
+  }
+  last = ts;
+  requestAnimationFrame(loop);
+}
+el('play').onclick = () => { if (t >= D.shift_s) t = 0; playing = !playing; el('play').textContent = playing ? '⏸ Pauza' : '▶ Odtwarzaj'; };
+el('reset').onclick = () => { t = 0; maps.forEach(M => M.trucks.forEach(tr => tr.i = 0)); draw(); };
+el('time').oninput = e => { t = Number(e.target.value); maps.forEach(M => M.trucks.forEach(tr => tr.i = 0)); draw(); };
+draw();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

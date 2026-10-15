@@ -50,6 +50,10 @@ class PeriodPlan:
     # where an excavator goes when its pile is dug out, in order: {excavator: [pile, ...]}; the first one that is
     # blasted and free is taken, otherwise the nearest free pile
     next_piles: dict = field(default_factory=dict)
+    # a frozen schedule (from schedule_of() of an earlier run, possibly edited): per shift, where every excavator
+    # works and which blasts are fired. The period then follows it exactly – nothing is decided on the way, so two
+    # runs (e.g. today's driving and the driving signals) differ only in how the trucks drive.
+    frozen: dict | None = None
     # drilling: blasts in new places must be drilled first (0 rigs = drilling not modelled)
     drills: int = 0
     drill_speed_kmh: float = 2.0      # moving between blasts
@@ -251,6 +255,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                     r["pos"] = centroid(j["poly"])
                 r["job"] = None
 
+    frozen = plan.frozen
+    schedule: list[dict] = []  # per shift: where the excavators work, what is blasted / drilled, material lying
     rows = []
     for i, (day, wd, shift_no) in enumerate(shifts):
         blasted = {}
@@ -283,7 +289,25 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
             blast_log.append({"strzal": pid, "obszar": a["id"], "data": day, "t": t, "polygon": poly, "auto": True,
                               "mw_kg": round(t * sc.blasting.powder_factor_kg_t)})
 
-        if shift_no == 1:  # blasts are fired on the first shift of a working day
+        if frozen:  # the blasts of the frozen schedule, exactly when it says
+            for pid in (frozen["blasts"][i] if i < len(frozen["blasts"]) else []):
+                if pid in fired:
+                    continue
+                if pid in planned and not planned[pid].get("auto"):
+                    fired.add(pid)
+                    left[pid] += float(planned[pid]["tonnage_t"])
+                    blasted[pid] = float(planned[pid]["tonnage_t"])
+                    blast_log.append({"strzal": pid, "obszar": "", "data": day, "t": float(planned[pid]["tonnage_t"]),
+                                      "polygon": planned[pid].get("polygon"), "auto": False,
+                                      "mw_kg": round(float(planned[pid]["tonnage_t"]) * sc.blasting.powder_factor_kg_t)})
+                    continue
+                ar = next((x for x in areas if pid.startswith(f"{x['cfg']['id']}/")), None)
+                if ar is None or pid != f"{ar['cfg']['id']}/{ar['next'] + 1}" or ar["next"] >= len(ar["strips"]):
+                    warnings.append(f"Strzał {pid}: poza kolejnością pasów obszaru – pominięty")
+                    continue
+                fired.add(pid)
+                self_blast(ar, ar["cfg"])
+        elif shift_no == 1:  # blasts are fired on the first shift of a working day
             for pid, b in blasts.items():
                 if b.every_days > 0 and wd >= b.first_day and (wd - b.first_day) % b.every_days == 0 and pid in left:
                     left[pid] += float(b.tonnage_t)
@@ -334,7 +358,22 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
 
         # an excavator without material drives to the nearest blasted pile nobody else works
         moves, delay = [], {}
-        if plan.move_excavators:
+
+        def relocate(e, target):
+            here, there = sc.routes[ex_route[e.id]].path, sc.routes[pile_route[target]].path
+            d = haversine_m(here[0], there[0]) if here and there else 0.0
+            delay[e.id] = round(d / (move_kmh / 3.6) / 60 + plan.move_setup_min, 1)
+            moves.append(f"{e.id} → {target} ({round(d):,} m".replace(",", " ") + f"; {delay[e.id]:.0f} min)")
+            ex_pile[e.id], ex_route[e.id] = target, pile_route[target]
+            ex_croutes[e.id] = pile_croutes.get(target, {})
+
+        if frozen:
+            want = frozen["ex"][i] if i < len(frozen["ex"]) else {}
+            for e in sc.excavators:
+                target = want.get(e.id, ex_pile[e.id])
+                if target != ex_pile[e.id] and target in pile_route:
+                    relocate(e, target)
+        elif plan.move_excavators:
             for e in sc.excavators:
                 if left[ex_pile[e.id]] >= MIN_PILE_T:
                     continue
@@ -348,12 +387,11 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                     there = sc.routes[pile_route[p]].path
                     return haversine_m(here[0], there[0]) if here and there else 0.0
                 wanted = [p for p in plan.next_piles.get(e.id, []) if p in free]
-                target = wanted[0] if wanted else min(free, key=dist)
-                d = dist(target)
-                delay[e.id] = round(d / (move_kmh / 3.6) / 60 + plan.move_setup_min, 1)
-                moves.append(f"{e.id} → {target} ({round(d):,} m".replace(",", " ") + f"; {delay[e.id]:.0f} min)")
-                ex_pile[e.id], ex_route[e.id] = target, pile_route[target]
-                ex_croutes[e.id] = pile_croutes.get(target, {})
+                relocate(e, wanted[0] if wanted else min(free, key=dist))
+        schedule.append({"data": day, "zmiana": shift_no, "ex": dict(ex_pile), "blasts": list(blasted),
+                         "drill": {r["id"]: r["job"] for r in rigs if r["job"]},
+                         "zapas_t": round(sum(t for p, t in left.items() if taken.get(p))),
+                         "left": {p: round(t) for p, t in left.items() if t >= MIN_PILE_T}})
         v = copy.deepcopy(sc)
         v.shift_goal = {}  # the period has its own goal; every shift hauls what it can
         for b in v.blasts:
@@ -455,10 +493,18 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
     zero = [c for c in df.columns if (c.startswith("z_") or c.startswith("zostalo_")) and c.endswith("_t")]
     df[zero] = df[zero].fillna(0)  # piles blasted during the period have no values before their blast
     df.attrs["blasts"] = blast_log
+    df.attrs["schedule"] = schedule
     df.attrs["drilling"] = drill_log
     df.attrs["warnings"] = sorted(set(warnings))
     df.attrs["waits"] = [waits[k] for k in sorted(waits)]
     return df
+
+
+def schedule_of(df: pd.DataFrame) -> dict:
+    """The schedule a run followed, ready to freeze (PeriodPlan.frozen): per shift the excavators' piles and the
+    blasts fired."""
+    sch = df.attrs.get("schedule") or []
+    return {"ex": [dict(s["ex"]) for s in sch], "blasts": [list(s["blasts"]) for s in sch]}
 
 
 def _shares(df: pd.DataFrame) -> dict:

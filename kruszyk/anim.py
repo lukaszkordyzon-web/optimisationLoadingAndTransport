@@ -214,6 +214,59 @@ def excavator_advice(res) -> dict[str, list[str]]:
     return out
 
 
+def driver_signals(res) -> list[list]:
+    """What the drivers' phones say with the driving signals: [time s, truck, text], in time order."""
+    out = []
+    seg = res.segments
+    if len(seg) and "pace" in seg:
+        slow = seg[seg["pace"] > 1.02]
+        for (truck, _trip, leg), g in slow.groupby(["truck", "trip", "leg"], sort=False):
+            v = 3.6 * float(g["length_m"].sum()) / max(float(g["duration_s"].sum()), 1.0)
+            ex = g["excavator"].iloc[0]
+            if leg == "pusty":
+                text = f"zwolnij do {v:.0f} km/h – pod {ex} będziesz, gdy się zwolni"
+            elif leg == "pelny":
+                text = f"zwolnij do {v:.0f} km/h – kosz kruszarki pełny"
+            else:
+                continue
+            out.append([round(float(g["start_s"].min()), 1), truck, text])
+    st_ = res.states
+    if len(st_):
+        for row in st_[st_["state"] == "parking"].itertuples():
+            out.append([round(float(row.start_s), 1), row.truck,
+                        "stań na postoju i wyłącz silnik – pod kruszarką kolejka; wezwę, gdy zwolni się miejsce"])
+    return sorted(out)
+
+
+def _side(res, label: str = "") -> dict:
+    """Everything one map of the animation needs."""
+    sc = res.scenario
+    return {
+        "label": label, "trucks": trajectories(res), "net": network(sc), "series": _series(res),
+        "hopper_cap": sc.crusher.hopper_t, "excavator_tracks": res.excavator_tracks, "light": res.light_vehicles,
+        "closure": list(res.closure) if res.closure else None, "breaks": [list(b) for b in res.breaks],
+        "advice": excavator_advice(res) if sc.advisor.enabled or sc.dispatch == "signals" else None,
+        "signals": driver_signals(res) if sc.dispatch == "signals" else [],
+        "queue_codes": [STATE_CODES.index(s) for s in QUEUES],
+    }
+
+
+def split_html(left, right, left_label: str = "Jak dziś", right_label: str = "Z sygnałami RL") -> str:
+    """Two maps side by side, one clock: the same shift driven today (left) and with the signals (right)."""
+    from pathlib import Path
+
+    here = Path(__file__).parent
+    template = (here / "anim_split.html").read_text(encoding="utf-8")
+    css = (here / "vendor" / "leaflet.css").read_text(encoding="utf-8")
+    js = (here / "vendor" / "leaflet.js").read_text(encoding="utf-8")
+    sc = left.scenario
+    payload = {"shift_s": sc.shift_hours * 3600, "start_clock": sc.shift_plan.start_time, "t_start": left.t_start,
+               "states": STATE_CODES, "labels": STATE_LABELS, "colors": STATE_COLORS,
+               "left": _side(left, left_label), "right": _side(right, right_label)}
+    return (template.replace("/*LEAFLET_CSS*/", css).replace("/*LEAFLET_JS*/", js)
+            .replace("__DATA__", json.dumps(payload, separators=(",", ":"))))
+
+
 def animation_payload(res, baseline=None, label: str = "", baseline_label: str = "naturalny") -> str:
     sc = res.scenario
     payload = {
