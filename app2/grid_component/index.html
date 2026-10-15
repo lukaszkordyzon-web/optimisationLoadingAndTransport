@@ -33,6 +33,7 @@
                   font: 400 13px 'IBM Plex Sans', sans-serif; color: #1B2733; cursor: pointer; text-align: left; }
   #pop button.o b { font-family: 'IBM Plex Mono', monospace; }
   #pop button.o.cur { box-shadow: inset 0 0 0 2px #1B2733; }
+  #pop button.o.cur b::before { content: '✓ '; }
   #pop button.o:hover { box-shadow: inset 0 0 0 2px #B3122A; }
   #pop button.stand { background: #F3F4F6; color: #4A5562; }
   #pop .row { display: flex; gap: 8px; align-items: center; margin: 4px 0 10px; font-size: 13px; }
@@ -41,6 +42,9 @@
              font: 600 13px 'IBM Plex Sans', sans-serif; cursor: pointer; }
   #pop .x { position: absolute; top: 6px; right: 8px; border: 0; background: none; padding: 4px 8px; font-size: 18px;
             color: #4A5562; cursor: pointer; }
+  #pop label.sc { display: block; font-size: 13px; margin: 4px 0; cursor: pointer; line-height: 26px; }
+  #pop input[type=radio] { width: auto; margin: 0 6px 0 0; vertical-align: -1px; }
+  #pop input.sm { width: 52px; padding: 3px 6px; font-size: 13px; }
   #pop .lbl { font-size: 12px; color: #4A5562; margin: 6px 0 4px; font-weight: 600; }
 </style>
 </head>
@@ -54,14 +58,14 @@
   <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek leży (kt = tys. t)</span>
   <span><i style="background:#fff;border:2px solid #B3122A"></i>coś się nie zgadza – najedź, żeby zobaczyć</span>
 </div>
-<div class="hint">Kliknij komórkę koparki albo wozidła – albo przeciągnij po kilku dniach (wozidła: także po kilku wierszach) – i wybierz z listy.</div>
+<div class="hint">Kliknij komórkę koparki albo wozidła – albo przeciągnij po kilku dniach (wozidła: także po kilku wierszach) – wybierz z listy i kliknij „Zastosuj” (albo Enter).</div>
 <div id="pop"></div>
 <script>
 const send = (type, extra) => window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*');
 let D = null, sel = null, anchor = null, dragging = false;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pop = document.getElementById('pop');
-const height = () => send('streamlit:setFrameHeight', { height: document.body.scrollHeight + (pop.style.display === 'block' ? 340 : 8) });
+const height = () => send('streamlit:setFrameHeight', { height: document.body.scrollHeight + (pop.style.display === 'block' ? 470 : 8) });
 const editable = r => r.kind === 'ex' || r.kind === 'tr';
 
 function inSel(ri, j) {
@@ -115,45 +119,72 @@ function rowsSel() { const out = []; for (let r = Math.min(sel.r0, sel.r1); r <=
 function range() { const [s0, s1] = shifts(); return s0 === s1 ? D.labels[s0] : `${D.labels[s0]} – ${D.labels[s1]}`; }
 function emit(v) { send('streamlit:setComponentValue', { value: Object.assign(v, { nonce: Date.now() }), dataType: 'json' }); hidePop(); }
 
+let choice = null;  // the area / excavator picked in the open list
+function scopeHtml() {
+  return '<div class="lbl">Zastosuj do</div>' +
+    '<label class="sc"><input type="radio" name="sc" value="sel" checked> zaznaczonych</label>' +
+    '<label class="sc"><input type="radio" name="sc" value="all"> wszystkich dni</label>' +
+    '<label class="sc"><input type="radio" name="sc" value="around"> zaznaczonych oraz kolejnych ' +
+    '<input id="fwd" class="sm" type="number" min="0" value="5"> dni i poprzednich <input id="back" class="sm" type="number" min="0" value="0"> dni</label>' +
+    '<div class="row"><button class="ok" id="apply">Zastosuj</button></div>';
+}
+function scope() {
+  const v = (pop.querySelector('input[name="sc"]:checked') || {}).value || 'sel';
+  return { scope: v, fwd: Math.max(0, +(document.getElementById('fwd') || {}).value || 0), back: Math.max(0, +(document.getElementById('back') || {}).value || 0) };
+}
+function pick(btn, attr) {
+  pop.querySelectorAll(`button[${attr}]`).forEach(b => b.classList.remove('cur'));
+  btn.classList.add('cur');
+  choice = btn.getAttribute(attr);
+}
 function showPop(td) {
   if (!sel || !td) return;
   const [s0, s1] = shifts();
   const unit = D.day ? 'na dzień' : 'na zmianę';
   let h = '<button class="x" aria-label="Zamknij" onclick="hidePop()">×</button>';
+  let apply;
   if (sel.kind === 'ex') {
     const row = rowsSel()[0], ex = D.exs.find(x => x.id === row.name) || { allowed: D.areas.map(a => a.id), rate: 0 };
     const cur = row.cells[Math.min(sel.a, sel.b)].v || { a: '', t: 0 };
     const perUnit = D.day ? D.spd : 1;
     const t0 = cur.t ? cur.t * perUnit : Math.round((ex.rate || 1000) * 0.9 / 100) * 100 * perUnit;
+    const areas = D.areas.filter(a => ex.allowed.includes(a.id));
+    choice = cur.a || (areas[0] || {}).id || 'postój';
     h += `<div class="t">${esc(row.name)}</div><div class="s">${esc(range())}</div>`;
     h += `<div class="lbl">Ile ton ${unit}</div><div class="row"><input id="tin" type="number" min="0" step="100" value="${Math.round(t0)}">`;
     h += `<span>t</span>${ex.rate ? `<span style="color:#4A5562">(ładuje ok. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
     h += '<div class="lbl">Skąd ładuje</div>';
-    D.areas.filter(a => ex.allowed.includes(a.id)).forEach(a => {
-      h += `<button class="o ${a.id === cur.a ? 'cur' : ''}" data-a="${esc(a.id)}" style="background:${a.bg}"><b>${esc(a.id)}</b><span>${esc(a.info)}</span></button>`;
+    areas.forEach(a => {
+      h += `<button class="o ${a.id === choice ? 'cur' : ''}" data-a="${esc(a.id)}" style="background:${a.bg}"><b>${esc(a.id)}</b><span>${esc(a.info)}</span></button>`;
     });
-    h += `<button class="o stand ${cur.a ? '' : 'cur'}" data-a="postój"><b>postój</b><span>koparka nie pracuje</span></button>`;
+    h += `<button class="o stand ${choice === 'postój' ? 'cur' : ''}" data-a="postój"><b>postój</b><span>koparka nie pracuje</span></button>`;
+    apply = () => {
+      const v = Math.max(0, +document.getElementById('tin').value || 0);
+      emit(Object.assign({ kind: 'ex', ex: row.name, a: s0, b: s1, area: choice, t: D.day ? v / D.spd : v }, scope()));
+    };
   } else {
     const rows = rowsSel();
+    const cur = (rows[0].cells[Math.min(sel.a, sel.b)].text || '').split('/')[0];
+    choice = D.exs.some(x => x.id === cur) ? cur : 'nie jeździ';
     h += `<div class="t">${esc(rows.map(r => r.name).join(', '))}</div><div class="s">${esc(range())} · jeździ do:</div>`;
-    D.exs.forEach(x => { h += `<button class="o" data-x="${esc(x.id)}" style="background:${x.bg}"><b>${esc(x.id)}</b><span>wozi z tej koparki</span></button>`; });
-    h += '<button class="o stand" data-x="nie jeździ"><b>nie jeździ</b><span>postój, serwis, brak kierowcy</span></button>';
+    D.exs.forEach(x => { h += `<button class="o ${x.id === choice ? 'cur' : ''}" data-x="${esc(x.id)}" style="background:${x.bg}"><b>${esc(x.id)}</b><span>wozi z tej koparki</span></button>`; });
+    h += `<button class="o stand ${choice === 'nie jeździ' ? 'cur' : ''}" data-x="nie jeździ"><b>nie jeździ</b><span>postój, serwis, brak kierowcy</span></button>`;
+    const ids = rows.map(r => r.name);
+    apply = () => emit(Object.assign({ kind: 'tr', ids, a: s0, b: s1, ex: choice }, scope()));
   }
+  h += scopeHtml();
   pop.innerHTML = h;
   pop.style.display = 'block';
   const r = td.getBoundingClientRect();
   pop.style.left = Math.max(4, Math.min(window.innerWidth - 370, r.left + window.scrollX - 120)) + 'px';
   pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
-  if (sel.kind === 'ex') {
-    const row = rowsSel()[0];
-    pop.querySelectorAll('button[data-a]').forEach(b => b.onclick = () => {
-      const v = Math.max(0, +document.getElementById('tin').value || 0);
-      emit({ kind: 'ex', ex: row.name, a: s0, b: s1, area: b.dataset.a, t: D.day ? v / D.spd : v });
-    });
-  } else {
-    const ids = rowsSel().map(r => r.name);
-    pop.querySelectorAll('button[data-x]').forEach(b => b.onclick = () => emit({ kind: 'tr', ids, a: s0, b: s1, ex: b.dataset.x }));
-  }
+  const attr = sel.kind === 'ex' ? 'data-a' : 'data-x';
+  pop.querySelectorAll(`button[${attr}]`).forEach(b => b.onclick = () => pick(b, attr));
+  pop.querySelector('#apply').onclick = apply;
+  pop.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } };
+  ['fwd', 'back'].forEach(id => { const el = document.getElementById(id); el.onfocus = () => { pop.querySelector('input[value="around"]').checked = true; }; });
+  const tin = document.getElementById('tin');
+  if (tin) { tin.focus(); tin.select(); }
   height();
 }
 function hidePop() { pop.style.display = 'none'; height(); }

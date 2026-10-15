@@ -114,3 +114,14 @@ def test_month_follows_the_work_plan():
     assert all(df["wywiezione_t"] <= 2500 + 40)  # never more than the plan's tonnes (+ the last truckload)
     assert df["z_O3/1_t"].iloc[2:].sum() == 0  # K-2 stands on the 2nd day
     assert df["z_O2/1_t"].sum() + df.get("z_O2/2_t", 0 * df["z_O2/1_t"]).sum() > 0
+
+
+def test_drilling_starts_when_the_area_rule_says():
+    from kruszyk import workplan
+
+    areas = [dict(AREAS[0], drill_below_t=2500.0)]
+    work = {"start": {"A": 3000.0}, "ex": {"K-1": [{"a": "A", "t": 500.0}] * 10}, "tr": {"WZ-01": ["K-1"] * 10}}
+    ev = workplan.evaluate(work, areas, RIG, 10, fire=1)
+    b = ev["blasts"]["A/2"]
+    assert b["drill"][0][1] == 1  # 2500 t left after the 1st shift: drilling starts on the 2nd
+    assert b["avail"] == 4 and not b["late"]  # 2 shifts of drilling + the blast; needed only on the 6th shift

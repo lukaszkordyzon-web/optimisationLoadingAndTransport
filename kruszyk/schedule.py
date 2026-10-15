@@ -32,7 +32,8 @@ def area_of(pid: str, areas: dict) -> tuple[str, int] | None:
 
 
 def plan_blasts(grid: dict[str, list[str]], areas: list[dict], rigs: list[dict], n: int, cap_t: float = math.inf,
-                fire_shifts: int = 1, t_per_m: float = 50.0, skip=frozenset()) -> dict[str, dict]:
+                fire_shifts: int = 1, t_per_m: float = 50.0, skip=frozenset(),
+                release: dict[str, int] | None = None) -> dict[str, dict]:
     """Drilling and firing of every new pile the grid uses. Returns {pile: {area, t, m, need, avail, fire, drill,
     late}}: `avail` = first shift the pile can be loaded (the planner's first use, or later when it cannot be
     ready), `fire` = the shifts of the blast (evacuation, firing, airing) just before it, `drill` = [(rig, shift)]."""
@@ -75,7 +76,21 @@ def plan_blasts(grid: dict[str, list[str]], areas: list[dict], rigs: list[dict],
                             best = (s, rid, d)
                         break
         late = False
-        if ready or not rig_m:  # drilled already (or drilling not modelled): only the firing is left
+        rel = (release or {}).get(pid)
+        if rel is not None and not ready and rig_m:
+            # the area's rule: drilling starts once this little is left to dig – on the first free rig, fired when drilled
+            lo = max(rel, prev["avail"] if prev else 0)
+            cands = []
+            for rid, mps in rig_m.items():
+                d = max(1, math.ceil(m / mps))
+                s = lo
+                while any(x in busy[rid] for x in range(s, s + d)):
+                    s += 1
+                cands.append((s + d, s, rid, d))
+            end, s, rid, d = min(cands)
+            avail = max(end + fire_shifts, prev["avail"] if prev else 0)
+            drill = [(rid, x) for x in range(s, s + d)]
+        elif ready or not rig_m:  # drilled already (or drilling not modelled): only the firing is left
             avail, drill = max(first, fire_shifts), []
         elif best:
             s, rid, d = best

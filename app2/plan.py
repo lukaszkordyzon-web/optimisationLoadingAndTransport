@@ -91,6 +91,7 @@ def rates_per_shift(raw: dict, sc, near: dict, cap: float) -> dict[str, float]:
         probe = workplan.scenario_raw(raw, {"start": {a: 1e6 for a in ids}}, grid, cap)
     except (ValueError, KeyError):
         return {}
+    probe["blasting"]["enabled"] = False  # an ordinary shift, without a blast
     r, hours = _rates(yaml_dump(probe))
     return {k: v * hours for k, v in r.items()}
 
@@ -180,9 +181,10 @@ def step_plan() -> None:
                     + " (z Maszyn)") if rigs else "Brak wiertnic w pracy – odstrzały bez wiercenia (Maszyny).")
         names = list(FIRE)
         cur = next((k for k, x in FIRE.items() if x == int(p["fire"])), names[0])
-        p["fire"] = FIRE[st.selectbox("Strzał (z ewakuacją i przewietrzeniem)", names, index=names.index(cur),
-                                      key="k2_fire")]
-        theme.note("W dniu strzału maszyny schodzą na czas strzału; przejazd koparki na nowy usyp jest wliczony.")
+        p["fire"] = FIRE[st.selectbox("Urobek dostępny", names, index=names.index(cur), key="k2_fire")]
+        _blast_hours(raw)
+        theme.note("W dniu strzału wozidła i koparki schodzą z wyrobiska na czas ewakuacji i strzału; przejazd koparki "
+                   "na nowy usyp jest wliczony.")
 
     # ---------------------------------------------------------------- the grid
     ev = workplan.evaluate(work, sc.areas, rigs, n, cap, int(p["fire"]), rates)
@@ -210,10 +212,11 @@ def step_plan() -> None:
         val = grid_component(data=data, key="k2_gridc", default=None)
         if val and val.get("nonce") != st.session_state.get("k2_grid_nonce"):
             st.session_state.k2_grid_nonce = val["nonce"]
+            a, b = _span(int(val["a"]), int(val["b"]), val, shifts)
             if val.get("kind") == "tr":
-                _set_trucks(val["ids"], int(val["a"]), int(val["b"]), val["ex"])
+                _set_trucks(val["ids"], a, b, val["ex"])
             else:
-                _set_ex(val["ex"], int(val["a"]), int(val["b"]), val["area"], float(val.get("t") or 0))
+                _set_ex(val["ex"], a, b, val["area"], float(val.get("t") or 0))
             st.rerun()
         with st.expander("Edycja zakresem (bez myszy)"):
             _editor(work, sc, lab, n)
@@ -260,6 +263,37 @@ def _fit_model(raw: dict, sc, real_t: float) -> None:
     st.rerun()
 
 
+def _blast_hours(raw: dict) -> None:
+    """Hours of the blasting works on a blast day (the scenario's `blasting`)."""
+    bl = raw.get("blasting") or {}
+
+    def tm(key, default):
+        try:
+            return dt.datetime.strptime(str(bl.get(key) or default), "%H:%M").time()
+        except ValueError:
+            return dt.datetime.strptime(default, "%H:%M").time()
+    v = st.session_state.get("ver", 0)
+    c = st.columns(2)
+    new = {"crew_arrive": c[0].time_input("Ekipa strzałowa od", tm("crew_arrive", "09:00"), key=f"k2_bl_ca_{v}",
+                                          step=dt.timedelta(minutes=15)),
+           "crew_leave": c[1].time_input("Ekipa do", tm("crew_leave", "11:40"), key=f"k2_bl_cl_{v}",
+                                         step=dt.timedelta(minutes=15)),
+           "fire_from": c[0].time_input("Strzał od", tm("fire_from", "11:00"), key=f"k2_bl_ff_{v}",
+                                        step=dt.timedelta(minutes=5)),
+           "fire_to": c[1].time_input("Strzał do", tm("fire_to", "11:20"), key=f"k2_bl_ft_{v}",
+                                      step=dt.timedelta(minutes=5))}
+    new = {k: x.strftime("%H:%M") for k, x in new.items()}
+    new["evacuation_min"] = float(c[0].number_input("Ewakuacja przed [min]", 0.0, 120.0,
+                                                    float(bl.get("evacuation_min") or 10.0), 5.0, format="%.0f",
+                                                    key=f"k2_bl_ev_{v}"))
+    if any(str(bl.get(k)) != str(x) for k, x in new.items() if k != "evacuation_min") or \
+            float(bl.get("evacuation_min") or 10.0) != new["evacuation_min"]:
+        r = copy.deepcopy(raw)
+        r.setdefault("blasting", {}).update(new)
+        state.set_raw(r)
+        st.rerun()
+
+
 def _areas_editor(raw: dict, sc, rigs: list, fire: int, work: dict) -> None:
     mps = max([float(r.get("m_per_shift") or 250) for r in rigs] or [250.0])
     cap = sc.blasting.max_blast_t()
@@ -270,7 +304,9 @@ def _areas_editor(raw: dict, sc, rigs: list, fire: int, work: dict) -> None:
         d = 0 if not rigs else -(-m // mps)
         rows.append({"obszar": a["id"], "poziom": a.get("level_m"), "start_t": float(work["start"].get(a["id"], 0.0)),
                      "odstrzal_t": float(a.get("blast_max_t") or 20000), "tpm": float(a.get("t_per_m") or 50),
-                     "zasoby_t": float(a.get("reserves_t") or 0), "mb": round(m), "wiercenie": f"{d:.0f} zm.",
+                     "zasoby_t": float(a.get("reserves_t") or 0),
+                     "wierc_od": None if a.get("drill_below_t") is None else float(a["drill_below_t"]),
+                     "mb": round(m), "wiercenie": f"{d:.0f} zm.",
                      "do_urobku": f"{d + fire:.0f} zm."})
     ver = f"{st.session_state.get('ver', 0)}_{st.session_state.get('k2_area_ver', 0)}"
     ed = st.data_editor(pd.DataFrame(rows), key=f"k2_areas_{ver}", hide_index=True, width="stretch",
@@ -283,6 +319,11 @@ def _areas_editor(raw: dict, sc, rigs: list, fire: int, work: dict) -> None:
                                        "tpm": st.column_config.NumberColumn("t/mb", min_value=5.0),
                                        "zasoby_t": st.column_config.NumberColumn("zasoby [t]", min_value=0.0, step=5000.0,
                                                                                  format="%.0f"),
+                                       "wierc_od": st.column_config.NumberColumn(
+                                           "wierć, gdy zostaje [t]", min_value=0.0, step=1000.0, format="%.0f",
+                                           help="Wiercenie następnego odstrzału zaczyna się, gdy w obszarze zostaje do "
+                                                "wybrania tyle ton. Puste = program wierci w ostatniej chwili, tak by "
+                                                "urobek był na czas."),
                                        "mb": "mb wiercenia", "wiercenie": "wiercenie", "do_urobku": "od wiercenia do urobku"})
     theme.note("Na start leży usyp <b>/1</b> (np. O1/1). Każdy kolejny odstrzał to następny usyp: O1/2, O1/3 …"
                + (f" · limit MW: największy strzał {cap:,.0f} t".replace(",", " ") if cap < float("inf") else ""))
@@ -298,9 +339,16 @@ def _areas_editor(raw: dict, sc, rigs: list, fire: int, work: dict) -> None:
     new = copy.deepcopy(raw)
     for _, r in ed.iterrows():
         upd = {"blast_max_t": float(r["odstrzal_t"]), "t_per_m": float(r["tpm"]), "reserves_t": float(r["zasoby_t"])}
+        below = None if pd.isna(r["wierc_od"]) else float(r["wierc_od"])
         for src in (new.get("areas") or []) + ((new.get("site") or {}).get("areas") or []):
-            if src.get("id") == r["obszar"] and any(float(src.get(k) or 0) != val for k, val in upd.items()):
+            if src.get("id") != r["obszar"]:
+                continue
+            if any(float(src.get(k) or 0) != val for k, val in upd.items()) or src.get("drill_below_t") != below:
                 src.update(upd)
+                if below is None:
+                    src.pop("drill_below_t", None)
+                else:
+                    src["drill_below_t"] = below
                 changed = True
     if changed:
         state.set_raw(new)
@@ -450,6 +498,19 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
 
 
 # ------------------------------------------------------------------ editing
+def _span(a: int, b: int, val: dict, shifts: list) -> tuple[int, int]:
+    """The shifts a change from the list goes to: the marked ones, all of them, or the marked ones with `fwd` working
+    days after and `back` before."""
+    if val.get("scope") == "all":
+        return 0, len(shifts) - 1
+    if val.get("scope") == "around":
+        lo_day = shifts[a][1] - int(val.get("back") or 0)
+        hi_day = shifts[b][1] + int(val.get("fwd") or 0)
+        days = [i for i, (_, wd, _) in enumerate(shifts) if lo_day <= wd <= hi_day]
+        return days[0], days[-1]
+    return a, b
+
+
 def _set_ex(ex: str, a: int, b: int, area: str, t_shift: float) -> None:
     w = st.session_state.work
     for i in range(a, b + 1):

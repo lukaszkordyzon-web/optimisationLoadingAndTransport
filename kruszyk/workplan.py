@@ -68,6 +68,7 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
     by_id = {a["id"]: a for a in areas}
     grid = {ex: [""] * n for ex in work["ex"]}
     left: dict[str, list[float]] = {}
+    release: dict[str, int] = {}  # earliest shift the drilling of a pile may start (the area's own rule)
     issues: list[dict] = []
     for a_id, a in by_id.items():
         s = float(work["start"].get(a_id, 0.0))
@@ -93,12 +94,17 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
                 grid[ex][i] = f"{a_id}/{j}"
             done += d
         used = {int(p.rsplit("/", 1)[1]) for cells in grid.values() for p in cells if p.startswith(f"{a_id}/")}
+        below = a.get("drill_below_t")
+        if below is not None and below == below:  # drilling starts when this little is left to dig in the area
+            for j in sorted(used - {1}):
+                end_prev = s + (j - 2) * b  # what lies in the area before this blast
+                release[f"{a_id}/{j}"] = next((i for i, c in enumerate(cum) if end_prev - c <= float(below)), n)
         for j in sorted(used | ({1} if s > 0 else set())):
             lo = 0.0 if j == 1 else s + (j - 2) * b
             hi = s if j == 1 else lo + b
             left[f"{a_id}/{j}"] = [max(0.0, min(hi - lo, hi - c)) for c in cum]
     start_piles = {f"{a}/1" for a in by_id}
-    blasts = plan_blasts(grid, areas, rigs, n, cap_t, fire, skip=start_piles)
+    blasts = plan_blasts(grid, areas, rigs, n, cap_t, fire, skip=start_piles, release=release)
     for p, bl in blasts.items():  # nothing lies there before the blast
         if p in left:
             left[p] = [v if i >= bl["avail"] else 0.0 for i, v in enumerate(left[p])]
@@ -149,6 +155,7 @@ def scenario_raw(raw: dict, work: dict, grid: dict[str, list[str]], cap_t: float
     from .site import area_start_piles, loading_point, site_to_scenario
 
     new = copy.deepcopy(raw)
+    new.setdefault("blasting", {})["enabled"] = True  # the pit closes for the blasts of the plan (only on those shifts)
     site = new["site"]
     for a in site.get("areas", []):
         a["start_t"] = float(work["start"].get(a["id"], 0.0))
