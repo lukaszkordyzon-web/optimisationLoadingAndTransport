@@ -167,3 +167,14 @@ def test_plan_as_a_minimum_loads_more_when_there_is_material():
         runs[mode] = float(run_period(today(sim), p, seed=1)["wywiezione_t"].sum())
     assert runs["limit"] <= 4000 + 80  # the plan: 2 × 500 t a shift
     assert runs["min"] > 1.3 * runs["limit"]  # the machines can do much more than that
+
+
+def test_without_planned_drilling_the_material_is_always_there():
+    from kruszyk import workplan
+
+    rig = [{"id": "W-1", "m_per_shift": 100}]
+    work = {"start": {"A": 0.0}, "ex": {"K-1": [{"a": "A", "t": 3000.0}] * 4}, "tr": {"WZ-01": ["K-1"] * 4},
+            "dr": {"W-1": [{"a": "", "t": 0.0}] * 4}, "drill": False}
+    ev = workplan.evaluate(work, AREAS, rig, 4, fire=1)
+    assert ev["planned"] == [3000.0] * 4 and not ev["blasts"] and not ev["issues"]
+    assert ev["grid"]["K-1"] == ["A/1"] * 4

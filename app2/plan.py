@@ -223,7 +223,15 @@ def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
                           help="Każdy wariant liczony jak dziś – ten sam miesiąc, pogoda i awarie; różni się tylko plan.")
         act = st.session_state.get("k2seg_variant") or first
         w = vs[act]
-        open_ = st.toggle(f"Pełna wydajność w wariancie {act} – koparki nie stają po zrobieniu planu",
+        t1, t2 = st.columns(2)
+        drill = t1.toggle(f"Planuj wiercenie w wariancie {act}", value=w.get("drill", True), key=f"k2_drill_{act}",
+                          help="Wyłączone: urobek jest dostępny cały czas – bez wiertnic, strzałów i braków urobku. "
+                               "Liczy się tylko układ koparka – wozidło – kruszarka (np. do sprawdzenia, ile da on "
+                               "przy pełnej wydajności).")
+        if drill != w.get("drill", True):
+            w["drill"] = drill
+            st.rerun()
+        open_ = t2.toggle(f"Pełna wydajność w wariancie {act} – koparki nie stają po zrobieniu planu",
                           value=w.get("mode") == "min", key=f"k2_open_{act}",
                           help="Wyłączone: koparka robi tony z harmonogramu i staje. Włączone: po zrobieniu planu ładuje "
                                "dalej, dopóki ma odstrzelony urobek, wozidła i czas – porównanie pokaże, ile da kopalnia, "
@@ -637,41 +645,47 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
                 drill_row.append(cell("–", "#FFFFFF", "#8A93A0", title))
         return orders_row, drill_row
 
-    rows = [{"kind": "group", "name": "WIERTNICE – zlecenia ustawiasz Ty, wiercenie liczy program"}]
-    for r in rigs:
+    rows = []
+    drilling = work.get("drill", True)
+    if not drilling:
+        rows.append({"kind": "group", "name": "WIERCENIE NIE PLANOWANE – urobek dostępny cały czas"})
+    else:
+        rows.append({"kind": "group", "name": "WIERTNICE – zlecenia ustawiasz Ty, wiercenie liczy program"})
+    for r in rigs if drilling else []:
         orders_row, drill_row = rig_rows(r["id"])
         rows.append({"kind": "dr", "name": f"{r['id']} · zlecenia", "id": r["id"], "cells": orders_row})
         rows.append({"kind": "drx", "name": "↳ wierci", "cells": drill_row})
-    rows.append({"kind": "group", "name": "STRZAŁY – zlecenie = strzał, po odwierceniu · kliknij, żeby przesunąć"})
-    bl = sc.blasting
-    fire_at = f"{bl.fire_from}–{bl.fire_to}"
-    for a_id in area_ids:
-        out = []
-        for g in groups:
-            fired = [(p, b) for p, b in blasts.items() if b["area"] == a_id and any(x in g for x in b["fire"] or [b["avail"] - 1])]
-            if fired:
-                p, b = fired[0]
-                moved = f" (przesunięty o {b['delay']} zm.)" if b["delay"] else ""
-                txt = "\n".join(f"strzał {_tt(c['t'])}" for _, c in fired) + f"\n{fire_at}"
-                out.append(cell(txt, "#1B2733", "#FFFFFF",
-                                "\n".join(f"strzał {q} (usyp {q}): {_num(c['t'])} t · {c['m']} mb" for q, c in fired)
-                                + f" · {fire_at}{moved} – urobek od {lab[min(b['avail'], n - 1)]}", bold=True, p=p))
-            else:
-                out.append(cell("", "#FFFFFF", "#FFFFFF"))
-        rows.append({"kind": "fire", "name": a_id, "cells": out})
-    rows.append({"kind": "group", "name": "URABEK ODSTRZELONY W OBSZARACH"})
-    for a_id in area_ids:
-        out = []
-        for g in groups:
-            lft = ev["area_left"][a_id][g[0]]
-            miss = sum(ev["short"][a_id][i] for i in g)
-            if miss > 1:
-                out.append(cell(f"brak {_tt(miss)}", "#FDE2E2", "#8C0E20", f"{a_id}: koparkom zabraknie {_num(miss)} t",
-                                red=True))
-            else:
-                out.append(cell(_tt(lft) if lft > 1 else "–", "#E3F1E6" if lft > 1 else "#FFFFFF",
-                                "#1E5A2C" if lft > 1 else "#8A93A0", f"{a_id}: leży ok. {_num(lft)} t"))
-        rows.append({"kind": "pile", "name": a_id, "cells": out})
+    if drilling:
+        rows.append({"kind": "group", "name": "STRZAŁY – zlecenie = strzał, po odwierceniu · kliknij, żeby przesunąć"})
+        bl = sc.blasting
+        fire_at = f"{bl.fire_from}–{bl.fire_to}"
+        for a_id in area_ids:
+            out = []
+            for g in groups:
+                fired = [(p, b) for p, b in blasts.items() if b["area"] == a_id and any(x in g for x in b["fire"] or [b["avail"] - 1])]
+                if fired:
+                    p, b = fired[0]
+                    moved = f" (przesunięty o {b['delay']} zm.)" if b["delay"] else ""
+                    txt = "\n".join(f"strzał {_tt(c['t'])}" for _, c in fired) + f"\n{fire_at}"
+                    out.append(cell(txt, "#1B2733", "#FFFFFF",
+                                    "\n".join(f"strzał {q} (usyp {q}): {_num(c['t'])} t · {c['m']} mb" for q, c in fired)
+                                    + f" · {fire_at}{moved} – urobek od {lab[min(b['avail'], n - 1)]}", bold=True, p=p))
+                else:
+                    out.append(cell("", "#FFFFFF", "#FFFFFF"))
+            rows.append({"kind": "fire", "name": a_id, "cells": out})
+        rows.append({"kind": "group", "name": "URABEK ODSTRZELONY W OBSZARACH"})
+        for a_id in area_ids:
+            out = []
+            for g in groups:
+                lft = ev["area_left"][a_id][g[0]]
+                miss = sum(ev["short"][a_id][i] for i in g)
+                if miss > 1:
+                    out.append(cell(f"brak {_tt(miss)}", "#FDE2E2", "#8C0E20", f"{a_id}: koparkom zabraknie {_num(miss)} t",
+                                    red=True))
+                else:
+                    out.append(cell(_tt(lft) if lft > 1 else "–", "#E3F1E6" if lft > 1 else "#FFFFFF",
+                                    "#1E5A2C" if lft > 1 else "#8A93A0", f"{a_id}: leży ok. {_num(lft)} t"))
+            rows.append({"kind": "pile", "name": a_id, "cells": out})
     rows.append({"kind": "group", "name": "KOPARKI – obszar i tony · ustawiasz Ty"})
     for x in ex_ids:
         rows.append({"kind": "ex", "name": x, "cells": work_row(x, "ex", ex_why(x))})

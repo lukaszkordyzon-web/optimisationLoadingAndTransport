@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import math
 
+ENDLESS_T = 1e9  # an area without planned drilling: the material never runs out
 SHORT = "short"
 EXHAUSTED = "exhausted"
 OVER = "over"
@@ -39,7 +40,7 @@ def cell(work: dict, ex: str, i: int, part: str = "ex") -> tuple[str, float]:
 def fit(work: dict, n: int) -> dict:
     """The plan cut or extended (last shift repeated) to n shifts."""
     out = {"start": dict(work.get("start") or {}), "ex": {}, "tr": {}, "dr": {}, "fire": dict(work.get("fire") or {}),
-           "mode": work.get("mode", "limit")}
+           "mode": work.get("mode", "limit"), "drill": work.get("drill", True)}
     for part in ("ex", "dr"):
         for k, cells in (work.get(part) or {}).items():
             cells = list(cells) or [{"a": "", "t": 0.0}]
@@ -119,6 +120,9 @@ def evaluate(work: dict, areas: list[dict], rigs: list[dict], n: int, cap_t: flo
     """Everything that follows from the plan: what the rigs really drill, the blasts, what lies in every area, the
     pile every excavator loads and how much of its tonnes it gets, the tonnes per shift, and the issues."""
     by_id = {a["id"]: a for a in areas}
+    if not work.get("drill", True):  # drilling not planned: the material is there all the time
+        work = dict(work, start={a: ENDLESS_T for a in by_id}, dr={}, fire={})
+        rigs = []
     issues: list[dict] = []
     # ---- drilling: every order (tonnes in an area) is drilled for as many shifts as it takes, orders one after
     # another; a drive to another area eats into the shift; "postój" stops the rig for that shift
@@ -307,7 +311,7 @@ def scenario_raw(raw: dict, work: dict, grid: dict[str, list[str]], cap_t: float
     new.setdefault("blasting", {})["enabled"] = True  # the pit closes for the blasts of the plan (only on those shifts)
     site = new["site"]
     for a in site.get("areas", []):
-        a["start_t"] = float(work["start"].get(a["id"], 0.0))
+        a["start_t"] = ENDLESS_T if not work.get("drill", True) else float(work["start"].get(a["id"], 0.0))
     piles = area_start_piles(site, cap_t)
     if not piles:
         raise ValueError("Na mapie nie ma obszarów wydobycia")
