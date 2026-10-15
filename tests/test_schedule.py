@@ -77,7 +77,7 @@ def test_drilled_tonnes_are_blasted_and_only_then_loaded():
 
     rig = [{"id": "W-1", "m_per_shift": 200}]  # 200 mb × 30 t/mb = 6000 t a shift in A
     work = {"start": {"A": 3000.0}, "ex": {"K-1": [{"a": "A", "t": 1000.0}] * 10}, "tr": {"WZ-01": ["K-1"] * 10},
-            "dr": {"W-1": [{"a": "A", "t": 6000.0}] * 2 + [{"a": "", "t": 0.0}] * 8}}
+            "dr": {"W-1": [{"a": "A", "t": 12000.0}] + [{"a": "", "t": 0.0}] * 9}}  # one order: 2 shifts
     ev = workplan.evaluate(work, AREAS, rig, 10, fire=1)
     b = ev["blasts"]["A/2"]
     assert b["t"] == 12000 and b["done"] == 1 and b["fire"] == [2] and b["avail"] == 3  # 2 shifts drilled = 1 blast
@@ -103,10 +103,10 @@ def test_work_plan_issues():
 
     rig = [{"id": "W-1", "m_per_shift": 100}]
     work = {"start": {"A": 0.0}, "ex": {"K-1": [{"a": "A", "t": 3000.0}] * 2, "K-2": [{"a": "", "t": 0.0}] * 2},
-            "tr": {"WZ-01": ["K-2"] * 2}, "dr": {"W-1": [{"a": "A", "t": 9000.0}] * 2}}
+            "tr": {"WZ-01": ["K-2"] * 2}, "dr": {"W-1": [{"a": "A", "t": 9000.0}] + [{"a": "", "t": 0.0}]}}
     ev = workplan.evaluate(work, AREAS, rig, 2, fire=1, rates={"K-1": 1500.0})
     kinds = {i["kind"] for i in ev["issues"]}
-    assert {workplan.SHORT, workplan.OVER, workplan.NO_TRUCKS, workplan.IDLE_TRUCK, workplan.DRILL_OVER} <= kinds
+    assert {workplan.SHORT, workplan.OVER, workplan.NO_TRUCKS, workplan.IDLE_TRUCK, workplan.UNFINISHED} <= kinds
     assert ev["planned"] == [0.0, 0.0]  # nothing blasted yet: nothing to load
 
 
@@ -130,3 +130,17 @@ def test_month_follows_the_work_plan():
     assert all(df["wywiezione_t"] <= 2500 + 40)  # never more than the plan's tonnes (+ the last truckload)
     assert df["z_O3/1_t"].iloc[2:].sum() == 0  # K-2 stands on the 2nd day
     assert df["z_O2/1_t"].sum() + df.get("z_O2/2_t", 0 * df["z_O2/1_t"]).sum() > 0
+
+
+def test_drill_order_runs_as_long_as_it_takes_and_orders_queue():
+    from kruszyk import workplan
+
+    rig = [{"id": "W-1", "m_per_shift": 100}]  # 3000 t a shift in A (30 t/mb), 3300 t in B
+    areas = [AREAS[0], dict(AREAS[1], blast_max_t=20000)]
+    work = {"start": {}, "ex": {}, "tr": {},
+            "dr": {"W-1": [{"a": "A", "t": 7500.0}, {"a": "B", "t": 3300.0}] + [{"a": "", "t": 0.0}] * 4}}
+    ev = workplan.evaluate(work, areas, rig, 6, fire=1, travel_h={("A", "B"): 2.0}, shift_h=8.0)
+    assert [round(x) for x in ev["drilled"]["A"]] == [3000, 3000, 1500, 0, 0, 0]  # 7500 t: two and a half shifts
+    # then 2 h of driving: B gets 8 − 4 (A) − 2 (drive) = 2 h of the 3rd shift, the rest on the 4th
+    assert [round(x) for x in ev["drilled"]["B"]] == [0, 0, 825, 2475, 0, 0]
+    assert ev["blasts"]["A/2"]["t"] == 7500 and ev["blasts"]["A/2"]["done"] == 2  # fired when the rig leaves A

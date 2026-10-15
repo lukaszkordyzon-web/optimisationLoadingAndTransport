@@ -34,6 +34,7 @@ EX_COLORS = [("#DCE8F7", "#1D4E89"), ("#FCE1D8", "#8A2E12"), ("#E4E9F2", "#2B3F6
              ("#F3E8D2", "#6B4A12")]
 STAND = "postój"
 OFF = "nie jeździ"
+NO_ORDER = "bez zlecenia"
 
 
 # ------------------------------------------------------------------ period
@@ -237,7 +238,11 @@ def step_plan() -> None:
                 if val.get("kind") == "tr":
                     _set_trucks(val["ids"], a, b, val["ex"])
                 else:
-                    _set_ex(val["ex"], a, b, val["area"], float(val.get("t") or 0), "dr" if val.get("kind") == "dr" else "ex")
+                    if val.get("kind") == "dr":
+                        _set_ex(val["ex"], a, b, val["area"], float(val.get("t") or 0), "dr",
+                                [d for d, _, _ in shifts] if day_view else None)
+                    else:
+                        _set_ex(val["ex"], a, b, val["area"], float(val.get("t") or 0))
             st.rerun()
         with st.expander("Edycja zakresem (bez myszy)"):
             _editor(work, sc, lab, n)
@@ -432,16 +437,38 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             return ""
         return f
 
-    def rig_why(r):
-        def f(i):
-            a, t = workplan.cell(work, r["id"], i, "dr")
-            c = ev["rig_cap"][r["id"]][i]
-            return f"da radę ok. {_num(c)} t" if t and t > 1.05 * c else ""
-        return f
+    def rig_row(rid):
+        """Orders the planner gave (strong colour) and the drilling that carries them on (light, with an arrow)."""
+        rr, out = ev["rig_rows"][rid], []
+        for g in groups:
+            orders = [rr[i]["order"] for i in g if rr[i]["order"]]
+            drill: dict[str, float] = {}
+            for i in g:
+                for a, d in rr[i]["drill"]:
+                    drill[a] = drill.get(a, 0.0) + d
+            drive = sum(rr[i]["drive_h"] for i in g)
+            wait = rr[g[-1]]["waiting"]
+            title = (f"{rid}: " + (f"zlecenie {', '.join(f'{a} {_num(t)} t' for a, t in orders)} · " if orders else "")
+                     + (f"wierci {', '.join(f'{a} {_num(d)} t' for a, d in drill.items())}" if drill else "nie wierci")
+                     + (f" · przejazd {drive * 60:.0f} min" if drive else "") + (f" · zostaje {_num(wait)} t" if wait else ""))
+            vals = {"a": orders[0][0] if orders else "", "t": orders[0][1] if orders else 0}
+            if orders:
+                bg, fg = acol.get(orders[-1][0], ("#FFFFFF", "#1B2733"))
+                out.append(cell(" + ".join(f"{a} {_kt(t)}" for a, t in orders), bg, fg, title, bold=True, v=vals))
+            elif any(rr[i]["stop"] for i in g):
+                out.append(cell(STAND, "#F3F4F6", "#5B6573", f"{rid}: postój", v=vals))
+            elif drill:
+                a = next(iter(drill))
+                bg, fg = acol.get(a, ("#FFFFFF", "#1B2733"))
+                out.append(cell(f"→ {'/'.join(drill)} {_kt(sum(drill.values()))}", "#FFFFFF", fg, title,
+                                v=vals, bd=bg))
+            else:
+                out.append(cell("–", "#FFFFFF", "#8A93A0", f"{rid}: wolna", v=vals))
+        return out
 
-    rows = [{"kind": "group", "name": "WIERTNICE – obszar i tony · ustawiasz Ty"}]
+    rows = [{"kind": "group", "name": "WIERTNICE – zlecenia: obszar i tony · ustawiasz Ty"}]
     for r in rigs:
-        rows.append({"kind": "dr", "name": r["id"], "cells": work_row(r["id"], "dr", rig_why(r))})
+        rows.append({"kind": "dr", "name": r["id"], "cells": rig_row(r["id"])})
     rows.append({"kind": "group", "name": "STRZAŁY – z odwierconych ton · kliknij, żeby przesunąć"})
     for a_id in area_ids:
         out = []
@@ -533,10 +560,22 @@ def _span(a: int, b: int, val: dict, shifts: list) -> tuple[int, int]:
     return a, b
 
 
-def _set_ex(key: str, a: int, b: int, area: str, t_shift: float, part: str = "ex") -> None:
+def _set_ex(key: str, a: int, b: int, area: str, t_shift: float, part: str = "ex", days: list | None = None) -> None:
+    """Excavators: area and tonnes on every shift. Rigs: an order (tonnes to drill) – once per day in the day view
+    (`days` = the date of every shift), "postój" stops the rig, "bez zlecenia" clears the order."""
     w = st.session_state.work
     for i in range(a, b + 1):
-        if i < len(w[part][key]):
+        if i >= len(w[part][key]):
+            continue
+        if part == "dr":
+            first = days is None or i == a or days[i] != days[i - 1]
+            if area == STAND:
+                w[part][key][i] = {"a": "", "t": 0.0, "stop": True}
+            elif area == NO_ORDER or not first:
+                w[part][key][i] = {"a": "", "t": 0.0}
+            else:
+                w[part][key][i] = {"a": area, "t": t_shift}
+        else:
             w[part][key][i] = {"a": area if area != STAND else "", "t": t_shift if area and area != STAND else 0.0}
 
 
@@ -568,12 +607,13 @@ def _editor(work, sc, lab, n) -> None:
         key = c[0].selectbox(title, list(work[part]), key=f"{pre}_ex")
         a = c[1].selectbox("Od zmiany", range(n), format_func=lambda i: lab[i], key=f"{pre}_from")
         b = c[2].selectbox("Do zmiany", range(n), index=n - 1, format_func=lambda i: lab[i], key=f"{pre}_to")
-        area = c[3].selectbox("Obszar", areas + [STAND], key=f"{pre}_area")
-        t = c[4].number_input("Ton na zmianę", 0.0, 50_000.0, 1000.0, 100.0, format="%.0f", key=f"{pre}_t")
+        area = c[3].selectbox("Obszar", areas + [STAND] + ([NO_ORDER] if part == "dr" else []), key=f"{pre}_area")
+        t = c[4].number_input("Ton do odwiercenia" if part == "dr" else "Ton na zmianę", 0.0, 200_000.0, 1000.0, 100.0,
+                              format="%.0f", key=f"{pre}_t")
         with c[5]:
             st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
             if st.button("Ustaw", type="primary", key=f"{pre}_set", width="stretch"):
-                _set_ex(key, min(a, b), max(a, b), area, t, part)
+                _set_ex(key, min(a, b), max(a, b), area, t, part, [0] * n if part == "dr" else None)
                 st.rerun()
     theme.h4("Wozidła")
     c = st.columns([2.2, 1.4, 1.4, 1.2, 1])
@@ -602,17 +642,10 @@ def _issue(it, work, lab, n, j, ev) -> None:
     elif k == workplan.EXHAUSTED:
         st.markdown(f'<div class="k2-issue"><b>Obszar {it["area"]}: od {lab[i]} wiercenie przekracza zasoby</b><br>'
                     "Zwiększ zasoby w tabeli obszarów albo przenieś wiertnicę.</div>", unsafe_allow_html=True)
-    elif k == workplan.DRILL_OVER:
-        st.markdown(f'<div class="k2-issue w"><b>{it["rig"]} od {lab[i]}: {_num(it["t"])} t w {it["area"]}{many}</b><br>'
-                    f"Da radę ok. {_num(it['cap'])} t na zmianę (mb/zm. × t/mb, minus przejazd z innego obszaru) – "
-                    "reszta nie zostanie odwiercona.</div>", unsafe_allow_html=True)
-        if st.button(f"Ustaw {it['rig']} na tyle, ile da radę", key=f"k2_fix_{j}", width="stretch"):
-            caps = ev["rig_cap"][it["rig"]]
-            for s in range(n):
-                c = work["dr"][it["rig"]][s]
-                if c.get("a") and float(c.get("t") or 0) > 1.05 * caps[s]:
-                    c["t"] = float(math.floor(caps[s] / 100) * 100)
-            st.rerun()
+    elif k == workplan.UNFINISHED:
+        st.markdown(f'<div class="k2-issue w"><b>{it["rig"]}: {_num(it["t"])} t w {it["area"]} nie zostanie odwierconych '
+                    "do końca okresu</b><br>Zleceń jest więcej, niż wiertnica zdąży – przesuń część na drugą wiertnicę "
+                    "albo zmniejsz zlecenia.</div>", unsafe_allow_html=True)
     elif k == workplan.OVER:
         ex = it["ex"]
         r = max(100.0, round(it["rate"], -2))

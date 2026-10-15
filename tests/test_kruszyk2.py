@@ -59,4 +59,4 @@ def test_schedule_editing_sets_area_tonnes_and_trucks():
     at.number_input(key="k2_d_t").set_value(5000.0).run()
     at.button(key="k2_d_set").click().run()
     assert not at.exception, at.exception
-    assert at.session_state["work"]["dr"]["W-2"] == [{"a": "O1", "t": 5000.0}] * 6
+    assert at.session_state["work"]["dr"]["W-2"] == [{"a": "O1", "t": 5000.0}] + [{"a": "", "t": 0.0}] * 5

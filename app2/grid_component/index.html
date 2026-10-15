@@ -51,7 +51,8 @@
 <body>
 <div class="wrap"><table id="grid"></table></div>
 <div class="legend">
-  <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>wiertnica / koparka: obszar i tys. t</span>
+  <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>zlecenie wiertnicy / koparka: obszar i tys. t</span>
+  <span><i style="background:repeating-linear-gradient(135deg,#fff 0 4px,#E0B990 4px 6px);border:1px solid #E0B990"></i>wiertnica wierci dalej zlecenie</span>
   <span><i style="background:#DCE8F7;border:1px solid #A9C1E2"></i>wozidło: do której koparki</span>
   <span><i style="background:#1B2733"></i>✸ strzał: numer usypu·kt – kliknij, żeby przesunąć</span>
   <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek leży (kt = tys. t)</span>
@@ -81,7 +82,7 @@ function render() {
     h += `<tr class="${r.kind}"><td class="name">${esc(r.name)}</td>`;
     r.cells.forEach((c, j) => {
       const cls = [editable(r, c) ? 'ed' : '', c.red ? 'red' : '', inSel(ri, j) ? 'sel' : ''].join(' ');
-      h += `<td class="${cls}" data-r="${ri}" data-j="${j}" title="${esc(c.title || '')}" style="background:${c.bg};color:${c.fg};${c.bold ? 'font-weight:700;' : ''}">${esc(c.text)}</td>`;
+      h += `<td class="${cls}" data-r="${ri}" data-j="${j}" title="${esc(c.title || '')}" style="background:${c.bd ? `repeating-linear-gradient(135deg, #fff 0 7px, ${c.bd} 7px 11px)` : c.bg};color:${c.fg};${c.bold ? 'font-weight:700;' : ''}">${esc(c.text)}</td>`;
     });
     h += '</tr>';
   });
@@ -170,17 +171,18 @@ function showPop(td) {
     const rate = isRig ? ((ex.rates || {})[choice] || 0) : ex.rate;
     const t0 = cur.t ? cur.t * perUnit : Math.round((rate || 1000) * (isRig ? 1 : 0.9) / 100) * 100 * perUnit;
     h += `<div class="t">${esc(row.name)}</div><div class="s">${esc(range())}</div>`;
-    h += `<div class="lbl">Ile ton ${unit}</div><div class="row"><input id="tin" type="number" min="0" step="100" value="${Math.round(t0)}">`;
+    h += `<div class="lbl">${isRig ? 'Zlecenie: ile ton odwiercić' + (D.day ? ' (od tego dnia)' : '') : 'Ile ton ' + unit}</div><div class="row"><input id="tin" type="number" min="0" step="100" value="${Math.round(isRig ? (cur.t || rate * perUnit) : t0)}">`;
     h += `<span>t</span>${!isRig && ex.rate ? `<span style="color:#4A5562">(ładuje ok. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
     h += `<div class="lbl">${isRig ? 'Gdzie wierci' : 'Skąd ładuje'}</div>`;
     areas.forEach(a => {
-      const info = isRig ? `wierci ok. ${Math.round(((ex.rates || {})[a.id] || 0) * perUnit / 100) / 10} kt ${unit}` : a.info;
+      const info = isRig ? `wierci ok. ${Math.round(((ex.rates || {})[a.id] || 0) * D.spd / 100) / 10} kt na dzień` : a.info;
       h += `<button class="o ${a.id === choice ? 'cur' : ''}" data-a="${esc(a.id)}" style="background:${a.bg}"><b>${esc(a.id)}</b><span>${esc(info)}</span></button>`;
     });
-    h += `<button class="o stand ${choice === 'postój' ? 'cur' : ''}" data-a="postój"><b>postój</b><span>${isRig ? 'wiertnica nie wierci' : 'koparka nie pracuje'}</span></button>`;
+    h += `<button class="o stand ${choice === 'postój' ? 'cur' : ''}" data-a="postój"><b>postój</b><span>${isRig ? 'wiertnica stoi (serwis, brak operatora)' : 'koparka nie pracuje'}</span></button>`;
+    if (isRig) h += `<button class="o stand" data-a="bez zlecenia"><b>bez zlecenia</b><span>wierci dalej to, co ma, albo czeka</span></button>`;
     apply = () => {
       const v = Math.max(0, +document.getElementById('tin').value || 0);
-      emit(Object.assign({ kind: sel.kind, ex: row.name, a: s0, b: s1, area: choice, t: D.day ? v / D.spd : v }, scope()));
+      emit(Object.assign({ kind: sel.kind, ex: row.name, a: s0, b: s1, area: choice, t: D.day && !isRig ? v / D.spd : v }, scope()));
     };
   } else {
     const rows = rowsSel();
