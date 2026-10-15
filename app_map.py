@@ -707,6 +707,7 @@ def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
                ("hopper_t", "kosz [t]", "num", (5.0, 5.0)), ("product", "co produkuje", "sel", [""] + list(PRODUCTS)),
                ("kwh_per_t", "energia [kWh/t]", "num", (0.1, 0.1)), ("target_t", "plan na zmianę [t]", "num", (0.0, 500.0)),
                ("accepts", "przyjmuje z (puste = wszystkie)", "multi", _pile_ids(site))]
+    main_crusher = crusher + [("elev_m", "rzędna [m] (puste = z wlotów pochylni)", "elev", None)]
     return {
         "road": [("name", "nazwa", "text", None), ("kind", "rodzaj", "sel", ["droga", "rampa"]),
                  ("grade_draw_pct", "nachylenie wzdłuż rysowania [%]", "num", (-30.0, 0.5)),
@@ -735,7 +736,7 @@ def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
                       ("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
                       ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0)),
                       ("areas", "pracuje w (harmonogram; puste = wszędzie)", "multi", _pile_ids(site)), *_FAIL],
-        "crusher": crusher + _FAIL, "crusher2": crusher + _FAIL,
+        "crusher": main_crusher + _FAIL, "crusher2": crusher + _FAIL,
         "parking": [("excavator", "koparka", "sel", [e["id"] for e in site.get("excavators", [])])],
         "bay": [("id", "nazwa", "text", None)],
         "dig": [("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
@@ -793,7 +794,15 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
                 new[key] = c.selectbox(label, options, index=options.index(v) if v in options else 0, key=wk,
                                        format_func=lambda x: x or "—")
             elif typ == "multi":
-                new[key] = c.multiselect(label, opt, [x for x in (v or []) if x in opt], key=wk)
+                new[key] = c.multiselect(label, opt, [x for x in (v or []) if x in opt], key=wk, disabled=not opt,
+                                         placeholder="wybierz…" if opt else "brak usypów i obszarów – najpierw je narysuj")
+            elif typ == "elev":
+                from kruszyk.site import crusher_fixed
+
+                new[key] = c.number_input(label, -2000.0, 5000.0, float(v) if crusher_fixed(o) and v is not None else None,
+                                          0.5, key=wk, placeholder=f"z pochylni: {float(v or 0):.1f} m",
+                                          help="Wpisz, jeśli znasz rzędną kruszarki. Puste = liczona z rzędnych wlotów "
+                                               "pochylni i nachyleń dróg.")
             elif typ == "time":
                 new[key] = c.text_input(f"{label} (GG:MM)", str(v or ""), key=wk, placeholder="jak w planie zmiany")
             elif typ == "level":
@@ -839,6 +848,12 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
                 o["id"] = val
         elif kind == "crusher" and key in ("capacity_tph", "hopper_t", "kwh_per_t"):
             cr[key] = val  # the main crusher's machine data live in the scenario
+        elif key == "elev_m":
+            if val is None:  # follow the ramp inlets again
+                o.pop("elev_set", None)
+                o.pop("level", None)
+            elif val != o.get("elev_m") or not o.get("elev_set"):
+                o["elev_m"], o["elev_set"] = float(val), True
         elif val is None or val == "":
             o.pop(key, None)  # empty = not set (e.g. crew times from the shift plan)
         else:
@@ -1055,6 +1070,11 @@ def blast_times_form(prefix: str, defaults: dict | None = None) -> dict:
         lv = _time("Wyjazd ekipy", d["crew_leave"], f"{prefix}_lv")
         f2 = _time("Odpalenie do (otwarcie)", d["fire_to"], f"{prefix}_f2")
     return {"crew_arrive": a, "fire_from": f1, "fire_to": f2, "evacuation_min": ev, "crew_leave": lv}
+
+
+def _base_label(label: str) -> str:
+    """'wydajność [t/h]' / 'przyjmuje z (puste = …)' -> 'wydajność' / 'przyjmuje z'."""
+    return label.split("[")[0].split("(")[0].strip().lower()
 
 
 def _pile_ids(site: dict) -> list[str]:
@@ -1344,9 +1364,12 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                                  help="Kierunek, w którym będziesz klikać punkty: zaczynasz na górze i idziesz w dół "
                                       "(⬇), zaczynasz na dole i idziesz w górę (⬆) albo droga jest płaska (➡). "
                                       "Na mapie strzałka pokaże kierunek rysowania.")
-            grade = st.number_input("Nachylenie [%]", 0.0, 25.0, 9.0 if attrs["kind"] == "rampa" else 1.0, 0.5,
-                                    disabled=DIRECTIONS[direction] == 0,
-                                    help="Rampa: zwykle 8–10 %. Droga technologiczna: 0–3 %.")
+            if DIRECTIONS[direction] == 0:  # flat: 0 %, nothing to type
+                grade = st.number_input("Nachylenie [%]", 0.0, 0.0, 0.0, disabled=True, key="road_grade_flat",
+                                        help="Droga płaska ma 0 %. Wybierz ⬇ / ⬆, żeby wpisać nachylenie.")
+            else:
+                grade = st.number_input("Nachylenie [%]", 0.0, 25.0, 9.0 if attrs["kind"] == "rampa" else 2.0, 0.5,
+                                        key="road_grade", help="Rampa: zwykle 8–10 %. Droga technologiczna: 0–3 %.")
             attrs["grade_draw_pct"] = DIRECTIONS[direction] * grade + 0.0
             if attrs["kind"] == "rampa":
                 z = st.number_input("Rzędna wlotu [m] (pierwszy narysowany punkt)", -2000.0, 3000.0, value=None,
@@ -1625,13 +1648,17 @@ def render_map_tab(raw_for_build: dict, set_raw, simple: bool = False, schedule:
                 st.session_state.pop("info_sel", None)
                 st.rerun()
             object_editor(site, info_sel, raw_for_build)
-            with st.expander("Wszystkie właściwości (także wyliczone: długości, rzędne, czasy)"):
-                half = (len(props) + 1) // 2
-                cols = st.columns(2)
-                for col, part in zip(cols, (props[1:half + 1], props[half + 1:])):
-                    if part:
-                        col.dataframe(pd.DataFrame(part, columns=["właściwość", "wartość"]).astype(str),
-                                      hide_index=True, width="stretch")
+            in_form = {_base_label(f[1]) for f in _form_fields(site, info_sel.split(":", 1)[0], {})} | {"produkt"}
+            props = [props[0]] + [p for p in props[1:] if _base_label(p[0]) not in in_form]
+            if len(props) > 1:
+                with st.expander("Wartości wyliczone – tylko podgląd (długości, rzędne, czasy; zmieniasz je na mapie "
+                                 "albo w polach powyżej)"):
+                    half = len(props) // 2
+                    cols = st.columns(2)
+                    for col, part in zip(cols, (props[1:half + 1], props[half + 1:])):
+                        if part:
+                            col.dataframe(pd.DataFrame(part, columns=["właściwość", "wartość"]).astype(str),
+                                          hide_index=True, width="stretch")
 
     st.subheader("3. Obiekty na mapie")
     st.caption("Parametry poprawiasz w tabelach (wiersz można też usunąć). Położenie i kształt – na mapie, w trybie "

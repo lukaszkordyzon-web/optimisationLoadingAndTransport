@@ -392,3 +392,14 @@ def test_road_level_is_chosen_in_the_table():
     assert not at.exception, at.exception
     road = next(r for r in at.session_state["site"]["roads"] if r["uid"] == uids[i])
     assert road["inlet_elev_m"] == other["elev_m"] and "level_pick" not in road
+
+
+def test_crusher_elevation_is_set_in_its_form():
+    at = AppTest.from_file(APP, default_timeout=300).run()
+    at.session_state["info_sel"] = "crusher:main"
+    at.run()
+    at.number_input(key="of_crusher:main_elev_m").set_value(512.0)
+    next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
+    assert not at.exception, at.exception
+    c = at.session_state["site"]["crusher"]
+    assert c["elev_m"] == 512.0 and c["elev_set"]
