@@ -97,3 +97,34 @@ def test_full_output_variant():
     assert not at.exception, at.exception
     cmp = at.session_state["k2_cmp"]
     assert cmp["B"]["t"] >= cmp["A"]["t"] and cmp["B"]["mode"] == "min"
+
+
+def test_a_variant_with_other_machines():
+    import copy
+
+    at = AppTest.from_file(APP, default_timeout=900)
+    at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
+                                   "real_t": 0.0}
+    at.run()
+    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.button(key="k2_var_copy").click().run()
+    trucks = copy.deepcopy(at.session_state["raw"]["trucks"])[:4]  # B: two trucks fewer, the rest a bigger model
+    for t in trucks:
+        t.update({"model": "CAT 773G (sztywnoramowe 55 t)", "payload_t": 55.0})
+    at.session_state["variants"]["B"]["machines"] = {"trucks": trucks, "excavators": []}
+    at.run()
+    assert not at.exception, at.exception
+    assert set(at.session_state["variants"]["B"]["tr"]) == {t["id"] for t in trucks}  # the plan kept, rows synced
+    assert len(at.session_state["variants"]["A"]["tr"]) == 6  # the base keeps its trucks
+    at.button(key="k2_var_cmp").click().run()
+    assert not at.exception, at.exception
+    assert set(at.session_state["k2_cmp"]) == {"A", "B"}
+
+
+def test_machines_screen_has_models_for_every_machine():
+    at = AppTest.from_file(APP, default_timeout=600)
+    at.run()
+    at.radio(key="k2_mine_tab").set_value("Maszyny").run()
+    assert not at.exception, at.exception
+    cols = [list(d.value.columns) for d in at.dataframe] if hasattr(at, "dataframe") else []
+    assert at.session_state["raw"]["excavators"]

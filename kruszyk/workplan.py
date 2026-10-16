@@ -41,6 +41,8 @@ def fit(work: dict, n: int) -> dict:
     """The plan cut or extended (last shift repeated) to n shifts."""
     out = {"start": dict(work.get("start") or {}), "ex": {}, "tr": {}, "dr": {}, "fire": dict(work.get("fire") or {}),
            "mode": work.get("mode", "limit"), "drill": work.get("drill", True)}
+    if work.get("machines"):
+        out["machines"] = work["machines"]
     for part in ("ex", "dr"):
         for k, cells in (work.get(part) or {}).items():
             cells = list(cells) or [{"a": "", "t": 0.0}]

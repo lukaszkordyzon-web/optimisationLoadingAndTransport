@@ -8,6 +8,7 @@ import streamlit as st
 
 from kruszyk import catalog
 from . import state, theme
+from .machines import crusher_editor, excavator_editor, map_models, sync_site, truck_editor
 from .theme import card
 
 MAP, MACHINES = "Mapa", "Maszyny"
@@ -45,30 +46,13 @@ def machines() -> None:
         n = sum(int(t.get("count", 1)) for t in trucks)
         cap = sum(int(t.get("count", 1)) * float(t.get("payload_t", 0)) for t in trucks)
         theme.h2(f"Wozidła <span class='k2-note' style='font-weight:400'>razem <b>{n} szt.</b> · {cap:,.0f} t ładowności</span>".replace(",", " "))
-        df = pd.DataFrame([{"id": t.get("id", ""), "model": t.get("model", ""), "sztuk": int(t.get("count", 1)),
-                            "ladownosc_t": t.get("payload_t"), "masa_t": t.get("empty_mass_t"), "moc_kw": t.get("power_kw"),
-                            "vmax_kmh": t.get("max_speed_kmh"), "pal_pelny": t.get("fuel_lph_loaded"),
-                            "pal_pusty": t.get("fuel_lph_empty"), "pal_jalowy": t.get("fuel_lph_idle")} for t in trucks])
-        ed = st.data_editor(df, key=f"k2_trucks_{v}", num_rows="dynamic", hide_index=True, width="stretch",
-                            column_config={"id": "ID", "model": "model", "sztuk": st.column_config.NumberColumn("sztuk", min_value=1, step=1),
-                                           "ladownosc_t": "ładowność [t]", "masa_t": "masa pusta [t]", "moc_kw": "moc [kW]",
-                                           "vmax_kmh": "v max [km/h]", "pal_pelny": "paliwo pełny [l/h]",
-                                           "pal_pusty": "paliwo pusty [l/h]", "pal_jalowy": "paliwo jałowy [l/h]"})
+        new_trucks = truck_editor(trucks, f"k2_trucks_{v}")
+        st.caption("Każde wozidło w osobnym wierszu. Wybierz model z listy – parametry wpiszą się same; popraw je "
+                   "na Wasze realne. „(własny)” = wpisujesz wszystko sam.")
         c = st.columns([3, 1, 1])
         model = c[0].selectbox("Dodaj z katalogu", catalog.names("truck"), key=f"k2_tcat_{v}")
         cnt = c[1].number_input("sztuk", 1, 30, 1, key=f"k2_tcnt_{v}")
         add = c[2].button("➕ Dodaj", key=f"k2_tadd_{v}", width="stretch")
-    new_trucks = []
-    for (_, r), old in zip(ed.iterrows(), trucks + [{}] * len(ed)):
-        t = dict(old)
-        t.update({"model": r["model"] or t.get("model", "wozidło"), "count": int(_num(r["sztuk"], 1)) or 1,
-                  "payload_t": _num(r["ladownosc_t"], 36), "empty_mass_t": _num(r["masa_t"], 30),
-                  "power_kw": _num(r["moc_kw"], 350), "max_speed_kmh": _num(r["vmax_kmh"], 45),
-                  "fuel_lph_loaded": _num(r["pal_pelny"], 45), "fuel_lph_empty": _num(r["pal_pusty"], 25),
-                  "fuel_lph_idle": _num(r["pal_jalowy"], 8)})
-        if r["id"]:
-            t["id"] = str(r["id"])
-        new_trucks.append(t)
     if add:
         p = catalog.params("truck", model)
         used = {t.get("id") for t in new_trucks}
@@ -87,36 +71,21 @@ def machines() -> None:
     with card("ex"):
         theme.h2("Koparki i ładowarki")
         exs = raw.get("excavators", [])
-        df = pd.DataFrame([{"id": e["id"], "lyzka_m3": e.get("bucket_m3"), "cykl_s": e.get("swing_cycle_s"),
-                            "wypelnienie": e.get("fill_factor", 0.9), "podstawienie_s": e.get("spot_time_s", 40.0)} for e in exs])
-        ed = st.data_editor(df, key=f"k2_ex_{v}", hide_index=True, width="stretch", disabled=["id"],
-                            column_config={"id": "ID", "lyzka_m3": "łyżka [m³]", "cykl_s": "cykl łyżki [s]",
-                                           "wypelnienie": "wypełnienie łyżki", "podstawienie_s": "podstawienie wozidła [s]"})
-        st.caption("Koparki dodajesz na mapie. Model z katalogu: kliknij koparkę na mapie.")
-    for e, (_, r) in zip(exs, ed.iterrows()):
-        e.update({"bucket_m3": _num(r["lyzka_m3"], 4), "swing_cycle_s": _num(r["cykl_s"], 30),
-                  "fill_factor": _num(r["wypelnienie"], 0.9), "spot_time_s": _num(r["podstawienie_s"], 40)})
-    for se in (raw.get("site") or {}).get("excavators", []):  # the map keeps the machine data too
-        x = next((e for e in exs if e["id"] == se.get("id")), None)
-        if x:
-            se.update({k_: x[k_] for k_ in ("bucket_m3", "swing_cycle_s", "fill_factor") if k_ in x})
+        area_ids = [x["id"] for x in (raw.get("site") or {}).get("areas", []) if x.get("id")]
+        raw["excavators"] = excavator_editor(exs, f"k2_ex_{v}", area_ids, map_models(raw))
+        st.caption("Koparki dodajesz na mapie. Tu wybierasz model z katalogu i poprawiasz parametry.")
+    sync_site(raw)
 
     c1, c2 = st.columns([3, 2])
     # ---------------------------------------------------------------- crushers
     with c1, card("cr"):
         theme.h2("Kruszarki")
         cr = raw.setdefault("crusher", {})
+        cr.setdefault("model", ((raw.get("site") or {}).get("crusher") or {}).get("model", ""))
         extra = raw.get("crushers_extra") or []
-        rows = [{"id": cr.get("id", "C-1"), "wydajnosc": cr.get("capacity_tph"), "kosz": cr.get("hopper_t"),
-                 "wyladunek_s": cr.get("dump_time_s", 60.0), "kwh_t": cr.get("kwh_per_t", 1.1)}]
-        rows += [{"id": c.get("id"), "wydajnosc": c.get("capacity_tph"), "kosz": c.get("hopper_t"),
-                  "wyladunek_s": c.get("dump_time_s", 60.0), "kwh_t": c.get("kwh_per_t", 1.1)} for c in extra]
-        ed = st.data_editor(pd.DataFrame(rows), key=f"k2_cr_{v}", hide_index=True, width="stretch", disabled=["id"],
-                            column_config={"id": "ID", "wydajnosc": "wydajność [t/h]", "kosz": "kosz [t]",
-                                           "wyladunek_s": "wyładunek [s]", "kwh_t": "energia [kWh/t]"})
-        for c_, (_, r) in zip([cr] + extra, ed.iterrows()):
-            c_.update({"capacity_tph": _num(r["wydajnosc"], 400), "hopper_t": _num(r["kosz"], 100),
-                       "dump_time_s": _num(r["wyladunek_s"], 60), "kwh_per_t": _num(r["kwh_t"], 1.1)})
+        done = crusher_editor([cr] + extra, f"k2_cr_{v}")
+        raw["crusher"], raw["crushers_extra"] = done[0], done[1:]
+        sync_site(raw)
     # ---------------------------------------------------------------- drill rigs
     with c2, card("rigs"):
         theme.h2("Wiertnice")

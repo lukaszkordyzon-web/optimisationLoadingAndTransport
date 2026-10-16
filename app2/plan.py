@@ -20,6 +20,7 @@ from kruszyk.config import yaml_dump
 from kruszyk.period import PeriodPlan
 from kruszyk.schedule import area_blast_t
 from . import state, theme
+from .machines import excavator_editor, map_models, truck_editor, variant_raw
 from .theme import card
 
 grid_component = components.declare_component("k2_grid", path=str(Path(__file__).parent / "grid_component"))
@@ -122,7 +123,10 @@ def _work(sc, raw: dict, n: int, cap: float, rigs: list, fire: int) -> tuple[dic
         act = next(iter(vs), "A")
         st.session_state.k2seg_variant = act
     w = vs.get(act, st.session_state.get("work"))
-    if w is None or set(w.get("ex") or {}) != {e.id for e in sc.excavators} or set(w.get("tr") or {}) != set(trucks):
+    if w is not None and set(w.get("ex") or {}) == {e.id for e in sc.excavators} and set(w.get("tr") or {}) != set(trucks):
+        old = w.get("tr") or {}
+        w["tr"] = {t: old.get(t, [""] * n) for t in trucks}  # other trucks: the new ones stand until planned
+    if w is None or set(w.get("ex") or {}) != {e.id for e in sc.excavators}:
         if not start:
             start = {a["id"]: area_blast_t(a, cap) for a in sc.areas}
         w = workplan.default(sc.excavators, trucks, sc.areas, rates, n, start, near, cap, rigs, fire)
@@ -154,6 +158,28 @@ def _drop_variant() -> None:
         st.session_state.k2seg_variant = next(iter(vs))
 
 
+def _variant_machines(raw: dict, w: dict, act: str) -> None:
+    """Other trucks / excavator models in this variant only (the mine in ① Kopalnia stays as it is)."""
+    vr = variant_raw(raw, w)
+    ver = st.session_state.get("k2_vm_ver", 0)
+    theme.note("Zmieniasz tylko ten wariant: model, liczbę wozideł (dodaj / usuń wiersz) i parametry koparek. Nowe wozidło "
+               "stoi, dopóki w harmonogramie nie przydzielisz go do koparki.")
+    trucks = truck_editor(vr.get("trucks", []), f"k2_vm_tr_{act}_{ver}")
+    area_ids = [x["id"] for x in (raw.get("site") or {}).get("areas", []) if x.get("id")]
+    exs = excavator_editor(vr.get("excavators", []), f"k2_vm_ex_{act}_{ver}", area_ids, map_models(vr))
+    c = st.columns(2)
+    if c[0].button("Zastosuj w wariancie", type="primary", key=f"k2_vm_set_{act}", width="stretch"):
+        w["machines"] = {"trucks": trucks, "excavators": [{k: e[k] for k in ("id", "bucket_m3", "swing_cycle_s",
+                                                                         "fill_factor", "spot_time_s", "model")
+                                                          if k in e} for e in exs]}
+        st.session_state.k2_vm_ver = ver + 1
+        st.rerun()
+    if c[1].button("Maszyny jak w kopalni", key=f"k2_vm_reset_{act}", width="stretch", disabled=not w.get("machines")):
+        w.pop("machines", None)
+        st.session_state.k2_vm_ver = ver + 1
+        st.rerun()
+
+
 def _diff(a: dict, b: dict, lab: list) -> list[str]:
     """What a variant changes against the base one, in a few words per machine."""
     out = []
@@ -168,6 +194,9 @@ def _diff(a: dict, b: dict, lab: list) -> list[str]:
                 out.append(f"{k}: inaczej na {len(diff)} zm. (od {lab[diff[0]]})")
     if a.get("fire") != b.get("fire"):
         out.append("inne przesunięcia strzałów")
+    if a.get("machines") != b.get("machines"):
+        mb = (b.get("machines") or {}).get("trucks")
+        out.append("inne maszyny" + (f" ({len(mb)} wozideł)" if mb is not None else ""))
     return out or ["bez zmian"]
 
 
@@ -205,7 +234,9 @@ def _limits(r: dict) -> str:
     return "koparki – pracują na pełnych możliwościach"
 
 
-def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
+def _variants_card(raw, p, rigs, cap, lab) -> None:
+    from kruszyk.config import scenario_from_dict
+
     vs = st.session_state.variants
     names = list(vs)
     first = names[0]
@@ -239,6 +270,8 @@ def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
         if open_ != (w.get("mode") == "min"):
             w["mode"] = "min" if open_ else "limit"
             st.rerun()
+        with st.expander(f"Maszyny w wariancie {act}" + (" · zmienione" if w.get("machines") else " · jak w kopalni")):
+            _variant_machines(raw, w, act)
         theme.note("Harmonogram poniżej to wybrany wariant. „Kopia” tworzy nowy z tym samym planem – zmieniasz w nim "
                    "wiercenie, koparki albo wozidła i porównujesz. Potem wybrany wariant zatwierdzasz do porównania z RL.")
         cache = st.session_state.setdefault("k2_cmp", {})
@@ -248,7 +281,8 @@ def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
             for j, (k, w) in enumerate(vs.items()):
                 if cache.get(k, {}).get("sig") != sig[k]:
                     bar.progress(j / len(vs), f"Wariant {k}: miesiąc jak dziś…")
-                    cache[k] = {"sig": sig[k], **_month_today(raw, sc, w, p, rigs, cap)}
+                    vr = variant_raw(raw, w)
+                    cache[k] = {"sig": sig[k], **_month_today(vr, scenario_from_dict(copy.deepcopy(vr)), w, p, rigs, cap)}
             bar.empty()
         done = [k for k in names if cache.get(k, {}).get("sig") == sig[k]]
         if len(done) >= 2:
@@ -285,8 +319,13 @@ def _variants_card(raw, sc, p, rigs, cap, lab) -> None:
 
 # ------------------------------------------------------------------ screen
 def step_plan() -> None:
-    raw = state.raw()
-    sc = state.scenario()
+    from kruszyk.config import scenario_from_dict
+
+    base = state.raw()
+    vs0 = st.session_state.get("variants") or {}
+    w0 = vs0.get(st.session_state.get("k2seg_variant") or "A")
+    raw = variant_raw(base, w0)  # the mine as the open variant has it (its own machines, if changed)
+    sc = state.scenario() if raw is base else scenario_from_dict(copy.deepcopy(raw))
     p = plan_settings()
     head = st.columns([4, 1.6], vertical_alignment="bottom")
     with head[0]:
@@ -338,7 +377,7 @@ def step_plan() -> None:
                 st.markdown(theme.chip(f"model {model_t:,.0f} t ({diff:+.0f} %)".replace(",", " "), ok=False),
                             unsafe_allow_html=True)
                 if st.button("Dopasuj model", key="k2_fit"):
-                    _fit_model(raw, sc, p["real_t"])
+                    _fit_model(base, sc, p["real_t"])
         elif model_t:
             theme.note(f"model: ok. {model_t:,.0f} t/zmianę".replace(",", " "))
 
@@ -346,7 +385,7 @@ def step_plan() -> None:
     c1, c2 = st.columns([3, 1.25])
     with c1, card("areas"):
         theme.h4("Obszary", "ile urobku leży na start, wielkość odstrzału, zasoby")
-        _areas_editor(raw, sc, rigs, int(p["fire"]), work)
+        _areas_editor(base, sc, rigs, int(p["fire"]), work)
     with c2, card("drill"):
         theme.h4("Wiercenie i strzelanie")
         theme.note((" · ".join(f"{r['id']}: <b>{float(r.get('m_per_shift') or 250):.0f} mb/zm.</b>, "
@@ -355,11 +394,11 @@ def step_plan() -> None:
         names = list(FIRE)
         cur = next((k for k, x in FIRE.items() if x == int(p["fire"])), names[0])
         p["fire"] = FIRE[st.selectbox("Urobek dostępny", names, index=names.index(cur), key="k2_fire")]
-        _blast_hours(raw)
+        _blast_hours(base)
         theme.note("W dniu strzału wozidła i koparki schodzą z wyrobiska na czas ewakuacji i strzału; przejazd koparki "
                    "na nowy usyp jest wliczony.")
 
-    _variants_card(raw, sc, p, rigs, cap, lab)
+    _variants_card(base, p, rigs, cap, lab)
 
     # ---------------------------------------------------------------- the grid
     ev = workplan.evaluate(work, sc.areas, rigs, n, cap, int(p["fire"]), rates, travel_h(raw, rigs), sc.shift_hours)
