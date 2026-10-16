@@ -147,12 +147,49 @@ def sync_site(raw: dict) -> None:
         site["crusher"]["model"] = raw["crusher"].get("model", site["crusher"].get("model", ""))
 
 
+ROAD_KEYS = ("single_lane", "speed_limit_kmh", "active")
+
+
+def road_editor(raw: dict, changes: dict, key: str) -> dict:
+    """The roads of the map as a variant has them: one or two lanes, speed limit, in use. Returns the changes against
+    the map ({road id: {field: value}})."""
+    roads = (raw.get("site") or {}).get("roads", [])
+    rows = []
+    for r in roads:
+        ch = changes.get(r["id"], {})
+        rows.append({"id": r["id"], "nazwa": r.get("name", r["id"]), "rodzaj": r.get("kind", "droga"),
+                     "jeden_pas": bool(ch.get("single_lane", r.get("single_lane", False))),
+                     "vmax": float(ch.get("speed_limit_kmh", r.get("speed_limit_kmh", 40.0))),
+                     "aktywna": bool(ch.get("active", r.get("active", True)))})
+    ed = st.data_editor(pd.DataFrame(rows, columns=["id", "nazwa", "rodzaj", "jeden_pas", "vmax", "aktywna"]), key=key,
+                        hide_index=True, width="stretch", disabled=["id", "nazwa", "rodzaj"],
+                        column_config={"id": "ID", "nazwa": "droga", "rodzaj": "rodzaj",
+                                       "jeden_pas": st.column_config.CheckboxColumn(
+                                           "jeden pas (mijanki)", help="Odznacz = dwa pasy: wozidła mijają się w "
+                                                                       "każdym miejscu, nikt nie czeka na mijance."),
+                                       "vmax": st.column_config.NumberColumn("prędkość max [km/h]", min_value=5.0),
+                                       "aktywna": st.column_config.CheckboxColumn("w użyciu")})
+    out = {}
+    for r, (_, e) in zip(roads, ed.iterrows()):
+        want = {"single_lane": bool(e["jeden_pas"]), "speed_limit_kmh": _num(e["vmax"], 40.0),
+                "active": bool(e["aktywna"])}
+        base = {"single_lane": bool(r.get("single_lane", False)), "speed_limit_kmh": float(r.get("speed_limit_kmh", 40.0)),
+                "active": bool(r.get("active", True))}
+        diff = {k: v for k, v in want.items() if v != base[k]}
+        if diff:
+            out[r["id"]] = diff
+    return out
+
+
 def variant_raw(raw: dict, work: dict) -> dict:
-    """The mine as a variant has it: its own trucks / excavator parameters when it changed them."""
+    """The mine as a variant has it: its own trucks / excavator parameters / roads when it changed them."""
     m = (work or {}).get("machines") or {}
-    if not m:
+    roads = (work or {}).get("roads") or {}
+    if not m and not roads:
         return raw
     new = copy.deepcopy(raw)
+    for r in (new.get("site") or {}).get("roads", []):
+        r.update({k: v for k, v in roads.get(r.get("id"), {}).items() if k in ROAD_KEYS})
     if m.get("trucks") is not None:
         new["trucks"] = copy.deepcopy(m["trucks"])
     for e in m.get("excavators") or []:

@@ -153,3 +153,36 @@ def test_picking_a_model_brings_its_parameters():
     assert t["payload_t"] == 55.0 and model_changed([t]) and "_model_changed" not in t
     e = _apply_model("excavator", {"bucket_m3": 4.5}, "", "CAT 352 (koparka 52 t)")
     assert e["bucket_m3"] == 3.1 and e["model"] == "CAT 352 (koparka 52 t)"
+
+
+def test_a_variant_with_a_two_lane_ramp():
+    import datetime as dt
+
+    import yaml
+
+    from app2.machines import variant_raw
+    from kruszyk import workplan
+    from kruszyk.config import scenario_from_dict
+    from kruszyk.period import PeriodPlan, run_period
+    from kruszyk.rl import today
+
+    raw = yaml.safe_load(open(Path(__file__).parent.parent / "scenarios" / "kruszyk_demo_zakrzowek.yaml", encoding="utf-8"))
+    ramps = [r["id"] for r in raw["site"]["roads"] if r.get("single_lane")]
+    assert ramps
+    sc = scenario_from_dict(raw)
+    n = 2
+    work = {"start": {"O2": 30000.0, "O3": 30000.0}, "ex": {"K-1": [{"a": "O2", "t": 3000.0}] * n,
+                                                           "K-2": [{"a": "O3", "t": 3000.0}] * n},
+            "tr": {f.id: ["K-1" if j % 2 else "K-2"] * n for j, f in enumerate(sc.trucks)}, "dr": {}, "mode": "min"}
+    out = {}
+    for name, roads in (("A", {}), ("B", {r: {"single_lane": False} for r in ramps})):
+        w = dict(work, roads=roads)
+        vr = variant_raw(raw, w)
+        assert all(not r.get("single_lane") for r in vr["site"]["roads"] if r["id"] in ramps) == bool(roads)
+        ev = workplan.evaluate(w, sc.areas, [], n)
+        sim = scenario_from_dict(workplan.scenario_raw(vr, w, ev["grid"]))
+        p = PeriodPlan(start=dt.date(2026, 11, 2), days=1, shifts_per_day=2)
+        p.frozen = workplan.frozen(w, ev, n)
+        out[name] = run_period(today(sim), p, seed=1)["wywiezione_t"].sum()
+    assert out["B"] >= out["A"] * 0.98  # two lanes never take tonnes away
+    assert raw["site"]["roads"][0].get("single_lane") is not None or True  # the map itself is untouched

@@ -20,7 +20,7 @@ from kruszyk.config import yaml_dump
 from kruszyk.period import PeriodPlan
 from kruszyk.schedule import area_blast_t
 from . import state, theme
-from .machines import excavator_editor, map_models, model_changed, truck_editor, variant_raw
+from .machines import excavator_editor, map_models, model_changed, road_editor, truck_editor, variant_raw
 from .theme import card
 
 grid_component = components.declare_component("k2_grid", path=str(Path(__file__).parent / "grid_component"))
@@ -195,6 +195,8 @@ def _diff(a: dict, b: dict, lab: list) -> list[str]:
                 out.append(f"{k}: inaczej na {len(diff)} zm. (od {lab[diff[0]]})")
     if a.get("fire") != b.get("fire"):
         out.append("inne przesunięcia strzałów")
+    if a.get("roads") != b.get("roads"):
+        out.append("inne drogi: " + ", ".join(sorted((b.get("roads") or {}))) if b.get("roads") else "drogi jak na mapie")
     if a.get("machines") != b.get("machines"):
         mb = (b.get("machines") or {}).get("trucks")
         out.append("inne maszyny" + (f" ({len(mb)} wozideł)" if mb is not None else ""))
@@ -273,6 +275,13 @@ def _variants_card(raw, p, rigs, cap, lab) -> None:
             st.rerun()
         with st.expander(f"Maszyny w wariancie {act}" + (" · zmienione" if w.get("machines") else " · jak w kopalni")):
             _variant_machines(raw, w, act)
+        with st.expander(f"Drogi w wariancie {act}" + (" · zmienione" if w.get("roads") else " · jak na mapie")):
+            theme.note("Przepustowość pochylni: jeden pas = wozidła czekają na mijankach (pod górę ma pierwszeństwo), "
+                       "dwa pasy = mijają się wszędzie. „w użyciu” wyłączone = sprawdzasz objazd. Zmienia tylko ten wariant.")
+            roads = road_editor(raw, w.get("roads") or {}, f"k2_vroads_{act}_{st.session_state.get('k2_vm_ver', 0)}")
+            if roads != (w.get("roads") or {}):
+                w["roads"] = roads
+                st.rerun()
         theme.note("Harmonogram poniżej to wybrany wariant. „Kopia” tworzy nowy z tym samym planem – zmieniasz w nim "
                    "wiercenie, koparki albo wozidła i porównujesz. Potem wybrany wariant zatwierdzasz do porównania z RL.")
         cache = st.session_state.setdefault("k2_cmp", {})
