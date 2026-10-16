@@ -127,8 +127,8 @@ def signal_boxes(p: dict) -> str:
 def step_simulation() -> None:
     head = st.columns([4, 1.4], vertical_alignment="bottom")
     with head[0]:
-        theme.header("Symulacja: jak dziś i z sygnałami RL", "Ta sama zmiana z miesiąca obok siebie – te same zlecenia "
-                                                             "sztygara, pogoda i awarie. Zmienia się tylko sposób jazdy.")
+        theme.header("Symulacja: jak dziś i z sygnałami RL", "Ta sama zmiana z miesiąca obok siebie – ten sam plan, "
+                                                             "pogoda i awarie. Zmienia się tylko sposób jazdy.")
     appr = _approved()
     if not appr:
         return
@@ -173,7 +173,7 @@ def step_result() -> None:
             sub = (f"Wariant {appr.get('variant', 'A')}"
                    + (" (pełna wydajność koparek)" if (appr.get("work") or {}).get("mode") == "min" else "") + " · "
                    f"{res['labels'][0]} – {res['labels'][-1]} · {len(res['today'])} zmian · ten sam harmonogram, strzały, "
-                   "pogoda i awarie. Wozidła jeżdżą tam, gdzie wysyła sztygar – zmienia się tylko sposób jazdy.")
+                   "pogoda i awarie. Wozidła jeżdżą do tych samych koparek – zmienia się tylko sposób jazdy.")
         theme.header("Ten sam miesiąc: jak dziś i z sygnałami RL", sub)
     appr = _approved()
     if not appr:
