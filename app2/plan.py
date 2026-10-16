@@ -205,7 +205,7 @@ def _diff(a: dict, b: dict, lab: list) -> list[str]:
 
 def _month_today(raw: dict, sc, work: dict, p: dict, rigs: list, cap: float) -> dict:
     """The month of a variant worked as today (the same luck as every other variant – only the plan differs)."""
-    from kruszyk.config import scenario_from_dict
+    from kruszyk.config import cycle_costs, scenario_from_dict
     from kruszyk.period import run_period
     from kruszyk.rl import today
 
@@ -213,7 +213,7 @@ def _month_today(raw: dict, sc, work: dict, p: dict, rigs: list, cap: float) -> 
     n = len(plan.shifts())
     work = workplan.fit(work, n)
     ev = workplan.evaluate(work, sc.areas, rigs, n, cap, int(p["fire"]), None, travel_h(raw, rigs), sc.shift_hours)
-    sim = scenario_from_dict(workplan.scenario_raw(raw, work, ev["grid"], cap))
+    sim = cycle_costs(scenario_from_dict(workplan.scenario_raw(raw, work, ev["grid"], cap)))
     plan.frozen = workplan.frozen(work, ev, n)
     df = run_period(today(sim), plan, seed=0)
     t, cost = float(df["wywiezione_t"].sum()), float(df["koszt_zl"].sum())

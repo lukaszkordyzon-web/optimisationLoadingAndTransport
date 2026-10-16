@@ -186,3 +186,16 @@ def test_a_variant_with_a_two_lane_ramp():
         out[name] = run_period(today(sim), p, seed=1)["wywiezione_t"].sum()
     assert out["B"] >= out["A"] * 0.98  # two lanes never take tonnes away
     assert raw["site"]["roads"][0].get("single_lane") is not None or True  # the map itself is untouched
+
+
+def test_kruszyk2_costs_only_the_loading_to_crusher_cycle():
+    import yaml
+
+    from kruszyk.config import cycle_costs, scenario_from_dict
+    from kruszyk.rl import today
+    from kruszyk.sim import simulate
+
+    raw = yaml.safe_load(open(Path(__file__).parent.parent / "scenarios" / "kruszyk_demo_zakrzowek.yaml", encoding="utf-8"))
+    k = simulate(today(cycle_costs(scenario_from_dict(raw))), seed=1).kpi
+    assert k["cost_breakdown"]["wiercenie_strzelanie"] == 0 and k["cost_breakdown"]["odchylka_skladu"] == 0
+    assert k["cost_breakdown"]["kruszarka"] > 0 and k["cost_total"] == sum(k["cost_breakdown"].values())

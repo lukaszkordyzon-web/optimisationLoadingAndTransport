@@ -518,7 +518,9 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
             "wywiezione_t": k["hauled_t"], "koszt_zl": k["cost_total"], "koszt_na_t": k["cost_per_t"],
             "paliwo_l": k["fuel_l"], "motogodziny_wozidel": k.get("truck_mth", 0.0),
             **{f"k_{name}": val for name, val in (k.get("cost_split") or {}).items()},
-            "k_paliwo": k.get("cost_breakdown", {}).get("paliwo", 0.0), "kolejki_h": round(k["truck_queue_excavator_h"] + k["truck_queue_crusher_h"], 2),
+            "k_paliwo": k.get("cost_breakdown", {}).get("paliwo", 0.0),
+            "k_kruszarka": k.get("cost_breakdown", {}).get("kruszarka", 0.0),
+            "k_energia": k.get("cost_breakdown", {}).get("energia", 0.0), "kolejki_h": round(k["truck_queue_excavator_h"] + k["truck_queue_crusher_h"], 2),
             "koparki_czekaly_h": round(sum(e["waiting_for_trucks_h"] for e in k["excavators"]), 2),
             "kruszarka_bez_nadawy_h": k["crusher_starved_h"],
             "awarie_h": round(k["truck_breakdown_h"] + k["excavator_down_h"]["awaria"] + k["crusher_breakdown_h"]

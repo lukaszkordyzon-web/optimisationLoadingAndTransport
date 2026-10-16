@@ -587,6 +587,15 @@ def _routes(raw_routes: dict | None) -> dict[str, Route]:
             for rid, r in (raw_routes or {}).items()}
 
 
+def cycle_costs(sc: Scenario) -> Scenario:
+    """Only the loading-to-crusher cycle is costed: excavators, trucks, the crusher. Drilling and blasting (and the
+    blend penalty) are left out – the driving does not change them, they would only dilute the comparison."""
+    sc.costs.drill_blast_per_t = 0.0
+    sc.costs.drill_blast_fine_extra_per_t = 0.0
+    sc.costs.blend_penalty_per_t_pp = 0.0
+    return sc
+
+
 def scenario_from_dict(raw: dict) -> Scenario:
     routes = _routes(raw["routes"])
     sc = Scenario(

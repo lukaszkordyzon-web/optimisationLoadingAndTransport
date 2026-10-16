@@ -73,10 +73,10 @@ def month(appr) -> dict | None:
         go_ = st.button("Policz miesiąc i naucz sygnały", type="primary", key="k2_month_go")
     if not go_:
         return None
-    from kruszyk.config import scenario_from_dict
+    from kruszyk.config import cycle_costs, scenario_from_dict
     import yaml
 
-    sc = scenario_from_dict(yaml.safe_load(appr["raw"]))  # the mine as the plan puts it: piles in the areas
+    sc = cycle_costs(scenario_from_dict(yaml.safe_load(appr["raw"])))  # the mine as the plan puts it: piles in the areas
     plan = period_plan(appr["plan"])
     plan.frozen = appr["frozen"]
     bar = st.progress(0.0, "Miesiąc jak dziś…")
@@ -99,10 +99,10 @@ def month(appr) -> dict | None:
 
 @st.cache_data(show_spinner=False, max_entries=6)
 def _split(state_yaml: str, params: tuple, seed: int) -> str:
-    from kruszyk.config import scenario_from_dict
+    from kruszyk.config import cycle_costs, scenario_from_dict
     import yaml
 
-    sc = scenario_from_dict(yaml.safe_load(state_yaml))
+    sc = cycle_costs(scenario_from_dict(yaml.safe_load(state_yaml)))
     a = simulate(today(sc), seed=seed)
     b = simulate(with_signals(sc, dict(params)), seed=seed)
     return split_html(a, b, "Jak dziś", "Z sygnałami RL")
@@ -198,7 +198,8 @@ def step_result() -> None:
         return f"{x:,.0f}".replace(",", " ")
     m = st.columns(5)
     m[0].metric("Oszczędność w miesiącu", f"{num((z0 - z1) * t1)} zł", help="(koszt tony dziś − z sygnałami) × tony z sygnałami")
-    m[1].metric("Koszt tony", f"{z1:.2f} zł/t", f"{z1 - z0:+.2f} zł/t (dziś {z0:.2f})", delta_color="inverse")
+    m[1].metric("Koszt tony", f"{z1:.2f} zł/t", f"{z1 - z0:+.2f} zł/t (dziś {z0:.2f})", delta_color="inverse",
+                help="Załadunek, transport i kruszarka – bez wiercenia i strzelania (sygnały jazdy ich nie zmieniają).")
     m[2].metric("Paliwo", f"{num(f1)} l", f"{100 * (f1 / f0 - 1):+.1f} % (dziś {num(f0)} l)" if f0 else None,
                 delta_color="inverse")
     m[3].metric("Wywiezione", f"{num(t1)} t", f"{100 * (t1 / t0 - 1):+.1f} % (dziś {num(t0)} t)" if t0 else None)
@@ -240,15 +241,19 @@ def step_result() -> None:
     parts = [("paliwo", "Paliwo (wozidła)"), ("wozidla_serwis", "Serwis wozideł – od mth"),
              ("wozidla_amortyzacja", "Amortyzacja wozideł – od mth"), ("wozidla_kierowcy", "Kierowcy – stały"),
              ("koparki_serwis", "Serwis koparek – od mth"), ("koparki_amortyzacja", "Amortyzacja koparek – od mth"),
-             ("koparki_operatorzy", "Operatorzy koparek – stały")]
+             ("koparki_operatorzy", "Operatorzy koparek – stały"), ("kruszarka", "Kruszarka – stały"),
+             ("energia", "Energia kruszarki – od tony")]
     if all(f"k_{k}" in a for k, _ in parts):
         with card("savings"):
-            theme.h4("Skąd oszczędność", "cały miesiąc; kierowcy i operatorzy są opłaceni tak samo – liczy się "
+            theme.h4("Skąd oszczędność", "cały miesiąc; załadunek, transport i kruszarka – bez wiercenia i "
+                                         "strzelania. Kierowcy i operatorzy są opłaceni tak samo – liczy się "
                                          "paliwo i to, co zależy od motogodzin")
             rows = []
             for k, label in parts:
                 x0, x1 = float(a[f"k_{k}"].sum()), float(b[f"k_{k}"].sum())
                 rows.append([label, num(x0), num(x1), f"{x1 - x0:+,.0f}".replace(",", " ")])
+            s0, s1 = float(a["koszt_zl"].sum()), float(b["koszt_zl"].sum())
+            rows.append(["Razem", num(s0), num(s1), f"{s1 - s0:+,.0f}".replace(",", " ")])
             m0, m1 = float(a["motogodziny_wozidel"].sum()), float(b["motogodziny_wozidel"].sum())
             rows.append(["Motogodziny wozideł [mth]", num(m0), num(m1), f"{m1 - m0:+,.0f}".replace(",", " ")])
             st.markdown(theme.table([("Składnik", ""), ("Jak dziś [zł]", "n"), ("Z RL [zł]", "n"), ("Różnica", "n")],
