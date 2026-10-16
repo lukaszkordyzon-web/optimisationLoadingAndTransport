@@ -350,7 +350,7 @@ class SignalsResult:
 
 def train_signals(states: list[Scenario], iterations: int = 8, population: int = 10, episodes: int = 3,
                   seed: int = 0, callback: Callable[[int, int, dict], None] | None = None,
-                  weight: float = 0.5) -> SignalsResult:
+                  weight: float = 0.5, check: int = 8) -> SignalsResult:
     """Learn the signal settings (CEM) on shifts starting from `states` – the situations of a month worked as
     today (full piles, last tonnes of a pile, an excavator after a move …). Every iteration practises on other
     shifts; all candidates of an iteration on the same ones, compared with today's driving on them."""
@@ -359,7 +359,7 @@ def train_signals(states: list[Scenario], iterations: int = 8, population: int =
     mu, sigma = np.zeros(dim), np.ones(dim)
     n_elite = max(2, population // 4)
     keep, gain = goal_weights(weight)
-    history = []
+    history, means = [], []
     for it in range(iterations):
         cases = [(states[int(rng.integers(len(states)))], 50_000 + 1000 * it + e) for e in range(episodes)]
         base = _run(cases, None)
@@ -369,12 +369,20 @@ def train_signals(states: list[Scenario], iterations: int = 8, population: int =
                          for k, x in enumerate(cand)))
         elite = np.array([cand[k] for _, k in scored[:n_elite]])
         mu = elite.mean(axis=0)
+        means.append(mu.copy())
         sigma = elite.std(axis=0) + max(0.05, 0.5 * (1 - it / max(iterations - 1, 1)))
         a = aggregate(base)
         row = {"runda": it + 1, "dzis_zl_t": a["cost_per_t"], "sygnaly_zl_t": scored[0][0]}
         history.append(row)
         if callback:
             callback(it + 1, iterations, row)
+    # a round practises on a few random shifts, so its winner may just have been lucky: the last settings are
+    # checked on the same spread of the month's shifts and the best one is kept
+    if check and len(means) > 1:
+        idx = np.linspace(0, len(states) - 1, min(check, len(states))).round().astype(int)
+        cases = [(states[i], 90_000 + e) for e, i in enumerate(idx)]
+        base = _run(cases, None)
+        mu = min(means[-3:], key=lambda m: signals_objective(_run(cases, decode_signals(m)), base, keep, gain))
     return SignalsResult(params=decode_signals(mu), history=pd.DataFrame(history),
                          setup={"iterations": iterations, "population": population, "episodes": episodes,
                                 "states": len(states), "shifts": iterations * (population + 1) * episodes,
