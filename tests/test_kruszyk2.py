@@ -128,3 +128,28 @@ def test_machines_screen_has_models_for_every_machine():
     assert not at.exception, at.exception
     cols = [list(d.value.columns) for d in at.dataframe] if hasattr(at, "dataframe") else []
     assert at.session_state["raw"]["excavators"]
+
+
+def test_catalogue_model_on_machines_does_not_break_the_scenario():
+    import copy
+
+    import yaml
+
+    from kruszyk.config import scenario_from_dict
+
+    raw = yaml.safe_load(open(Path(__file__).parent.parent / "scenarios" / "kruszyk_demo_zakrzowek.yaml", encoding="utf-8"))
+    raw = copy.deepcopy(raw)
+    for e in raw["excavators"]:
+        e["model"] = "CAT 352 (koparka 52 t)"
+    raw["crusher"]["model"] = "Sandvik CJ615 – szczękowa stacjonarna"
+    sc = scenario_from_dict(raw)
+    assert sc.excavators
+
+
+def test_picking_a_model_brings_its_parameters():
+    from app2.machines import _apply_model, model_changed
+
+    t = _apply_model("truck", {"payload_t": 38.0, "model": "x"}, "x", "CAT 773G (sztywnoramowe 55 t)")
+    assert t["payload_t"] == 55.0 and model_changed([t]) and "_model_changed" not in t
+    e = _apply_model("excavator", {"bucket_m3": 4.5}, "", "CAT 352 (koparka 52 t)")
+    assert e["bucket_m3"] == 3.1 and e["model"] == "CAT 352 (koparka 52 t)"

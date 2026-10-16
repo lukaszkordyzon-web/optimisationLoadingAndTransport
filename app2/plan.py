@@ -20,7 +20,7 @@ from kruszyk.config import yaml_dump
 from kruszyk.period import PeriodPlan
 from kruszyk.schedule import area_blast_t
 from . import state, theme
-from .machines import excavator_editor, map_models, truck_editor, variant_raw
+from .machines import excavator_editor, map_models, model_changed, truck_editor, variant_raw
 from .theme import card
 
 grid_component = components.declare_component("k2_grid", path=str(Path(__file__).parent / "grid_component"))
@@ -168,7 +168,8 @@ def _variant_machines(raw: dict, w: dict, act: str) -> None:
     area_ids = [x["id"] for x in (raw.get("site") or {}).get("areas", []) if x.get("id")]
     exs = excavator_editor(vr.get("excavators", []), f"k2_vm_ex_{act}_{ver}", area_ids, map_models(vr))
     c = st.columns(2)
-    if c[0].button("Zastosuj w wariancie", type="primary", key=f"k2_vm_set_{act}", width="stretch"):
+    picked = model_changed(trucks) | model_changed(exs)  # a model picked: its parameters go in at once
+    if picked or c[0].button("Zastosuj w wariancie", type="primary", key=f"k2_vm_set_{act}", width="stretch"):
         w["machines"] = {"trucks": trucks, "excavators": [{k: e[k] for k in ("id", "bucket_m3", "swing_cycle_s",
                                                                          "fill_factor", "spot_time_s", "model")
                                                           if k in e} for e in exs]}

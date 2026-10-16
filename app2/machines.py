@@ -23,10 +23,14 @@ def _models(kind: str, current: list[str]) -> list[str]:
     return [OWN] + catalog.names(kind) + sorted({m for m in current if m and m not in catalog.KINDS[kind]})
 
 
+CHANGED = "_model_changed"  # set on a machine whose model was just picked: the table must show its parameters
+
+
 def _apply_model(kind: str, obj: dict, old_model: str, new_model: str) -> dict:
     """A model picked from the list brings its parameters; the planner's own values stay otherwise."""
     if new_model and new_model != old_model and new_model in catalog.KINDS[kind]:
         catalog.apply(kind, obj, new_model)
+        obj[CHANGED] = True
     elif new_model and new_model != OWN:
         obj["model"] = new_model
     return obj
@@ -117,6 +121,14 @@ def crusher_editor(crushers: list[dict], key: str) -> list[dict]:
                   "kwh_per_t": _num(r["kwh_t"], 1.1)})
         out.append(_apply_model("crusher", x, c.get("model", ""), str(r["model"] or "")))
     return out
+
+
+def model_changed(items: list[dict]) -> bool:
+    """A model was just picked in one of the rows (the flags are removed)."""
+    hit = False
+    for x in items:
+        hit = bool(x.pop(CHANGED, False)) or hit
+    return hit
 
 
 def map_models(raw: dict) -> dict[str, str]:

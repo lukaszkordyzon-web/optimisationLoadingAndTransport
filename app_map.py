@@ -746,6 +746,8 @@ def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
         "excavator": [("id", "nazwa", "text", None), ("pile", "ładuje z usypu", "sel", pile_ids),
                       ("model", "model (katalog)", "sel", [""] + catalog.names("excavator")),
                       ("bucket_m3", "łyżka [m³]", "num", (0.5, 0.5)), ("swing_cycle_s", "cykl łyżki [s]", "num", (10.0, 1.0)),
+                      ("fill_factor", "wypełnienie łyżki", "num", (0.3, 0.05)),
+                      ("spot_time_s", "podstawienie wozidła [s]", "num", (0.0, 5.0)),
                       ("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
                       ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0)),
                       ("areas", "pracuje w (harmonogram; puste = wszędzie)", "multi", _pile_ids(site)), *_FAIL],

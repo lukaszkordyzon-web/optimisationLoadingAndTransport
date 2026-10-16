@@ -568,7 +568,12 @@ class Scenario:
 
 
 def _build(cls, data: dict):
-    return cls(**(data or {}))
+    """A dataclass from its dict; descriptive extras the screens keep (e.g. the catalogue model) are skipped."""
+    fields = getattr(cls, "__dataclass_fields__", None)
+    data = data or {}
+    if fields:
+        data = {k: v for k, v in data.items() if k in fields}
+    return cls(**data)
 
 
 def load_scenario(path: str | Path) -> Scenario:

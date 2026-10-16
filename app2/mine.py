@@ -8,7 +8,7 @@ import streamlit as st
 
 from kruszyk import catalog
 from . import state, theme
-from .machines import crusher_editor, excavator_editor, map_models, sync_site, truck_editor
+from .machines import crusher_editor, excavator_editor, map_models, model_changed, sync_site, truck_editor
 from .theme import card
 
 MAP, MACHINES = "Mapa", "Maszyny"
@@ -63,6 +63,9 @@ def machines() -> None:
                 k += 1
             new_trucks.append({**p, "model": model, "count": 1, "id": f"WZ-{k:02d}", "excavators": []})
     raw["trucks"] = new_trucks
+    if model_changed(new_trucks):  # a model picked: show its parameters in the table at once
+        state.set_raw(raw)
+        st.rerun()
     if add:
         state.set_raw(raw)
         st.rerun()
@@ -73,6 +76,10 @@ def machines() -> None:
         exs = raw.get("excavators", [])
         area_ids = [x["id"] for x in (raw.get("site") or {}).get("areas", []) if x.get("id")]
         raw["excavators"] = excavator_editor(exs, f"k2_ex_{v}", area_ids, map_models(raw))
+        if model_changed(raw["excavators"]):
+            sync_site(raw)
+            state.set_raw(raw)
+            st.rerun()
         st.caption("Koparki dodajesz na mapie. Tu wybierasz model z katalogu i poprawiasz parametry.")
     sync_site(raw)
 
@@ -84,8 +91,12 @@ def machines() -> None:
         cr.setdefault("model", ((raw.get("site") or {}).get("crusher") or {}).get("model", ""))
         extra = raw.get("crushers_extra") or []
         done = crusher_editor([cr] + extra, f"k2_cr_{v}")
+        changed = model_changed(done)
         raw["crusher"], raw["crushers_extra"] = done[0], done[1:]
         sync_site(raw)
+        if changed:
+            state.set_raw(raw)
+            st.rerun()
     # ---------------------------------------------------------------- drill rigs
     with c2, card("rigs"):
         theme.h2("Wiertnice")

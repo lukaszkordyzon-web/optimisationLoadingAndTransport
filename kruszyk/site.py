@@ -735,6 +735,10 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
               "swing_cycle_s": float(e.get("swing_cycle_s", 30.0)), "blast": pile, "route": rid}
         if e.get("fill_factor"):
             ex["fill_factor"] = float(e["fill_factor"])
+        if e.get("spot_time_s"):
+            ex["spot_time_s"] = float(e["spot_time_s"])
+        if e.get("model"):
+            ex["model"] = e["model"]
         if dig:
             ex["dig_routes"], ex["dig_path"] = [rid], [list(p) for p in e["dig_path"]]
             for i, p in enumerate(dig[1:], start=1):
