@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -30,8 +31,30 @@ def _approved():
     return appr
 
 
+COSTS = [("wozidla_kierowcy", "Kierowcy"), ("paliwo", "Paliwo wozideł"), ("wozidla_serwis", "Serwis wozideł – od mth"),
+         ("wozidla_amortyzacja", "Odtworzenie wozideł – od mth"), ("koparki_operatorzy", "Operatorzy koparek"),
+         ("koparki_serwis", "Serwis koparek – od mth"), ("koparki_amortyzacja", "Odtworzenie koparek – od mth"),
+         ("kruszarka", "Kruszarka – stały"), ("energia", "Energia kruszarki – od tony")]
+
+
+def _parts() -> tuple:
+    """The cost parts the planner counts (ticks); all when none is ticked."""
+    got = tuple(k for k, _ in COSTS if st.session_state.get(f"k2_cost_{k}", True))
+    return got or tuple(k for k, _ in COSTS)
+
+
+def _dynamic() -> bool:
+    return bool(st.session_state.get("k2_dyn", False))
+
+
 def _month_key(appr) -> str:
-    return hashlib.md5(repr((state.raw_yaml(), appr["key"], _weight())).encode()).hexdigest()
+    return hashlib.md5(repr((state.raw_yaml(), appr["key"], _weight(), _parts(), _dynamic())).encode()).hexdigest()
+
+
+def _cost(df: pd.DataFrame, parts: tuple) -> pd.Series:
+    """Every shift's cost counting only the chosen parts."""
+    cols = [f"k_{k}" for k in parts if f"k_{k}" in df]
+    return df[cols].sum(axis=1) if cols else df["koszt_zl"]
 
 
 def _weight() -> float:
@@ -56,6 +79,18 @@ def goal_slider() -> None:
                     help="Lewo: RL może odpuścić trochę ton, jeśli tona wyjdzie wyraźnie taniej. Środek: tańsza tona, ale "
                          "bez utraty ton. Prawo: każda tona się liczy – w granicach harmonogramu i wydajności koparek.")
         c[2].markdown('<div class="k2-note" style="text-align:right">najwięcej ton</div>', unsafe_allow_html=True)
+        o = st.columns([2, 3], vertical_alignment="center")
+        o[0].toggle("Dynamiczny przydział wozideł (z RL)", key="k2_dyn",
+                    help="Jak dziś: wozidło wraca do koparki z harmonogramu. Włączone (tylko w przebiegu z RL): po "
+                         "wyładunku jedzie tam, gdzie zostanie najszybciej załadowane – do koparek, które mają w tej "
+                         "zmianie tony. Koparka nie stoi bez wozideł, gdy inne czekają w kolejce.")
+        with o[1].popover(f"Koszty w wyliczeniu · {len(_parts())} z {len(COSTS)}", width="stretch"):
+            theme.note("Zaznaczone koszty liczą się w koszcie tony, oszczędności i w nauce RL. Koszt całkowity "
+                       "(wszystkie składniki) jest zawsze na końcu tabeli w ④ Wynik. Wiercenie i strzelanie nie są "
+                       "liczone – jazda ich nie zmienia.")
+            cols = st.columns(3)
+            for j, (k, label) in enumerate(COSTS):
+                cols[j % 3].checkbox(label, value=True, key=f"k2_cost_{k}")
 
 
 def month(appr) -> dict | None:
@@ -84,28 +119,107 @@ def month(appr) -> dict | None:
     df0 = run_period(today(sc), plan, seed=SEED, states=states, kpis=kpi0,
                      progress=lambda i, k: bar.progress(0.35 * i / k, f"Miesiąc jak dziś: zmiana {i} z {k}"))
     size = QUICK if st.session_state.get("k2_quick") else {}
-    r = train_signals(states, seed=SEED, **size, weight=_weight(),
+    parts, dyn = _parts(), _dynamic()
+    r = train_signals(states, seed=SEED, **size, weight=_weight(), dynamic=dyn, parts=parts,
                       callback=lambda i, k, row: bar.progress(0.35 + 0.3 * i / k, f"Nauka sygnałów: runda {i} z {k}"))
     kpi1 = []
-    df1 = run_period(with_signals(sc, r.params), plan, seed=SEED, kpis=kpi1,
+    df1 = run_period(with_signals(sc, r.params, dyn), plan, seed=SEED, kpis=kpi1,
                      progress=lambda i, k: bar.progress(0.65 + 0.35 * i / k, f"Miesiąc z sygnałami: zmiana {i} z {k}"))
     bar.empty()
     res = {"key": key, "today": df0, "signals": df1, "params": r.params, "setup": r.setup, "states": states,
-           "labels": labels(plan)}
+           "labels": labels(plan), "parts": parts, "dynamic": dyn}
     st.session_state.month = res
     st.session_state.pop("split", None)
     return res
 
 
+def _in_shift(r, parts: tuple, step_min: float = 5.0) -> pd.DataFrame:
+    """One shift minute by minute: tonnes, cost per tonne (the chosen costs) and queueing, all cumulative."""
+    from kruszyk.rl import selected_cost
+
+    tl = r.timeline
+    end = float(tl["t_s"].iloc[-1]) if len(tl) else 0.0
+    grid = np.arange(0.0, end + 1.0, step_min * 60)
+    tonnes = np.interp(grid, tl["t_s"], tl["dumped_t"]) if len(tl) else np.zeros(len(grid))
+    share = selected_cost(r.kpi, parts) / r.kpi["cost_total"] if r.kpi["cost_total"] else 1.0
+    cost = (np.interp(grid, tl["t_s"], tl["cost"]) if len(tl) else np.zeros(len(grid))) * share
+    q = r.states[r.states["state"].isin(["kolejka_koparka", "kolejka_kruszarka"])]
+    st_, en_ = q["start_s"].to_numpy(), q["end_s"].to_numpy()
+    queue = np.array([float(np.clip(np.minimum(en_, g) - st_, 0, None).sum()) / 3600 for g in grid])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        # the first loads make the cost per tonne jump – it is shown once some material has gone through
+        zl_t = np.where(tonnes > max(150.0, 0.05 * float(tonnes[-1] if len(tonnes) else 0)), cost / np.maximum(tonnes, 1),
+                        np.nan)
+    return pd.DataFrame({"t_s": grid, "t": tonnes, "zl_t": zl_t, "q": queue})
+
+
 @st.cache_data(show_spinner=False, max_entries=6)
-def _split(state_yaml: str, params: tuple, seed: int) -> str:
+def _split(state_yaml: str, params: tuple, seed: int, dynamic: bool = False, parts: tuple = ()) -> tuple:
+    """Both runs of one shift: the side-by-side page and the shift's curves."""
     from kruszyk.config import cycle_costs, scenario_from_dict
     import yaml
 
     sc = cycle_costs(scenario_from_dict(yaml.safe_load(state_yaml)))
     a = simulate(today(sc), seed=seed)
-    b = simulate(with_signals(sc, dict(params)), seed=seed)
-    return split_html(a, b, "Jak dziś", "Z sygnałami RL")
+    b = simulate(with_signals(sc, dict(params), dynamic), seed=seed)
+    parts = parts or tuple(k for k, _ in COSTS)
+    return split_html(a, b, "Jak dziś", "Z sygnałami RL"), _in_shift(a, parts), _in_shift(b, parts), sc.shift_plan.start_time
+
+
+BASE, RL = "#FF7A3D", "#22D3C5"  # dashboard colours: baseline orange-red, RL cyan
+
+
+def _dashboard(x, a: pd.DataFrame, b: pd.DataFrame, xtitle: str) -> go.Figure:
+    """Three charts on one time axis: cumulative queueing, cost per tonne and tonnes – today vs RL."""
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(rows=1, cols=3, horizontal_spacing=0.06,
+                        subplot_titles=("Kolejki narastająco [h]", "Koszt tony narastająco [zł/t]",
+                                        "Produkcja narastająco [t]"))
+    for name, d, color, fill in (("Jak dziś", a, BASE, "rgba(255,122,61,0.25)"),
+                                 ("Z RL", b, RL, "rgba(34,211,197,0.25)")):
+        fig.add_scatter(x=x, y=d["q"], name=name, mode="lines", line=dict(color=color, width=2.5), fill="tozeroy",
+                        fillcolor=fill, legendgroup=name, row=1, col=1)
+        fig.add_scatter(x=x, y=d["zl_t"], name=name, mode="lines", line=dict(color=color, width=2.5),
+                        legendgroup=name, showlegend=False, row=1, col=2)
+        fig.add_scatter(x=x, y=d["t"], name=name, mode="lines", line=dict(color=color, width=2.5),
+                        legendgroup=name, showlegend=False, row=1, col=3)
+    fig.update_xaxes(matches="x", showgrid=False, title_text=xtitle, title_font=dict(size=11))
+    fig.update_yaxes(gridcolor="rgba(255,255,255,0.08)", zeroline=False)
+    fig.update_layout(template="plotly_dark", height=330, margin=dict(t=50, b=40, l=40, r=20),
+                      paper_bgcolor="#0F141B", plot_bgcolor="#0F141B", hovermode="x unified",
+                      legend=dict(orientation="h", y=1.3, x=1, xanchor="right"), font=dict(color="#D6DEE8"))
+    return fig
+
+
+PERIODS = ["Zmiana", "Doba", "Kilka dni", "Tydzień", "Miesiąc"]
+
+
+def _window(a: pd.DataFrame, i: int, period: str, days: int) -> list[int]:
+    """The shifts of the chosen period around shift i."""
+    dates = [pd.Timestamp(d).normalize() for d in a["data"]]
+    d0 = dates[i]
+    if period == "Doba":
+        keep = [k for k, d in enumerate(dates) if d == d0]
+    elif period == "Kilka dni":
+        keep = [k for k, d in enumerate(dates) if d0 <= d < d0 + pd.Timedelta(days=days)]
+    elif period == "Tydzień":
+        wk = d0.isocalendar()[:2]
+        keep = [k for k, d in enumerate(dates) if d.isocalendar()[:2] == wk]
+    elif period == "Miesiąc":
+        keep = list(range(len(a)))
+    else:
+        keep = [i]
+    return keep or [i]
+
+
+def _period_curves(a: pd.DataFrame, b: pd.DataFrame, keep: list[int], parts: tuple) -> tuple:
+    def cum(d):
+        d = d.iloc[keep]
+        t = d["wywiezione_t"].cumsum()
+        return pd.DataFrame({"t": t.to_numpy(), "zl_t": (_cost(d, parts).cumsum() / t.where(t > 0)).to_numpy(),
+                             "q": d["kolejki_h"].cumsum().to_numpy()})
+    return cum(a), cum(b)
 
 
 def signal_boxes(p: dict) -> str:
@@ -124,6 +238,10 @@ def signal_boxes(p: dict) -> str:
     return "".join(f'<div class="k2-box"><b>{a}</b> {b}</div>' for a, b in rows)
 
 
+def _shift_step(n: int, d: int) -> None:
+    st.session_state.k2_shift_i = (int(st.session_state.get("k2_shift_i", 0)) + d) % n
+
+
 def step_simulation() -> None:
     head = st.columns([4, 1.4], vertical_alignment="bottom")
     with head[0]:
@@ -138,25 +256,46 @@ def step_simulation() -> None:
     from kruszyk.config import dump_scenario
 
     a, b, lab = res["today"], res["signals"], res["labels"]
+    parts, dyn = res.get("parts") or _parts(), bool(res.get("dynamic"))
     n = len(a)
-    i = int(st.session_state.get("k2_shift_i", 0)) % n
+    if int(st.session_state.get("k2_shift_i", 0)) >= n:
+        st.session_state.k2_shift_i = 0
     with card("shiftbar"):
-        c = st.columns([0.5, 2.4, 0.5, 4], vertical_alignment="center")
-        if c[0].button("‹", key="k2_prev", width="stretch", help="poprzednia zmiana"):
-            st.session_state.k2_shift_i = (i - 1) % n
-            st.rerun()
-        d = b["koszt_na_t"].iloc[i] - a["koszt_na_t"].iloc[i]
-        c[1].markdown(f'<div style="text-align:center"><div class="k2-note">Zmiana {i + 1} z {n}</div>'
-                      f'<div style="font-weight:700;font-size:16px">{lab[i]}</div></div>', unsafe_allow_html=True)
-        if c[2].button("›", key="k2_next", width="stretch", help="następna zmiana"):
-            st.session_state.k2_shift_i = (i + 1) % n
-            st.rerun()
-        c[3].markdown(f'<div class="k2-note" style="text-align:right">jak dziś {a["wywiezione_t"].iloc[i]:,.0f} t · '
-                      f'{a["koszt_na_t"].iloc[i]:.2f} zł/t &nbsp;|&nbsp; z RL {b["wywiezione_t"].iloc[i]:,.0f} t · '
-                      f'{b["koszt_na_t"].iloc[i]:.2f} zł/t ({d:+.2f})</div>'.replace(",", " "), unsafe_allow_html=True)
+        c = st.columns([0.5, 2.6, 0.5, 2.4, 1.2], vertical_alignment="bottom")
+        c[0].button("‹", key="k2_prev", width="stretch", help="poprzednia zmiana", on_click=_shift_step, args=(n, -1))
+        c[1].selectbox("Zmiana", list(range(n)), key="k2_shift_i", format_func=lambda k: f"{k + 1}. {lab[k]}",
+                       help="Wybierz zmianę z listy – możesz wpisać datę, np. 15.10.")
+        c[2].button("›", key="k2_next", width="stretch", help="następna zmiana", on_click=_shift_step, args=(n, 1))
+        period = c[3].segmented_control("Wykresy za okres", PERIODS, key="k2_period", default="Zmiana") or "Zmiana"
+        days = int(c[4].number_input("dni", 2, 31, 3, key="k2_days", disabled=period != "Kilka dni"))
+        i = int(st.session_state.get("k2_shift_i", 0))
+        z0 = _cost(a.iloc[[i]], parts).iloc[0] / max(a["wywiezione_t"].iloc[i], 1)
+        z1 = _cost(b.iloc[[i]], parts).iloc[0] / max(b["wywiezione_t"].iloc[i], 1)
+        theme.note(f"{lab[i]} · jak dziś {a['wywiezione_t'].iloc[i]:,.0f} t · {z0:.2f} zł/t &nbsp;|&nbsp; z RL "
+                   f"{b['wywiezione_t'].iloc[i]:,.0f} t · {z1:.2f} zł/t ({z1 - z0:+.2f})".replace(",", " "))
     st_yaml = dump_scenario(res["states"][i])
-    page = _split(st_yaml, tuple(sorted(res["params"].items())), SEED + 7919 * i)  # the seed of that shift in the month
-    components.html(page, height=900, scrolling=True)
+    page, ca, cb, start = _split(st_yaml, tuple(sorted(res["params"].items())), SEED + 7919 * i, dyn, tuple(parts))
+    components.html(page, height=900, scrolling=True)  # the two maps: today and with RL
+    with card("dash"):
+        if period == "Zmiana":
+            day = pd.Timestamp(a["data"].iloc[i]).normalize()
+            h, m = (int(v) for v in str(a["start"].iloc[i] if "start" in a else start).split(":"))
+            x = [day + pd.Timedelta(hours=h, minutes=m, seconds=float(t)) for t in ca["t_s"]]
+            fig = _dashboard(x, ca, cb.reindex(range(len(ca))).ffill(), "godzina")
+            fig.update_xaxes(tickformat="%H:%M")
+            title = f"Zmiana {lab[i]}"
+        else:
+            keep = _window(a, i, period, days)
+            pa, pb = _period_curves(a, b, keep, parts)
+            fig = _dashboard([lab[k] for k in keep], pa, pb, "zmiana")
+            fig.update_xaxes(showticklabels=len(keep) <= 21)
+            title = f"{period}: {lab[keep[0]]} – {lab[keep[-1]]} · {len(keep)} zmian"
+        theme.h4(title, "kolejki pod koparkami i kruszarką, koszt tony z zaznaczonych kosztów, wywiezione tony – "
+                        "pomarańczowy: jak dziś, cyjan: z RL" + (" · RL z dynamicznym przydziałem wozideł" if dyn else ""))
+        if st.toggle("Oś Y logarytmiczna", key="k2_dash_log",
+                     help="Małe wartości (początek zmiany, kolejki) nie giną przy dużych – łatwiej zobaczyć różnicę."):
+            fig.update_yaxes(type="log")
+        st.plotly_chart(fig, width="stretch", key="k2_dash")
     with head[1]:
         if st.button("Cały miesiąc →", type="primary", key="k2_to_result", width="stretch"):
             st.session_state.nav_next = "④ Wynik"
@@ -173,7 +312,9 @@ def step_result() -> None:
             sub = (f"Wariant {appr.get('variant', 'A')}"
                    + (" (pełna wydajność koparek)" if (appr.get("work") or {}).get("mode") == "min" else "") + " · "
                    f"{res['labels'][0]} – {res['labels'][-1]} · {len(res['today'])} zmian · ten sam harmonogram, strzały, "
-                   "pogoda i awarie. Wozidła jeżdżą do tych samych koparek – zmienia się tylko sposób jazdy.")
+                   "pogoda i awarie. "
+                   + ("Z RL wozidła są przydzielane do koparek dynamicznie – zmienia się jazda i przydział."
+                      if res.get("dynamic") else "Wozidła jeżdżą do tych samych koparek – zmienia się tylko sposób jazdy."))
         theme.header("Ten sam miesiąc: jak dziś i z sygnałami RL", sub)
     appr = _approved()
     if not appr:
@@ -187,8 +328,10 @@ def step_result() -> None:
                     theme.chip("Model zgodny z realną produkcją" if p.get("real_t") else "Model bez kontroli realnej produkcji",
                                ok=bool(p.get("real_t"))) + "</div>", unsafe_allow_html=True)
     a, b = res["today"], res["signals"]
+    parts = tuple(res.get("parts") or _parts())
+    k0s, k1s = _cost(a, parts), _cost(b, parts)  # every shift's cost counting the ticked parts
     t0, t1 = float(a["wywiezione_t"].sum()), float(b["wywiezione_t"].sum())
-    c0, c1 = float(a["koszt_zl"].sum()), float(b["koszt_zl"].sum())
+    c0, c1 = float(k0s.sum()), float(k1s.sum())
     f0, f1 = float(a["paliwo_l"].sum()), float(b["paliwo_l"].sum())
     q0, q1 = float(a["kolejki_h"].sum()), float(b["kolejki_h"].sum())
     z0, z1 = (c0 / t0 if t0 else 0.0), (c1 / t1 if t1 else 0.0)
@@ -197,9 +340,11 @@ def step_result() -> None:
     def num(x: float) -> str:
         return f"{x:,.0f}".replace(",", " ")
     m = st.columns(5)
-    m[0].metric("Oszczędność w miesiącu", f"{num((z0 - z1) * t1)} zł", help="(koszt tony dziś − z sygnałami) × tony z sygnałami")
+    m[0].metric("Oszczędność w miesiącu", f"{num(c0 - c1)} zł",
+                help="Ile mniej kosztował miesiąc z RL – zaznaczone koszty, te same zmiany. Dodatkowe tony nie są tu "
+                     "wyceniane: są w „Wywiezione”.")
     m[1].metric("Koszt tony", f"{z1:.2f} zł/t", f"{z1 - z0:+.2f} zł/t (dziś {z0:.2f})", delta_color="inverse",
-                help="Załadunek, transport i kruszarka – bez wiercenia i strzelania (sygnały jazdy ich nie zmieniają).")
+                help="Zaznaczone koszty (Koszty w wyliczeniu) – bez wiercenia i strzelania, jazda ich nie zmienia.")
     m[2].metric("Paliwo", f"{num(f1)} l", f"{100 * (f1 / f0 - 1):+.1f} % (dziś {num(f0)} l)" if f0 else None,
                 delta_color="inverse")
     m[3].metric("Wywiezione", f"{num(t1)} t", f"{100 * (t1 / t0 - 1):+.1f} % (dziś {num(t0)} t)" if t0 else None)
@@ -222,15 +367,16 @@ def step_result() -> None:
         theme.h4("Koszt narastająco")
         fig = go.Figure()
         for name, d, color in (("jak dziś", a, "#8A93A0"), ("z sygnałami", b, "#B3122A")):
-            fig.add_scatter(x=res["labels"], y=d["koszt_zl"].cumsum() / 1000, mode="lines", name=name,
+            fig.add_scatter(x=res["labels"], y=_cost(d, parts).cumsum() / 1000, mode="lines", name=name,
                             line=dict(color=color, width=3))
         fig.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10), legend=dict(orientation="h", y=1.12),
                           xaxis=dict(showticklabels=False), yaxis_title="tys. zł", plot_bgcolor="#FFFFFF")
         st.plotly_chart(fig, width="stretch")
         week = pd.DataFrame({"w": [pd.Timestamp(d).strftime("%d.%m") for d in a["data"]],
                              "wk": [pd.Timestamp(d).isocalendar().week for d in a["data"]],
-                             "t0": a["wywiezione_t"], "t1": b["wywiezione_t"], "k0": a["koszt_zl"], "k1": b["koszt_zl"],
-                             "win": (b["koszt_na_t"] < a["koszt_na_t"]).astype(int)})
+                             "t0": a["wywiezione_t"], "t1": b["wywiezione_t"], "k0": k0s, "k1": k1s,
+                             "win": (k1s / b["wywiezione_t"].clip(lower=1) < k0s / a["wywiezione_t"].clip(lower=1))
+                             .astype(int)})
         rows = []
         for _, g in week.groupby("wk", sort=False):
             rows.append([f"{g['w'].iloc[0]}–{g['w'].iloc[-1]}", f"{num(g['t0'].sum())} / {num(g['t1'].sum())}",
@@ -238,22 +384,21 @@ def step_result() -> None:
                          f"{int(g['win'].sum())} z {len(g)}"])
         st.markdown(theme.table([("Tydzień", ""), ("Tony dziś / z RL", "n"), ("zł/t dziś / z RL", "n"),
                                  ("Zmian taniej", "n")], rows, numeric={1, 2, 3}, sans={0}), unsafe_allow_html=True)
-    parts = [("paliwo", "Paliwo (wozidła)"), ("wozidla_serwis", "Serwis wozideł – od mth"),
-             ("wozidla_amortyzacja", "Amortyzacja wozideł – od mth"), ("wozidla_kierowcy", "Kierowcy – stały"),
-             ("koparki_serwis", "Serwis koparek – od mth"), ("koparki_amortyzacja", "Amortyzacja koparek – od mth"),
-             ("koparki_operatorzy", "Operatorzy koparek – stały"), ("kruszarka", "Kruszarka – stały"),
-             ("energia", "Energia kruszarki – od tony")]
-    if all(f"k_{k}" in a for k, _ in parts):
+    if all(f"k_{k}" in a for k, _ in COSTS):
         with card("savings"):
-            theme.h4("Skąd oszczędność", "cały miesiąc; załadunek, transport i kruszarka – bez wiercenia i "
-                                         "strzelania. Kierowcy i operatorzy są opłaceni tak samo – liczy się "
-                                         "paliwo i to, co zależy od motogodzin")
+            theme.h4("Skąd oszczędność", "cały miesiąc; zaznaczone koszty, bez wiercenia i strzelania. Kierowcy i "
+                                         "operatorzy są opłaceni tak samo – liczy się paliwo i to, co zależy od "
+                                         "motogodzin")
             rows = []
-            for k, label in parts:
-                x0, x1 = float(a[f"k_{k}"].sum()), float(b[f"k_{k}"].sum())
-                rows.append([label, num(x0), num(x1), f"{x1 - x0:+,.0f}".replace(",", " ")])
+            for k, label in COSTS:
+                if k in parts:
+                    x0, x1 = float(a[f"k_{k}"].sum()), float(b[f"k_{k}"].sum())
+                    rows.append([label, num(x0), num(x1), f"{x1 - x0:+,.0f}".replace(",", " ")])
+            rows.append(["Razem – zaznaczone koszty", num(c0), num(c1), f"{c1 - c0:+,.0f}".replace(",", " ")])
             s0, s1 = float(a["koszt_zl"].sum()), float(b["koszt_zl"].sum())
-            rows.append(["Razem", num(s0), num(s1), f"{s1 - s0:+,.0f}".replace(",", " ")])
+            if len(parts) < len(COSTS):
+                rows.append(["Koszt całkowity – wszystkie składniki", num(s0), num(s1),
+                             f"{s1 - s0:+,.0f}".replace(",", " ")])
             m0, m1 = float(a["motogodziny_wozidel"].sum()), float(b["motogodziny_wozidel"].sum())
             rows.append(["Motogodziny wozideł [mth]", num(m0), num(m1), f"{m1 - m0:+,.0f}".replace(",", " ")])
             st.markdown(theme.table([("Składnik", ""), ("Jak dziś [zł]", "n"), ("Z RL [zł]", "n"), ("Różnica", "n")],
@@ -267,7 +412,7 @@ def step_result() -> None:
                        f"Nauczone na {s['shifts']} zmianach symulacji, w sytuacjach z {s['states']} zmian tego miesiąca "
                        "(pełne usypy, końcówki, przejazdy koparek, deszcz, awarie).")
         with card("sure"):
-            wins = int((b["koszt_na_t"] < a["koszt_na_t"]).sum())
+            wins = int((k1s / b["wywiezione_t"].clip(lower=1) < k0s / a["wywiezione_t"].clip(lower=1)).sum())
             need = sign_threshold(n)
             theme.h4("Pewność wyniku")
             verdict = ("różnica pewna" if wins >= need else "za mało, by mówić o pewnej różnicy" if wins > n - need

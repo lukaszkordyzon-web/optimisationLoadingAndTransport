@@ -674,7 +674,7 @@ class Simulation:
     # --------------------------------------------------------------- dispatcher
     def _binding(self, fleet: TruckFleet) -> bool:
         """Does the truck's assignment bind the dispatch in this run?"""
-        return fleet.assign_locked or self.sc.dispatch not in ("rl", "dynamic")
+        return fleet.assign_locked or (self.sc.dispatch not in ("rl", "dynamic") and not self.sc.dynamic_assign)
 
     def allowed_ids(self, fleet: TruckFleet) -> list[str]:
         ids = list(fleet.blend) or list(fleet.excavators)
@@ -720,7 +720,8 @@ class Simulation:
 
     def dispatch(self, truck: TruckState) -> ExcavatorState | None:
         allowed = set(self.allowed_ids(truck.fleet))
-        if self.sc.dispatch in ("rl", "dynamic") and not truck.fleet.assign_locked:
+        free = self.sc.dispatch in ("rl", "dynamic") or self.sc.dynamic_assign
+        if free and not truck.fleet.assign_locked:
             allowed = set(self.excavators)  # today's assignment is not binding for the system
         candidates = [ex for ex in self.excavators.values() if ex.cfg.id in allowed and self._active(ex)]
         if not candidates:
@@ -732,7 +733,7 @@ class Simulation:
         self.decisions += 1
         mode = self.sc.dispatch
         home = self.excavators.get(truck.home_excavator)
-        if mode in ("fixed", "natural", "signals"):
+        if mode in ("fixed", "natural", "signals") and not (self.sc.dynamic_assign and not truck.fleet.assign_locked):
             # a breakdown or a finished pile is reported on the radio: the foreman sends the trucks to another
             # excavator (without knowing where they would be loaded sooner)
             working = [ex for ex in active if not self._broken(ex)] or active

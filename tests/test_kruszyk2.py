@@ -199,3 +199,61 @@ def test_kruszyk2_costs_only_the_loading_to_crusher_cycle():
     k = simulate(today(cycle_costs(scenario_from_dict(raw))), seed=1).kpi
     assert k["cost_breakdown"]["wiercenie_strzelanie"] == 0 and k["cost_breakdown"]["odchylka_skladu"] == 0
     assert k["cost_breakdown"]["kruszarka"] > 0 and k["cost_total"] == sum(k["cost_breakdown"].values())
+
+
+def test_dynamic_assignment_sends_trucks_where_they_are_loaded_soonest():
+    import datetime as dt
+
+    import yaml
+
+    from kruszyk import workplan
+    from kruszyk.config import scenario_from_dict
+    from kruszyk.period import PeriodPlan, run_period
+    from kruszyk.rl import with_signals
+
+    raw = yaml.safe_load(open(Path(__file__).parent.parent / "scenarios" / "kruszyk_demo_zakrzowek.yaml", encoding="utf-8"))
+    sc = scenario_from_dict(raw)
+    n = 1
+    # every truck sent to K-1 by the plan, while K-2 has tonnes too
+    work = {"start": {"O2": 30000.0, "O3": 30000.0}, "ex": {"K-1": [{"a": "O2", "t": 3000.0}],
+                                                           "K-2": [{"a": "O3", "t": 3000.0}]},
+            "tr": {f.id: ["K-1"] for f in sc.trucks}, "dr": {}, "mode": "limit"}
+    ev = workplan.evaluate(work, sc.areas, [], n)
+    sim = scenario_from_dict(workplan.scenario_raw(raw, work, ev["grid"]))
+    out = {}
+    for name, v in (("rigid", with_signals(sim)), ("dynamic", with_signals(sim, dynamic=True))):
+        p = PeriodPlan(start=dt.date(2026, 11, 2), days=1, shifts_per_day=1)
+        p.frozen = workplan.frozen(work, ev, n)
+        kpis = []
+        run_period(v, p, seed=1, kpis=kpis)
+        out[name] = {e["excavator"]: e["loaded_t"] for e in kpis[0]["excavators"]}
+    assert out["rigid"].get("K-2", 0) < 1  # today: nobody drives to K-2
+    assert out["dynamic"].get("K-2", 0) > 0  # dynamic: trucks also load at K-2
+
+
+def test_simulation_period_charts_dynamic_assignment_and_cost_ticks():
+    at = AppTest.from_file(APP, default_timeout=900)
+    at.session_state["k2_quick"] = True
+    at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 3, "shifts": 2, "sat": False, "hol": "", "fire": 1,
+                                   "real_t": 0.0}
+    at.run()
+    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.button(key="k2_approve").click().run()
+    assert not at.exception, at.exception
+    at.toggle(key="k2_dyn").set_value(True)
+    at.checkbox(key="k2_cost_kruszarka").uncheck()
+    at.button(key="k2_month_go").click().run()
+    assert not at.exception, at.exception
+    m = at.session_state["month"]
+    assert m["dynamic"] and "kruszarka" not in m["parts"]
+    at.selectbox(key="k2_shift_i").set_value(3).run()
+    assert not at.exception, at.exception
+    at.toggle(key="k2_dash_log").set_value(True)
+    for period in ("Doba", "Kilka dni", "Tydzień", "Miesiąc"):
+        at.session_state["k2_period"] = period
+        at.run()
+        assert not at.exception, (period, at.exception)
+    at.radio(key="k2_nav").set_value("④ Wynik").run()
+    assert not at.exception, at.exception
+    page = " ".join(x.value for x in at.markdown)
+    assert "Koszt całkowity – wszystkie składniki" in page and "Kruszarka – stały" not in page

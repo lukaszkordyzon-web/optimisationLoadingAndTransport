@@ -302,12 +302,17 @@ def decode_signals(x) -> dict:
     return decode_advisor(x[:3]) | {k: ex[k] for k in ("truck_park_queue_min", "truck_min_working_share")}
 
 
-def with_signals(sc: Scenario, params: dict | None = None) -> Scenario:
-    """The scenario driven with the signals (destinations as today)."""
+def with_signals(sc: Scenario, params: dict | None = None, dynamic: bool = False) -> Scenario:
+    """The scenario driven with the signals (destinations as today; `dynamic`: after dumping a truck goes where it
+    will be loaded soonest, among the excavators working in the shift)."""
     v = copy.deepcopy(sc)
     v.dispatch, v.advisor.enabled = "signals", True
     for k, val in (params or decode_signals(np.zeros(len(SIGNAL_KEYS)))).items():
         setattr(v.advisor if hasattr(v.advisor, k) else v.excavator_policy, k, val)
+    if dynamic:
+        v.dynamic_assign = True
+        for f in v.trucks:  # the plan's excavator stays the truck's own one, but no longer binds it
+            f.assign_locked = False
     return v
 
 
@@ -317,9 +322,26 @@ def today(sc: Scenario) -> Scenario:
     return v
 
 
-def _run(cases: list[tuple[Scenario, int]], params: dict | None) -> list[dict]:
-    return [kpi_row(simulate(with_signals(s, params) if params is not None else today(s), seed=seed).kpi)
-            for s, seed in cases]
+COST_PARTS = ("wozidla_kierowcy", "paliwo", "wozidla_serwis", "wozidla_amortyzacja", "koparki_operatorzy",
+              "koparki_serwis", "koparki_amortyzacja", "kruszarka", "energia")
+
+
+def selected_cost(kpi: dict, parts=None) -> float:
+    """The cost of a run counting only the chosen parts (None = all)."""
+    if parts is None:
+        return float(kpi["cost_total"])
+    pool = (kpi.get("cost_split") or {}) | (kpi.get("cost_breakdown") or {})
+    return float(sum(pool.get(p, 0.0) for p in parts))
+
+
+def _run(cases: list[tuple[Scenario, int]], params: dict | None, dynamic: bool = False, parts=None) -> list[dict]:
+    out = []
+    for s, seed in cases:
+        k = simulate(with_signals(s, params, dynamic) if params is not None else today(s), seed=seed).kpi
+        row = kpi_row(k)
+        row["cost_total"] = selected_cost(k, parts)
+        out.append(row)
+    return out
 
 
 def signals_objective(rows: list[dict], base: list[dict], keep: float = KEEP_T, gain: float = 0.0) -> float:
@@ -350,7 +372,7 @@ class SignalsResult:
 
 def train_signals(states: list[Scenario], iterations: int = 8, population: int = 10, episodes: int = 3,
                   seed: int = 0, callback: Callable[[int, int, dict], None] | None = None,
-                  weight: float = 0.5, check: int = 8) -> SignalsResult:
+                  weight: float = 0.5, check: int = 8, dynamic: bool = False, parts=None) -> SignalsResult:
     """Learn the signal settings (CEM) on shifts starting from `states` – the situations of a month worked as
     today (full piles, last tonnes of a pile, an excavator after a move …). Every iteration practises on other
     shifts; all candidates of an iteration on the same ones, compared with today's driving on them."""
@@ -362,10 +384,10 @@ def train_signals(states: list[Scenario], iterations: int = 8, population: int =
     history, means = [], []
     for it in range(iterations):
         cases = [(states[int(rng.integers(len(states)))], 50_000 + 1000 * it + e) for e in range(episodes)]
-        base = _run(cases, None)
+        base = _run(cases, None, parts=parts)
         cand = mu + sigma * rng.standard_normal((population, dim))
         cand[0] = mu
-        scored = sorted(((signals_objective(_run(cases, decode_signals(x)), base, keep, gain), k)
+        scored = sorted(((signals_objective(_run(cases, decode_signals(x), dynamic, parts), base, keep, gain), k)
                          for k, x in enumerate(cand)))
         elite = np.array([cand[k] for _, k in scored[:n_elite]])
         mu = elite.mean(axis=0)
@@ -381,12 +403,13 @@ def train_signals(states: list[Scenario], iterations: int = 8, population: int =
     if check and len(means) > 1:
         idx = np.linspace(0, len(states) - 1, min(check, len(states))).round().astype(int)
         cases = [(states[i], 90_000 + e) for e, i in enumerate(idx)]
-        base = _run(cases, None)
-        mu = min(means[-3:], key=lambda m: signals_objective(_run(cases, decode_signals(m)), base, keep, gain))
+        base = _run(cases, None, parts=parts)
+        mu = min(means[-3:], key=lambda m: signals_objective(_run(cases, decode_signals(m), dynamic, parts), base, keep,
+                                                             gain))
     return SignalsResult(params=decode_signals(mu), history=pd.DataFrame(history),
                          setup={"iterations": iterations, "population": population, "episodes": episodes,
                                 "states": len(states), "shifts": iterations * (population + 1) * episodes,
-                                "weight": weight})
+                                "weight": weight, "dynamic": dynamic})
 
 
 def explain_signals(p: dict) -> list[str]:

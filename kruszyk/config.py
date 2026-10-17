@@ -424,6 +424,9 @@ class Scenario:
     #   rl      – policy learned by reinforcement learning (rl_weights)
     dispatch: str = "dynamic"
     natural_switch_prob: float = 0.0  # drivers keep to the excavator the foreman gave them (raise if they switch on their own)
+    # with today's driving (natural / signals): after dumping a truck goes where it will be loaded soonest, among the
+    # excavators working in the shift, instead of back to its own one (a 🔒 assignment still binds)
+    dynamic_assign: bool = False
     rl_weights: list | None = None
     seed: int = 42
     variability: Variability = field(default_factory=Variability)
@@ -609,6 +612,7 @@ def scenario_from_dict(raw: dict) -> Scenario:
         loose_density_t_m3=raw.get("loose_density_t_m3", 1.75),
         rolling_resistance_pct=raw.get("rolling_resistance_pct", 3.0),
         dispatch=raw.get("dispatch", "dynamic"),
+        dynamic_assign=bool(raw.get("dynamic_assign", False)),
         seed=raw.get("seed", 42),
         variability=_build(Variability, raw.get("variability", {})),
         costs=_build(Costs, raw.get("costs", {})),

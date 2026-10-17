@@ -444,7 +444,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
             for f in v.trucks:
                 if f.id in drive:
                     if drive[f.id] and drive[f.id] in ex_pile:
-                        f.excavators, f.blend, f.assign_locked = [drive[f.id]], {}, True
+                        # the plan's excavator is the truck's own one; with dynamic assignment it may go elsewhere
+                        f.excavators, f.blend, f.assign_locked = [drive[f.id]], {}, not v.dynamic_assign
                     else:
                         f.count = 0
             if v.truck_count == 0:  # nobody drives: the trucks stay, the excavators have nothing to load
