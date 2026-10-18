@@ -396,7 +396,11 @@ def step_plan() -> None:
             theme.note(f"model: approx. {model_t:,.0f} t/shift".replace(",", " "))
 
     # ---------------------------------------------------------------- areas, drilling
-    c1, c2 = st.columns([3, 1.25])
+    # with drilling off the blasted rock is always there: areas, drill rigs and blast hours do not count – folded away
+    drilling = work.get("drill", True)
+    box = st.container() if drilling else st.expander(
+        "Areas, drilling and blasting – not used: drilling is off in this variant (blasted rock is always available)")
+    c1, c2 = box.columns([3, 1.25])
     with c1, card("areas"):
         theme.h4("Areas", "blasted rock lying at start, blast size, reserves")
         _areas_editor(base, sc, rigs, int(p["fire"]), work)

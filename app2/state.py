@@ -12,7 +12,8 @@ from kruszyk.config import scenario_from_dict, yaml_dump
 SCEN_DIR = Path(__file__).parent.parent / "scenarios"
 DEFAULT = "kruszyk_base"  # the mine opened at start (with its schedule)
 # results that belong to one mine / one schedule – dropped when the mine changes
-DERIVED = ("work", "variants", "k2seg_variant", "k2_cmp", "approved", "month", "split", "site", "site_ver", "info_sel")
+DERIVED = ("work", "variants", "k2seg_variant", "k2_cmp", "approved", "month", "split", "site", "site_ver", "info_sel",
+           "runs")
 
 
 def presets() -> dict[str, Path]:
@@ -55,7 +56,8 @@ def export() -> str:
     if st.session_state.get("work") is not None:
         data["k2_schedule"] = {"work": st.session_state.work, "plan": st.session_state.get("k2_plan", {}),
                                "variants": st.session_state.get("variants") or {},
-                               "variant": st.session_state.get("k2seg_variant") or "A"}
+                               "variant": st.session_state.get("k2seg_variant") or "A",
+                               "runs": st.session_state.get("runs") or {}}
     return yaml_dump(data)
 
 
@@ -71,3 +73,4 @@ def load(text: str) -> None:
         elif sched.get("work"):
             st.session_state.work = sched["work"]
         st.session_state.k2_plan = sched.get("plan", {})
+        st.session_state.runs = sched.get("runs") or {}

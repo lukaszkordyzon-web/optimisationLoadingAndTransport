@@ -289,9 +289,11 @@ def step_result() -> None:
         theme.header("The same month: baseline and with RL signals", sub)
     appr = _approved()
     if not appr:
+        _runs_card(None, None)
         return
     res = month(appr)
     if not res:
+        _runs_card(None, appr)
         return
     p = st.session_state.get("k2_plan", {})
     with head[1]:
@@ -395,3 +397,62 @@ def step_result() -> None:
                             "paliwo_rl": b["paliwo_l"]})
         st.download_button("Download shift results (CSV)", out.to_csv(index=False).encode("utf-8"), "wynik_miesiaca.csv",
                            "text/csv", key="k2_csv", width="stretch")
+    _runs_card(res, appr)
+
+
+KEEP = ["data", "wywiezione_t", "koszt_zl", "paliwo_l", "kolejki_h", "motogodziny_wozidel"]
+
+
+def _pack(df: pd.DataFrame) -> dict:
+    cols = [c for c in df if c in KEEP or c.startswith("k_")]
+    d = df[cols].copy()
+    d["data"] = d["data"].astype(str)
+    return {c: d[c].tolist() for c in d}
+
+
+def _summary(name: str, r: dict) -> list:
+    """One row of the saved-simulations table."""
+    a, b = pd.DataFrame(r["today"]), pd.DataFrame(r["signals"])
+    parts = tuple(r.get("parts") or [k for k, _ in COSTS])
+    t0, t1 = float(a["wywiezione_t"].sum()), float(b["wywiezione_t"].sum())
+    c0, c1 = float(_cost(a, parts).sum()), float(_cost(b, parts).sum())
+    f0, f1 = float(a["paliwo_l"].sum()), float(b["paliwo_l"].sum())
+    q0, q1 = float(a["kolejki_h"].sum()), float(b["kolejki_h"].sum())
+    num = lambda x: f"{x:,.0f}".replace(",", " ")  # noqa: E731
+    return [name, r.get("variant", "A") + (" · dynamic" if r.get("dynamic") else ""), goal_label(r.get("weight", 0.5)),
+            f"{len(a)}", f"{num(t0)} / {num(t1)}", f"{c0 / t0:.2f} / {c1 / t1:.2f}" if t0 and t1 else "–",
+            num(c0 - c1), f"{100 * (f1 / f0 - 1):+.1f} %" if f0 else "–", num(q1 - q0)]
+
+
+def _runs_card(res: dict | None, appr: dict | None) -> None:
+    """Simulations saved in this project: keep a run, set up another layout, compare them side by side."""
+    runs = st.session_state.setdefault("runs", {})
+    if not res and not runs:
+        return
+    with card("runs"):
+        theme.h4("Saved simulations", "kept in the project file (File → Save) – change the variant, machines or "
+                                      "settings, run the month again and save it next to the others")
+        if res:
+            c = st.columns([3, 1], vertical_alignment="bottom")
+            default = (f"{appr.get('variant', 'A')} · {goal_label(res['setup'].get('weight', 0.5))}"
+                       + (" · dynamic" if res.get("dynamic") else ""))
+            name = c[0].text_input("Name of this simulation", default, key="k2_run_name")
+            if c[1].button("💾 Save this simulation", key="k2_run_save", width="stretch"):
+                runs[name.strip() or default] = {
+                    "variant": appr.get("variant", "A"), "weight": res["setup"].get("weight", 0.5),
+                    "dynamic": bool(res.get("dynamic")), "parts": list(res.get("parts") or []),
+                    "labels": list(res["labels"]), "params": {k: float(v) for k, v in res["params"].items()},
+                    "planned_t": float(appr.get("planned_t") or 0), "today": _pack(res["today"]),
+                    "signals": _pack(res["signals"])}
+                st.rerun()
+        if runs:
+            rows = [_summary(k, r) for k, r in runs.items()]
+            st.markdown(theme.table([("Simulation", ""), ("Variant", ""), ("RL goal", ""), ("Shifts", "n"),
+                                     ("Tonnes baseline / RL", "n"), ("PLN/t baseline / RL", "n"),
+                                     ("Saving [PLN]", "n"), ("Fuel", "n"), ("Queues [h]", "n")],
+                                    rows, numeric={3, 4, 5, 6, 7, 8}, sans={0, 1, 2}), unsafe_allow_html=True)
+            c = st.columns([3, 1], vertical_alignment="bottom")
+            drop = c[0].selectbox("Saved simulation", list(runs), key="k2_run_pick", label_visibility="collapsed")
+            if c[1].button("Delete", key="k2_run_drop", width="stretch"):
+                runs.pop(drop, None)
+                st.rerun()

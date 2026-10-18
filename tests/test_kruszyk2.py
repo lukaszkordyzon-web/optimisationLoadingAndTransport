@@ -268,6 +268,14 @@ def test_simulation_period_charts_dynamic_assignment_and_cost_ticks():
     assert not at.exception, at.exception
     page = " ".join(x.value for x in at.markdown)
     assert "Total cost – all items" in page and "Crusher – fixed" not in page
+    at.button(key="k2_run_save").click().run()  # keep this simulation in the project
+    assert not at.exception, at.exception
+    assert len(at.session_state["runs"]) == 1
+    from app2 import state  # noqa: F401  (the saved project carries the simulations)
+    import yaml
+    run = next(iter(at.session_state["runs"].values()))
+    assert len(run["today"]["wywiezione_t"]) == len(at.session_state["month"]["today"])
+    assert yaml.safe_load(yaml.safe_dump(at.session_state["runs"], allow_unicode=True))
 
 
 def test_the_base_scenario_opens_with_its_schedule_and_runs():
