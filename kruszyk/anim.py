@@ -251,8 +251,11 @@ def _side(res, label: str = "") -> dict:
     }
 
 
-def split_html(left, right, left_label: str = "Jak dziś", right_label: str = "Z sygnałami RL") -> str:
-    """Two maps side by side, one clock: the same shift driven today (left) and with the signals (right)."""
+def split_html(left, right, left_label: str = "Jak dziś", right_label: str = "Z sygnałami RL", curves: dict | None = None,
+               prior: str = "null") -> str:
+    """Two maps side by side, one clock: the same shift driven today (left) and with the signals (right).
+    `curves`: the shift's cumulative tonnes / cost / queueing for the live charts under the maps; `prior`: the
+    period's earlier shifts as JSON (or a placeholder the caller fills in)."""
     from pathlib import Path
 
     here = Path(__file__).parent
@@ -264,7 +267,9 @@ def split_html(left, right, left_label: str = "Jak dziś", right_label: str = "Z
                "states": STATE_CODES, "labels": STATE_LABELS, "colors": STATE_COLORS,
                "left": _side(left, left_label), "right": _side(right, right_label)}
     return (template.replace("/*LEAFLET_CSS*/", css).replace("/*LEAFLET_JS*/", js)
-            .replace("__DATA__", json.dumps(payload, separators=(",", ":"))))
+            .replace("__DATA__", json.dumps(payload, separators=(",", ":")))
+            .replace("__SHIFTCURVES__", json.dumps(curves, separators=(",", ":")) if curves else "null")
+            .replace("__PRIOR__", prior))
 
 
 def animation_payload(res, baseline=None, label: str = "", baseline_label: str = "naturalny") -> str:

@@ -46,6 +46,17 @@
   .legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; border:1px solid #0003; }
   .banner { position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:1000; padding:5px 12px;
             border-radius:8px; font-weight:700; color:#fff; display:none; }
+  .charts { background:#0F141B; border-radius:10px; padding:12px 14px 14px; margin-top:10px; color:#D6DEE8; }
+  .charts .top { display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; margin-bottom:8px; font-size:13px; }
+  .charts .top b { font-size:15px; color:#fff; }
+  .charts .key i { display:inline-block; width:18px; height:3px; border-radius:2px; vertical-align:middle; margin:0 5px 2px 0; }
+  .charts label { margin-left:auto; cursor:pointer; }
+  .grid3 { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:12px; }
+  @media (max-width: 900px) { .grid3 { grid-template-columns:1fr; } }
+  .ch { background:#151C25; border-radius:8px; padding:8px 10px; }
+  .ch .h { font-weight:700; font-size:14px; color:#fff; }
+  .ch .v { font: 600 13px "IBM Plex Mono", ui-monospace, monospace; margin:2px 0 4px; }
+  .ch canvas { width:100%; height:200px; display:block; }
 </style>
 </head>
 <body>
@@ -84,6 +95,16 @@
 </div>
 <div class="diff">Różnica do tej chwili <span class="n" id="d-cpt">–</span><span class="n" id="d-fuel" style="color:#C9D2DC">–</span>
   <span class="legend" id="legend" style="margin-left:auto;color:#C9D2DC"></span></div>
+<div class="charts" id="charts">
+  <div class="top"><b id="ch-title">Ta zmiana do tej chwili</b>
+    <span class="key"><i style="background:#FF7A3D"></i>jak dziś</span><span class="key"><i style="background:#22D3C5"></i>z RL</span>
+    <label><input type="checkbox" id="ch-log"> oś Y logarytmiczna</label></div>
+  <div class="grid3">
+    <div class="ch"><div class="h">Kolejki narastająco</div><div class="v" id="v-q">–</div><canvas id="c-q"></canvas></div>
+    <div class="ch"><div class="h">Koszt tony narastająco</div><div class="v" id="v-c">–</div><canvas id="c-c"></canvas></div>
+    <div class="ch"><div class="h">Produkcja narastająco</div><div class="v" id="v-t">–</div><canvas id="c-t"></canvas></div>
+  </div>
+</div>
 <script>
 const D = __DATA__;
 const el = id => document.getElementById(id);
@@ -190,6 +211,7 @@ function draw() {
   } else el('R-msg').innerHTML = '<div class="none">Brak komunikatów na tej zmianie.</div>';
   el('clock').textContent = clock(t);
   el('time').value = t;
+  if (typeof drawCharts === 'function') drawCharts();
   const a = vals.L, b = vals.R;
   if (a && b && a.cpt && b.cpt) {
     const d = b.cpt - a.cpt;
@@ -197,6 +219,98 @@ function draw() {
     el('d-fuel').textContent = (b.fuel - a.fuel > 0 ? '+' : '') + fmt(b.fuel - a.fuel) + ' l paliwa';
   }
 }
+
+// ---- live charts: the period up to the current moment of this shift, advancing with the clock
+const CS = __SHIFTCURVES__, CP = __PRIOR__;
+const CCOL = { L: '#FF7A3D', R: '#22D3C5' };
+const NPRI = CP ? CP.n : 0;
+function prior(side, key, j) { return CP && j > 0 ? CP[side][key][j - 1] : 0; }  // cumulative at the end of shift j
+function pts(side, kind, tNow) {
+  // [x, y] up to tNow; x in shifts from the start of the period
+  const out = [], P = CP, n = NPRI, S = CS && CS[side];
+  const val = (T, C, Q) => kind === 't' ? T : kind === 'q' ? Q : (T > CS.min_t ? C / T : null);
+  if (n) { out.push([0, kind === 'c' ? null : 0]); for (let j = 1; j <= n; j++) out.push([j, val(prior(side, 't', j), prior(side, 'cost', j), prior(side, 'q', j))]); }
+  if (!S) return out;
+  const T0 = prior(side, 't', n), C0 = prior(side, 'cost', n), Q0 = prior(side, 'q', n);
+  for (let k = 0; k < S.s.length; k++) {
+    if (S.s[k] > tNow) break;
+    out.push([n + S.s[k] / CS.shift_s, val(T0 + S.t[k], C0 + S.cost[k], Q0 + S.q[k])]);
+  }
+  return out;
+}
+const YR = {};
+['q', 'c', 't'].forEach(kind => {  // fixed y range from the whole period, so the axes do not jump
+  const all = ['L', 'R'].flatMap(s => pts(s, kind, Infinity)).map(p => p[1]).filter(v => v !== null && isFinite(v));
+  let lo = kind === 'c' ? Math.min(...all) : 0, hi = Math.max(...all, 1e-6);
+  if (kind === 'c') { const pad = (hi - lo) * 0.08 || 0.5; lo -= pad; hi += pad; }
+  YR[kind] = [lo, hi * (kind === 'c' ? 1 : 1.05)];
+});
+function xTicks() {
+  if (!NPRI) {
+    const h = CS.shift_s / 3600, out = [];
+    for (let k = 0; k <= h; k++) out.push([k * 3600 / CS.shift_s, clock(k * 3600)]);
+    return out;
+  }
+  const lab = CP.labels.concat([CP.current]), step = Math.max(1, Math.ceil(lab.length / 7)), out = [];
+  for (let j = 0; j < lab.length; j += step) out.push([j + 0.5, lab[j]]);
+  return out;
+}
+function drawChart(id, kind, tNow, unit, dig) {
+  const cv = el(id), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const log = el('ch-log').checked, L0 = 46, R0 = 8, T0 = 8, B0 = 26;
+  let [lo, hi] = YR[kind];
+  const tf = v => log ? Math.log10(Math.max(v, kind === 'c' ? 0.01 : 0.1)) : v;
+  if (log) { lo = tf(kind === 'c' ? Math.max(lo, 0.01) : 0.1); hi = tf(hi); }
+  const xMax = NPRI + 1;
+  const X = x => L0 + (W - L0 - R0) * x / xMax, Y = v => T0 + (H - T0 - B0) * (1 - (tf(v) - lo) / ((hi - lo) || 1));
+  g.font = '11px IBM Plex Sans, system-ui, sans-serif'; g.fillStyle = '#8B97A6'; g.strokeStyle = 'rgba(255,255,255,0.08)';
+  const ticks = [];  // round values on the y axis
+  let step = 1;
+  if (log) { for (let e = Math.floor(lo); e <= Math.ceil(hi); e++) [1, 2, 5].forEach(m => { const v = m * Math.pow(10, e); if (tf(v) >= lo && tf(v) <= hi) ticks.push(v); }); }
+  else {
+    const raw = (hi - lo) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+    step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || raw;
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) ticks.push(v);
+  }
+  ticks.forEach(v => {
+    const yy = Y(v), dec = v >= 1000 ? (step % 1000 ? 1 : 0) : log ? (v < 1 ? 1 : 0) : (step < 0.1 ? 2 : step < 1 ? 1 : 0);
+    g.beginPath(); g.moveTo(L0, yy); g.lineTo(W - R0, yy); g.stroke();
+    g.textAlign = 'right'; g.fillText(v >= 1000 ? fmt(v / 1000, dec) + 'k' : fmt(v, dec), L0 - 6, yy + 4);
+  });
+  g.textAlign = 'center';
+  xTicks().forEach(([x, s]) => g.fillText(s, X(x), H - 8));
+  if (NPRI) {  // where this shift starts
+    g.strokeStyle = 'rgba(255,255,255,0.25)'; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(X(NPRI), T0); g.lineTo(X(NPRI), H - B0); g.stroke(); g.setLineDash([]);
+  }
+  const now = {};
+  ['L', 'R'].forEach(side => {
+    const P = pts(side, kind, tNow).filter(p => p[1] !== null && isFinite(p[1]));
+    if (!P.length) return;
+    if (kind === 'q') {  // area
+      g.beginPath(); g.moveTo(X(P[0][0]), Y(log ? 0.1 : 0)); P.forEach(p => g.lineTo(X(p[0]), Y(p[1])));
+      g.lineTo(X(P[P.length - 1][0]), Y(log ? 0.1 : 0)); g.closePath();
+      g.fillStyle = side === 'L' ? 'rgba(255,122,61,0.22)' : 'rgba(34,211,197,0.22)'; g.fill();
+    }
+    g.beginPath(); P.forEach((p, k) => k ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1])));
+    g.strokeStyle = CCOL[side]; g.lineWidth = 2.5; g.stroke();
+    const e = P[P.length - 1]; g.fillStyle = CCOL[side]; g.beginPath(); g.arc(X(e[0]), Y(e[1]), 3.5, 0, 7); g.fill();
+    now[side] = e[1];
+  });
+  const f = v => v === undefined ? '–' : fmt(v, dig) + ' ' + unit;
+  const d = now.L !== undefined && now.R !== undefined ? now.R - now.L : null;
+  el('v-' + kind).innerHTML = `<span style="color:${CCOL.L}">${f(now.L)}</span> &nbsp;·&nbsp; <span style="color:${CCOL.R}">${f(now.R)}</span>` +
+    (d === null ? '' : ` &nbsp;<span style="color:#8B97A6">(${d > 0 ? '+' : ''}${fmt(d, dig)})</span>`);
+}
+function drawCharts() {
+  if (!CS) { el('charts').style.display = 'none'; return; }
+  el('ch-title').textContent = CP ? CP.title : 'Ta zmiana do tej chwili';
+  drawChart('c-q', 'q', t, 'h', 1); drawChart('c-c', 'c', t, 'zł/t', 2); drawChart('c-t', 't', t, 't', 0);
+}
+el('ch-log').onchange = drawCharts;
+new ResizeObserver(drawCharts).observe(el('charts'));
+
 function loop(ts) {
   if (playing) {
     if (last !== null) t = Math.min(D.shift_s, t + (ts - last) / 1000 * Number(el('speed').value));

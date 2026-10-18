@@ -248,7 +248,6 @@ def test_simulation_period_charts_dynamic_assignment_and_cost_ticks():
     assert m["dynamic"] and "kruszarka" not in m["parts"]
     at.selectbox(key="k2_shift_i").set_value(3).run()
     assert not at.exception, at.exception
-    at.toggle(key="k2_dash_log").set_value(True)
     for period in ("Doba", "Kilka dni", "Tydzień", "Miesiąc"):
         at.session_state["k2_period"] = period
         at.run()

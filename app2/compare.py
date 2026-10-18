@@ -140,7 +140,13 @@ def _in_shift(r, parts: tuple, step_min: float = 5.0) -> pd.DataFrame:
     tl = r.timeline
     end = float(tl["t_s"].iloc[-1]) if len(tl) else 0.0
     grid = np.arange(0.0, end + 1.0, step_min * 60)
-    tonnes = np.interp(grid, tl["t_s"], tl["dumped_t"]) if len(tl) else np.zeros(len(grid))
+    # tonnes grow evenly between dumps (a dump is a step; as a ramp the cost per tonne does not saw up and down)
+    ld = r.loads[r.loads["dumped_at_s"].notna()].sort_values("dumped_at_s") if "dumped_at_s" in r.loads else r.loads
+    if len(ld):
+        tonnes = np.interp(grid, np.concatenate([[0.0], ld["dumped_at_s"].to_numpy(dtype=float)]),
+                           np.concatenate([[0.0], ld["tonnes"].cumsum().to_numpy(dtype=float)]))
+    else:
+        tonnes = np.zeros(len(grid))
     share = selected_cost(r.kpi, parts) / r.kpi["cost_total"] if r.kpi["cost_total"] else 1.0
     cost = (np.interp(grid, tl["t_s"], tl["cost"]) if len(tl) else np.zeros(len(grid))) * share
     q = r.states[r.states["state"].isin(["kolejka_koparka", "kolejka_kruszarka"])]
@@ -150,7 +156,7 @@ def _in_shift(r, parts: tuple, step_min: float = 5.0) -> pd.DataFrame:
         # the first loads make the cost per tonne jump – it is shown once some material has gone through
         zl_t = np.where(tonnes > max(150.0, 0.05 * float(tonnes[-1] if len(tonnes) else 0)), cost / np.maximum(tonnes, 1),
                         np.nan)
-    return pd.DataFrame({"t_s": grid, "t": tonnes, "zl_t": zl_t, "q": queue})
+    return pd.DataFrame({"t_s": grid, "t": tonnes, "zl_t": zl_t, "q": queue, "cost": cost})
 
 
 @st.cache_data(show_spinner=False, max_entries=6)
@@ -163,33 +169,11 @@ def _split(state_yaml: str, params: tuple, seed: int, dynamic: bool = False, par
     a = simulate(today(sc), seed=seed)
     b = simulate(with_signals(sc, dict(params), dynamic), seed=seed)
     parts = parts or tuple(k for k, _ in COSTS)
-    return split_html(a, b, "Jak dziś", "Z sygnałami RL"), _in_shift(a, parts), _in_shift(b, parts), sc.shift_plan.start_time
-
-
-BASE, RL = "#FF7A3D", "#22D3C5"  # dashboard colours: baseline orange-red, RL cyan
-
-
-def _dashboard(x, a: pd.DataFrame, b: pd.DataFrame, xtitle: str) -> go.Figure:
-    """Three charts on one time axis: cumulative queueing, cost per tonne and tonnes – today vs RL."""
-    from plotly.subplots import make_subplots
-
-    fig = make_subplots(rows=1, cols=3, horizontal_spacing=0.06,
-                        subplot_titles=("Kolejki narastająco [h]", "Koszt tony narastająco [zł/t]",
-                                        "Produkcja narastająco [t]"))
-    for name, d, color, fill in (("Jak dziś", a, BASE, "rgba(255,122,61,0.25)"),
-                                 ("Z RL", b, RL, "rgba(34,211,197,0.25)")):
-        fig.add_scatter(x=x, y=d["q"], name=name, mode="lines", line=dict(color=color, width=2.5), fill="tozeroy",
-                        fillcolor=fill, legendgroup=name, row=1, col=1)
-        fig.add_scatter(x=x, y=d["zl_t"], name=name, mode="lines", line=dict(color=color, width=2.5),
-                        legendgroup=name, showlegend=False, row=1, col=2)
-        fig.add_scatter(x=x, y=d["t"], name=name, mode="lines", line=dict(color=color, width=2.5),
-                        legendgroup=name, showlegend=False, row=1, col=3)
-    fig.update_xaxes(matches="x", showgrid=False, title_text=xtitle, title_font=dict(size=11))
-    fig.update_yaxes(gridcolor="rgba(255,255,255,0.08)", zeroline=False)
-    fig.update_layout(template="plotly_dark", height=330, margin=dict(t=50, b=40, l=40, r=20),
-                      paper_bgcolor="#0F141B", plot_bgcolor="#0F141B", hovermode="x unified",
-                      legend=dict(orientation="h", y=1.3, x=1, xanchor="right"), font=dict(color="#D6DEE8"))
-    return fig
+    ca, cb = _in_shift(a, parts, 2.0), _in_shift(b, parts, 2.0)
+    pack = lambda c: {k: [round(float(v), 3) for v in c[col]] for k, col in  # noqa: E731
+                      (("s", "t_s"), ("t", "t"), ("cost", "cost"), ("q", "q"))}
+    curves = {"shift_s": sc.shift_hours * 3600, "min_t": 150.0, "L": pack(ca), "R": pack(cb)}
+    return split_html(a, b, "Jak dziś", "Z sygnałami RL", curves, prior="__PRIOR__")
 
 
 PERIODS = ["Zmiana", "Doba", "Kilka dni", "Tydzień", "Miesiąc"]
@@ -213,15 +197,6 @@ def _window(a: pd.DataFrame, i: int, period: str, days: int) -> list[int]:
     return keep or [i]
 
 
-def _period_curves(a: pd.DataFrame, b: pd.DataFrame, keep: list[int], parts: tuple) -> tuple:
-    def cum(d):
-        d = d.iloc[keep]
-        t = d["wywiezione_t"].cumsum()
-        return pd.DataFrame({"t": t.to_numpy(), "zl_t": (_cost(d, parts).cumsum() / t.where(t > 0)).to_numpy(),
-                             "q": d["kolejki_h"].cumsum().to_numpy()})
-    return cum(a), cum(b)
-
-
 def signal_boxes(p: dict) -> str:
     """The driving signals in plain words, as boxes."""
     m, sd, cp = p["arrival_margin_s"], p["max_slowdown"], p["crusher_pacing"]
@@ -236,6 +211,22 @@ def signal_boxes(p: dict) -> str:
              f"zawsze jeździ co najmniej {100 * p['truck_min_working_share']:.0f} % wozideł każdej koparki."),
             ("Operator koparki:", "nabierz łyżkę przed podstawieniem wozidła.")]
     return "".join(f'<div class="k2-box"><b>{a}</b> {b}</div>' for a, b in rows)
+
+
+def _prior(a: pd.DataFrame, b: pd.DataFrame, lab: list, i: int, period: str, days: int, parts: tuple) -> str:
+    """The period's shifts before the one played (cumulative at each shift's end) for the live charts; 'null' for
+    a single shift."""
+    import json
+
+    keep = [k for k in _window(a, i, period, days) if k < i]
+    if period == "Zmiana" or not keep:
+        return "null"
+    side = lambda d: {"t": d["wywiezione_t"].iloc[keep].cumsum().round(1).tolist(),  # noqa: E731
+                      "cost": _cost(d.iloc[keep], parts).cumsum().round(0).tolist(),
+                      "q": d["kolejki_h"].iloc[keep].cumsum().round(2).tolist()}
+    first = _window(a, i, period, days)[0]
+    return json.dumps({"n": len(keep), "labels": [lab[k] for k in keep], "current": lab[i],
+                       "title": f"{period}: {lab[first]} → {lab[i]} (do tej chwili)", "L": side(a), "R": side(b)})
 
 
 def _shift_step(n: int, d: int) -> None:
@@ -274,28 +265,8 @@ def step_simulation() -> None:
         theme.note(f"{lab[i]} · jak dziś {a['wywiezione_t'].iloc[i]:,.0f} t · {z0:.2f} zł/t &nbsp;|&nbsp; z RL "
                    f"{b['wywiezione_t'].iloc[i]:,.0f} t · {z1:.2f} zł/t ({z1 - z0:+.2f})".replace(",", " "))
     st_yaml = dump_scenario(res["states"][i])
-    page, ca, cb, start = _split(st_yaml, tuple(sorted(res["params"].items())), SEED + 7919 * i, dyn, tuple(parts))
-    components.html(page, height=900, scrolling=True)  # the two maps: today and with RL
-    with card("dash"):
-        if period == "Zmiana":
-            day = pd.Timestamp(a["data"].iloc[i]).normalize()
-            h, m = (int(v) for v in str(a["start"].iloc[i] if "start" in a else start).split(":"))
-            x = [day + pd.Timedelta(hours=h, minutes=m, seconds=float(t)) for t in ca["t_s"]]
-            fig = _dashboard(x, ca, cb.reindex(range(len(ca))).ffill(), "godzina")
-            fig.update_xaxes(tickformat="%H:%M")
-            title = f"Zmiana {lab[i]}"
-        else:
-            keep = _window(a, i, period, days)
-            pa, pb = _period_curves(a, b, keep, parts)
-            fig = _dashboard([lab[k] for k in keep], pa, pb, "zmiana")
-            fig.update_xaxes(showticklabels=len(keep) <= 21)
-            title = f"{period}: {lab[keep[0]]} – {lab[keep[-1]]} · {len(keep)} zmian"
-        theme.h4(title, "kolejki pod koparkami i kruszarką, koszt tony z zaznaczonych kosztów, wywiezione tony – "
-                        "pomarańczowy: jak dziś, cyjan: z RL" + (" · RL z dynamicznym przydziałem wozideł" if dyn else ""))
-        if st.toggle("Oś Y logarytmiczna", key="k2_dash_log",
-                     help="Małe wartości (początek zmiany, kolejki) nie giną przy dużych – łatwiej zobaczyć różnicę."):
-            fig.update_yaxes(type="log")
-        st.plotly_chart(fig, width="stretch", key="k2_dash")
+    page = _split(st_yaml, tuple(sorted(res["params"].items())), SEED + 7919 * i, dyn, tuple(parts))
+    components.html(page.replace("__PRIOR__", _prior(a, b, lab, i, period, days, parts)), height=1240, scrolling=True)
     with head[1]:
         if st.button("Cały miesiąc →", type="primary", key="k2_to_result", width="stretch"):
             st.session_state.nav_next = "④ Wynik"
