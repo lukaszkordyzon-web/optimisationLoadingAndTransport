@@ -1,0 +1,2711 @@
+name: Kruszyk quarry – base scenario
+shift_hours: 8
+seed: 42
+dispatch: dynamic
+loose_density_t_m3: 1.75
+rolling_resistance_pct: 3.0
+blasts:
+- id: O1/1
+  tonnage_t: 0.0
+  fragmentation: 0.3
+  material: wapień
+  loose_density_t_m3: 1.7
+  psd:
+  - - 10.0
+    - 2.7
+  - - 25.0
+    - 7.8
+  - - 50.0
+    - 17.1
+  - - 100.0
+    - 35.0
+  - - 200.0
+    - 62.8
+  - - 300.0
+    - 80.0
+  - - 500.0
+    - 94.9
+  - - 800.0
+    - 99.5
+  - - 1000.0
+    - 99.9
+  - - 1200.0
+    - 100.0
+- id: O2/1
+  tonnage_t: 0.0
+  fragmentation: 0.3
+  material: wapień
+  loose_density_t_m3: 1.7
+  psd:
+  - - 10.0
+    - 2.7
+  - - 25.0
+    - 7.8
+  - - 50.0
+    - 17.1
+  - - 100.0
+    - 35.0
+  - - 200.0
+    - 62.8
+  - - 300.0
+    - 80.0
+  - - 500.0
+    - 94.9
+  - - 800.0
+    - 99.5
+  - - 1000.0
+    - 99.9
+  - - 1200.0
+    - 100.0
+excavators:
+- id: K-2
+  bucket_m3: 3.4
+  swing_cycle_s: 24.0
+  blast: O1/1
+  route: T-K-2
+  fill_factor: 0.85
+  model: Volvo EC550E (koparka 55 t)
+  spot_time_s: 40.0
+  areas: []
+- id: K-3
+  bucket_m3: 4.0
+  swing_cycle_s: 26.0
+  blast: O2/1
+  route: T-K-3
+  fill_factor: 0.85
+  model: Hitachi ZX690LCH-7 (koparka 70 t)
+  spot_time_s: 40.0
+  areas: []
+trucks:
+- model: CAT 770G (sztywnoramowe 36 t)
+  count: 1
+  payload_t: 36.0
+  empty_mass_t: 33.6
+  power_kw: 382.0
+  max_speed_kmh: 60.0
+  fuel_lph_loaded: 46.0
+  fuel_lph_empty: 25.0
+  fuel_lph_idle: 8.0
+  tank_l: 568.0
+  drive_efficiency: 0.75
+  id: WZ-01
+  excavators: []
+- payload_t: 36.0
+  empty_mass_t: 33.6
+  power_kw: 382.0
+  max_speed_kmh: 60.0
+  fuel_lph_loaded: 46.0
+  fuel_lph_empty: 25.0
+  fuel_lph_idle: 8.0
+  tank_l: 568.0
+  drive_efficiency: 0.75
+  model: CAT 770G (sztywnoramowe 36 t)
+  count: 1
+  id: WZ-02
+  excavators: []
+- payload_t: 36.0
+  empty_mass_t: 33.6
+  power_kw: 382.0
+  max_speed_kmh: 60.0
+  fuel_lph_loaded: 46.0
+  fuel_lph_empty: 25.0
+  fuel_lph_idle: 8.0
+  tank_l: 568.0
+  drive_efficiency: 0.75
+  model: CAT 770G (sztywnoramowe 36 t)
+  count: 1
+  id: WZ-03
+  excavators: []
+- payload_t: 36.0
+  empty_mass_t: 33.6
+  power_kw: 382.0
+  max_speed_kmh: 60.0
+  fuel_lph_loaded: 46.0
+  fuel_lph_empty: 25.0
+  fuel_lph_idle: 8.0
+  tank_l: 568.0
+  drive_efficiency: 0.75
+  model: CAT 770G (sztywnoramowe 36 t)
+  count: 1
+  id: WZ-04
+  excavators: []
+- payload_t: 36.0
+  empty_mass_t: 33.6
+  power_kw: 382.0
+  max_speed_kmh: 60.0
+  fuel_lph_loaded: 46.0
+  fuel_lph_empty: 25.0
+  fuel_lph_idle: 8.0
+  tank_l: 568.0
+  drive_efficiency: 0.75
+  model: CAT 770G (sztywnoramowe 36 t)
+  count: 1
+  id: WZ-05
+  excavators: []
+- payload_t: 36.0
+  empty_mass_t: 33.6
+  power_kw: 382.0
+  max_speed_kmh: 60.0
+  fuel_lph_loaded: 46.0
+  fuel_lph_empty: 25.0
+  fuel_lph_idle: 8.0
+  tank_l: 568.0
+  drive_efficiency: 0.75
+  model: CAT 770G (sztywnoramowe 36 t)
+  count: 1
+  id: WZ-06
+  excavators: []
+routes:
+  T-K-2:
+    segments:
+    - name: front
+      length_m: 51.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: road 4
+      length_m: 113.6
+      speed_limit_kmh: 40.0
+      curves:
+      - - 48.4
+        - 99.2
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 80.6
+      speed_limit_kmh: 25.0
+      section: R2#6
+      section_dir: -1
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 109.4
+      speed_limit_kmh: 25.0
+      section: R2#5
+      section_dir: -1
+      curves:
+      - - 25.2
+        - 69.4
+      - - 132.4
+        - 15.0
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 82.1
+      speed_limit_kmh: 25.0
+      section: R2#4
+      section_dir: -1
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 143.9
+      speed_limit_kmh: 25.0
+      section: R2#3
+      section_dir: -1
+      curves:
+      - - 142.7
+        - 27.0
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 172.9
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      curves:
+      - - 189.2
+        - 32.6
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 160.5
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 74.5
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 10.0
+    - name: road 1
+      length_m: 59.7
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: plac_kruszarki
+      length_m: 16.9
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 50.798896
+      - 20.503836
+    - - 50.798578
+      - 20.503299
+    - - 50.799052
+      - 20.501867
+    - - 50.799903
+      - 20.502875
+    - - 50.800168
+      - 20.502607
+    - - 50.800544
+      - 20.502419
+    - - 50.801097
+      - 20.502092
+    - - 50.801704
+      - 20.501921
+    - - 50.802287
+      - 20.501223
+    - - 50.802751
+      - 20.500665
+    - - 50.803246
+      - 20.499474
+    - - 50.803629
+      - 20.497828
+    - - 50.803867
+      - 20.496916
+    - - 50.803985
+      - 20.496175
+    - - 50.804097
+      - 20.495344
+    - - 50.804246
+      - 20.495296
+    elev_start_m: -93.7
+    elev_end_m: 0.0
+  T-K-3:
+    segments:
+    - name: front
+      length_m: 32.2
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: road 3
+      length_m: 127.6
+      speed_limit_kmh: 40.0
+      section: R3#3
+      section_dir: -1
+      curves:
+      - - 68.0
+        - 58.7
+      grade_pct: 10.0
+    - name: road 3
+      length_m: 123.5
+      speed_limit_kmh: 40.0
+      section: R3#2
+      section_dir: -1
+      curves:
+      - - 66.5
+        - 50.8
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 36.8
+      speed_limit_kmh: 25.0
+      section: R2#5
+      section_dir: -1
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 82.1
+      speed_limit_kmh: 25.0
+      section: R2#4
+      section_dir: -1
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 143.9
+      speed_limit_kmh: 25.0
+      section: R2#3
+      section_dir: -1
+      curves:
+      - - 142.7
+        - 27.0
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 172.9
+      speed_limit_kmh: 25.0
+      section: R2#2
+      section_dir: -1
+      curves:
+      - - 189.2
+        - 32.6
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 160.5
+      speed_limit_kmh: 25.0
+      section: R2#1
+      section_dir: -1
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 74.5
+      speed_limit_kmh: 25.0
+      section: R2#0
+      section_dir: -1
+      grade_pct: 10.0
+    - name: road 1
+      length_m: 59.7
+      speed_limit_kmh: 40.0
+      grade_pct: 0.0
+    - name: plac_kruszarki
+      length_m: 16.9
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 50.798571
+      - 20.505488
+    - - 50.798727
+      - 20.505102
+    - - 50.799127
+      - 20.504994
+    - - 50.799537
+      - 20.504313
+    - - 50.79972
+      - 20.503584
+    - - 50.800168
+      - 20.502607
+    - - 50.800544
+      - 20.502419
+    - - 50.801097
+      - 20.502092
+    - - 50.801704
+      - 20.501921
+    - - 50.802287
+      - 20.501223
+    - - 50.802751
+      - 20.500665
+    - - 50.803246
+      - 20.499474
+    - - 50.803629
+      - 20.497828
+    - - 50.803867
+      - 20.496916
+    - - 50.803985
+      - 20.496175
+    - - 50.804097
+      - 20.495344
+    - - 50.804246
+      - 20.495296
+    elev_start_m: -92.2
+    elev_end_m: 0.0
+crusher:
+  capacity_tph: 600.0
+  hopper_t: 200.0
+  dump_time_s: 60.0
+  fragmentation_penalty: 0.4
+  kwh_per_t: 1.1
+  kwh_fragmentation_extra: 0.6
+  id: C-1
+  accepts: []
+  product: ''
+  target_t: 0.0
+  model: Metso Nordberg NP1315 – udarowa stacjonarna (wapień)
+  max_feed_mm: 900.0
+variability:
+  driver_sd: 0.07
+  trip_sd: 0.08
+  load_sd: 0.1
+  rain_probability: 0.2
+  rain_slowdown: 0.12
+  truck_mtbf_h: 40
+  truck_mttr_min: 35
+stockpile:
+  enabled: false
+  divert_wait_s: 180
+  dump_time_s: 40
+  loader_tph: 450
+  feed_below_t: 60
+  initial_t: 0
+  loader_per_h: 350
+  rehandle_cost_per_t: 1.5
+pacing:
+  enabled: false
+  max_slowdown: 0.25
+costs:
+  truck_per_h: 300
+  excavator_per_h: 900
+  crusher_per_h: 1200.0
+  fuel_per_l: 6.5
+  energy_per_kwh: 0.9
+  drill_blast_per_t: 3.0
+  drill_blast_fine_extra_per_t: 2.5
+  truck_operator_per_h: 180.0
+  truck_amort_per_mth: 60.0
+  truck_service_per_mth: 40.0
+  excavator_operator_per_h: 315.0
+  excavator_amort_per_mth: 292.5
+  excavator_service_per_mth: 292.5
+reliability:
+  enabled: true
+  ref_shifts_per_day: 2.0
+  ref_days_per_month: 22.0
+  machines:
+    WZ-01:
+      count: 8.0
+      hours: 8.0
+    WZ-02:
+      count: 6.0
+      hours: 8.0
+links:
+  K-2>K-3:
+    segments:
+    - name: front
+      length_m: 51.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: road 4
+      length_m: 113.6
+      speed_limit_kmh: 40.0
+      curves:
+      - - 48.4
+        - 99.2
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 80.6
+      speed_limit_kmh: 25.0
+      section: R2#6
+      section_dir: -1
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 72.6
+      speed_limit_kmh: 25.0
+      section: R2#5
+      section_dir: -1
+      curves:
+      - - 25.2
+        - 69.4
+      - - 6.0
+        - 158.5
+      grade_pct: 10.0
+    - name: road 3
+      length_m: 123.5
+      speed_limit_kmh: 40.0
+      section: R3#2
+      section_dir: 1
+      curves:
+      - - 219.7
+        - 14.3
+      grade_pct: -10.0
+    - name: road 3
+      length_m: 127.6
+      speed_limit_kmh: 40.0
+      section: R3#3
+      section_dir: 1
+      curves:
+      - - 68.0
+        - 58.7
+      grade_pct: -10.0
+    - name: dojazd
+      length_m: 32.2
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 50.798896
+      - 20.503836
+    - - 50.798578
+      - 20.503299
+    - - 50.799052
+      - 20.501867
+    - - 50.799903
+      - 20.502875
+    - - 50.800168
+      - 20.502607
+    - - 50.79972
+      - 20.503584
+    - - 50.799537
+      - 20.504313
+    - - 50.799127
+      - 20.504994
+    - - 50.798727
+      - 20.505102
+    - - 50.798571
+      - 20.505488
+    elev_start_m: -93.7
+    elev_end_m: -92.2
+  K-3>K-2:
+    segments:
+    - name: front
+      length_m: 32.2
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    - name: road 3
+      length_m: 127.6
+      speed_limit_kmh: 40.0
+      section: R3#3
+      section_dir: -1
+      curves:
+      - - 68.0
+        - 58.7
+      grade_pct: 10.0
+    - name: road 3
+      length_m: 123.5
+      speed_limit_kmh: 40.0
+      section: R3#2
+      section_dir: -1
+      curves:
+      - - 219.7
+        - 14.3
+      - - 6.0
+        - 158.5
+      grade_pct: 10.0
+    - name: ramp 2
+      length_m: 72.6
+      speed_limit_kmh: 25.0
+      section: R2#5
+      section_dir: 1
+      curves:
+      - - 25.2
+        - 69.4
+      grade_pct: -10.0
+    - name: ramp 2
+      length_m: 80.6
+      speed_limit_kmh: 25.0
+      section: R2#6
+      section_dir: 1
+      curves:
+      - - 48.4
+        - 99.2
+      grade_pct: -10.0
+    - name: road 4
+      length_m: 113.6
+      speed_limit_kmh: 40.0
+      grade_pct: -10.0
+    - name: dojazd
+      length_m: 51.7
+      grade_pct: 0.0
+      speed_limit_kmh: 15.0
+    path:
+    - - 50.798571
+      - 20.505488
+    - - 50.798727
+      - 20.505102
+    - - 50.799127
+      - 20.504994
+    - - 50.799537
+      - 20.504313
+    - - 50.79972
+      - 20.503584
+    - - 50.800168
+      - 20.502607
+    - - 50.799903
+      - 20.502875
+    - - 50.799052
+      - 20.501867
+    - - 50.798578
+      - 20.503299
+    - - 50.798896
+      - 20.503836
+    elev_start_m: -92.2
+    elev_end_m: -93.7
+planned_blasts: []
+areas:
+- material: wapień
+  blast_max_t: 8000.0
+  t_per_m: 30.0
+  bench_m: 15.0
+  solid_density_t_m3: 2.65
+  first_drilled: false
+  reblast_below_t: 0.0
+  min_gap_days: 1.0
+  max_per_day: 1.0
+  psd:
+  - - 10.0
+    - 2.7
+  - - 25.0
+    - 7.8
+  - - 50.0
+    - 17.1
+  - - 100.0
+    - 35.0
+  - - 200.0
+    - 62.8
+  - - 300.0
+    - 80.0
+  - - 500.0
+    - 94.9
+  - - 800.0
+    - 99.5
+  - - 1000.0
+    - 99.9
+  - - 1200.0
+    - 100.0
+  loose_density_t_m3: 1.7
+  id: O1
+  level_m: 0.0
+  reserves_t: 171000.0
+  polygon:
+  - - 50.798442
+    - 20.503299
+  - - 50.799107
+    - 20.503825
+  - - 50.798863
+    - 20.504479
+  - - 50.798205
+    - 20.503868
+  - - 50.798293
+    - 20.503578
+  start_t: 0.0
+- material: wapień
+  blast_max_t: 8000.0
+  t_per_m: 30.0
+  bench_m: 15.0
+  solid_density_t_m3: 2.65
+  first_drilled: false
+  reblast_below_t: 0.0
+  min_gap_days: 1.0
+  max_per_day: 1.0
+  psd:
+  - - 10.0
+    - 2.7
+  - - 25.0
+    - 7.8
+  - - 50.0
+    - 17.1
+  - - 100.0
+    - 35.0
+  - - 200.0
+    - 62.8
+  - - 300.0
+    - 80.0
+  - - 500.0
+    - 94.9
+  - - 800.0
+    - 99.5
+  - - 1000.0
+    - 99.9
+  - - 1200.0
+    - 100.0
+  loose_density_t_m3: 1.7
+  id: O2
+  level_m: 0.0
+  reserves_t: 223000.0
+  polygon:
+  - - 50.798679
+    - 20.505327
+  - - 50.79794
+    - 20.504898
+  - - 50.797737
+    - 20.505692
+  - - 50.798524
+    - 20.506196
+  start_t: 0.0
+crushers_extra: []
+site:
+  center:
+  - 52.0
+  - 19.4
+  zoom: 6
+  crusher:
+    lat: 50.804246
+    lon: 20.495296
+    elev_m: 0.0
+    model: Metso Nordberg NP1315 – udarowa stacjonarna (wapień)
+  piles: []
+  excavators:
+  - pile: (najbliższy)
+    bucket_m3: 3.4
+    swing_cycle_s: 24.0
+    fill_factor: 0.85
+    model: Volvo EC550E (koparka 55 t)
+    id: K-2
+    lat: 50.798896
+    lon: 20.503836
+    uid: e9353eb7bc
+    spot_time_s: 40.0
+    areas: []
+  - pile: (najbliższy)
+    bucket_m3: 4.0
+    swing_cycle_s: 26.0
+    fill_factor: 0.85
+    model: Hitachi ZX690LCH-7 (koparka 70 t)
+    id: K-3
+    lat: 50.798571
+    lon: 20.505488
+    uid: 8be502e6e1
+    spot_time_s: 40.0
+    areas: []
+  roads:
+  - id: R1
+    kind: droga
+    name: road 1
+    grade_draw_pct: 0.0
+    speed_limit_kmh: 40.0
+    single_lane: false
+    coords:
+    - - 50.804097
+      - 20.495344
+    - - 50.803985
+      - 20.496175
+    uid: 5768e336a8
+  - id: R2
+    kind: rampa
+    name: ramp 2
+    grade_draw_pct: -10.0
+    speed_limit_kmh: 25.0
+    single_lane: true
+    coords:
+    - - 50.803975
+      - 20.496181
+    - - 50.803867
+      - 20.496916
+    - - 50.803629
+      - 20.497828
+    - - 50.803246
+      - 20.499474
+    - - 50.802751
+      - 20.500665
+    - - 50.802287
+      - 20.501223
+    - - 50.801704
+      - 20.501921
+    - - 50.801097
+      - 20.502092
+    - - 50.800544
+      - 20.502419
+    - - 50.800168
+      - 20.502607
+    - - 50.799903
+      - 20.502875
+    - - 50.799052
+      - 20.501867
+    uid: '6099325167'
+  - id: R3
+    kind: droga
+    name: road 3
+    grade_draw_pct: -10.0
+    speed_limit_kmh: 40.0
+    single_lane: true
+    coords:
+    - - 50.801704
+      - 20.501926
+    - - 50.800893
+      - 20.502414
+    - - 50.800185
+      - 20.502967
+    - - 50.79972
+      - 20.503584
+    - - 50.799537
+      - 20.504313
+    - - 50.799127
+      - 20.504994
+    - - 50.798727
+      - 20.505102
+    uid: 1a02a22722
+  - id: R4
+    kind: droga
+    name: road 4
+    grade_draw_pct: -10.0
+    speed_limit_kmh: 40.0
+    single_lane: false
+    coords:
+    - - 50.799042
+      - 20.501851
+    - - 50.798578
+      - 20.503299
+    uid: 6cb5dc3e6d
+  passing_bays:
+  - lat: 50.7995915
+    lon: 20.5040958
+    uid: de296dfb3f
+    id: M1
+  - lat: 50.8011984
+    lon: 20.5022302
+    uid: 30dc7d7786
+    id: M2
+  - lat: 50.8023115
+    lon: 20.5011936
+    uid: 7a810874b6
+    id: M3
+  - lat: 50.8032811
+    lon: 20.499323
+    uid: f71c6c35a7
+    id: M4
+  - lat: 50.8037956
+    lon: 20.4971896
+    uid: 1695f6c53a
+    id: M5
+  - lat: 50.8004834
+    lon: 20.5024493
+    uid: 4a6a8e4772
+    id: M6
+  - lat: 50.7996319
+    lon: 20.5025539
+    uid: 2e11d28e98
+    id: M7
+  areas:
+  - material: wapień
+    blast_max_t: 8000.0
+    t_per_m: 30.0
+    bench_m: 15.0
+    solid_density_t_m3: 2.65
+    first_drilled: false
+    reblast_below_t: 0.0
+    min_gap_days: 1.0
+    max_per_day: 1.0
+    psd:
+    - - 10.0
+      - 2.7
+    - - 25.0
+      - 7.8
+    - - 50.0
+      - 17.1
+    - - 100.0
+      - 35.0
+    - - 200.0
+      - 62.8
+    - - 300.0
+      - 80.0
+    - - 500.0
+      - 94.9
+    - - 800.0
+      - 99.5
+    - - 1000.0
+      - 99.9
+    - - 1200.0
+      - 100.0
+    loose_density_t_m3: 1.7
+    id: O1
+    level_m: 0.0
+    reserves_t: 171000.0
+    polygon:
+    - - 50.798442
+      - 20.503299
+    - - 50.799107
+      - 20.503825
+    - - 50.798863
+      - 20.504479
+    - - 50.798205
+      - 20.503868
+    - - 50.798293
+      - 20.503578
+    uid: a6f0007f5f
+    start_t: 0.0
+  - material: wapień
+    blast_max_t: 8000.0
+    t_per_m: 30.0
+    bench_m: 15.0
+    solid_density_t_m3: 2.65
+    first_drilled: false
+    reblast_below_t: 0.0
+    min_gap_days: 1.0
+    max_per_day: 1.0
+    psd:
+    - - 10.0
+      - 2.7
+    - - 25.0
+      - 7.8
+    - - 50.0
+      - 17.1
+    - - 100.0
+      - 35.0
+    - - 200.0
+      - 62.8
+    - - 300.0
+      - 80.0
+    - - 500.0
+      - 94.9
+    - - 800.0
+      - 99.5
+    - - 1000.0
+      - 99.9
+    - - 1200.0
+      - 100.0
+    loose_density_t_m3: 1.7
+    id: O2
+    level_m: 0.0
+    reserves_t: 223000.0
+    polygon:
+    - - 50.798679
+      - 20.505327
+    - - 50.79794
+      - 20.504898
+    - - 50.797737
+      - 20.505692
+    - - 50.798524
+      - 20.506196
+    uid: 69f4a232bb
+    start_t: 0.0
+  parking: []
+  levels:
+  - name: Poziom +0
+    elev_m: 0.0
+    auto: true
+    roads:
+    - road 1
+drills:
+- id: W-1
+  in_work: true
+  m_per_shift: 250.0
+  speed_kmh: 2.0
+blasting:
+  fire_from: '11:00'
+  fire_to: '11:20'
+  crew_arrive: 09:00
+  crew_leave: '11:40'
+  evacuation_min: 10.0
+k2_schedule:
+  work:
+    start:
+      O1: 8000.0
+      O2: 8000.0
+    ex:
+      K-2:
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      - a: O1
+        t: 2000.0
+      K-3:
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+      - a: O2
+        t: 1800.0
+    tr:
+      WZ-01:
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      WZ-02:
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      WZ-03:
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      WZ-04:
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      WZ-05:
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      - K-2
+      WZ-06:
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+      - K-3
+    dr:
+      W-1:
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: ''
+        t: 0.0
+      - a: O1
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: O2
+        t: 8000.0
+      - a: ''
+        t: 0.0
+      - a: ''
+        t: 0.0
+      - a: ''
+        t: 0.0
+    fire: {}
+    mode: limit
+    drill: false
+  plan:
+    start: '2026-10-01'
+    days: 28
+    shifts: 3
+    sat: true
+    hol: ''
+    fire: 1
+    real_t: 0.0
+    target_t: 220000.0
+  variants:
+    A:
+      start:
+        O1: 8000.0
+        O2: 8000.0
+      ex:
+        K-2:
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        - a: O1
+          t: 2000.0
+        K-3:
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+        - a: O2
+          t: 1800.0
+      tr:
+        WZ-01:
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        WZ-02:
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        WZ-03:
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        WZ-04:
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        WZ-05:
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        - K-2
+        WZ-06:
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+        - K-3
+      dr:
+        W-1:
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: ''
+          t: 0.0
+        - a: O1
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: O2
+          t: 8000.0
+        - a: ''
+          t: 0.0
+        - a: ''
+          t: 0.0
+        - a: ''
+          t: 0.0
+      fire: {}
+      mode: limit
+      drill: false
+  variant: A

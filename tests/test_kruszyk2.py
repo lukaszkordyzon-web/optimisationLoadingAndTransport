@@ -7,10 +7,22 @@ pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 APP = str(Path(__file__).parent.parent / "kruszyk2.py")
+DEMO = Path(__file__).parent.parent / "scenarios" / "kruszyk_demo_zakrzowek.yaml"
+
+
+def _app(timeout: int = 900, mine: Path | None = DEMO) -> AppTest:
+    """The app on a given mine (default: the map demo these tests were written for; None = the start mine)."""
+    import yaml
+
+    at = AppTest.from_file(APP, default_timeout=timeout)
+    if mine is not None:
+        at.session_state["raw"] = yaml.safe_load(mine.read_text(encoding="utf-8"))
+        at.session_state["ver"] = 0
+    return at
 
 
 def test_whole_flow_on_the_start_mine():
-    at = AppTest.from_file(APP, default_timeout=900)
+    at = _app(900)
     at.session_state["k2_quick"] = True  # a short learning – the flow, not the result, is tested here
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 3, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
@@ -37,7 +49,7 @@ def test_whole_flow_on_the_start_mine():
 
 
 def test_schedule_editing_sets_area_tonnes_and_trucks():
-    at = AppTest.from_file(APP, default_timeout=600)
+    at = _app(600)
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 3, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
@@ -63,7 +75,7 @@ def test_schedule_editing_sets_area_tonnes_and_trucks():
 
 
 def test_a_copy_of_the_schedule_is_compared_with_the_base():
-    at = AppTest.from_file(APP, default_timeout=900)
+    at = _app(900)
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
@@ -84,7 +96,7 @@ def test_a_copy_of_the_schedule_is_compared_with_the_base():
 
 
 def test_full_output_variant():
-    at = AppTest.from_file(APP, default_timeout=900)
+    at = _app(900)
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
@@ -102,7 +114,7 @@ def test_full_output_variant():
 def test_a_variant_with_other_machines():
     import copy
 
-    at = AppTest.from_file(APP, default_timeout=900)
+    at = _app(900)
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
@@ -122,7 +134,7 @@ def test_a_variant_with_other_machines():
 
 
 def test_machines_screen_has_models_for_every_machine():
-    at = AppTest.from_file(APP, default_timeout=600)
+    at = _app(600)
     at.run()
     at.radio(key="k2_mine_tab").set_value("Machines").run()
     assert not at.exception, at.exception
@@ -232,7 +244,7 @@ def test_dynamic_assignment_sends_trucks_where_they_are_loaded_soonest():
 
 
 def test_simulation_period_charts_dynamic_assignment_and_cost_ticks():
-    at = AppTest.from_file(APP, default_timeout=900)
+    at = _app(900)
     at.session_state["k2_quick"] = True
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 3, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
@@ -256,3 +268,19 @@ def test_simulation_period_charts_dynamic_assignment_and_cost_ticks():
     assert not at.exception, at.exception
     page = " ".join(x.value for x in at.markdown)
     assert "Total cost – all items" in page and "Crusher – fixed" not in page
+
+
+def test_the_base_scenario_opens_with_its_schedule_and_runs():
+    at = _app(900, mine=None)
+    at.session_state["k2_quick"] = True
+    at.session_state["k2_plan"] = {"start": "2026-10-01", "days": 2, "shifts": 3, "sat": True, "hol": "", "fire": 1,
+                                   "real_t": 0.0}
+    at.run()
+    assert not at.exception, at.exception
+    assert set(at.session_state["variants"]["A"]["ex"]) == {"K-2", "K-3"}  # the saved schedule came with the mine
+    at.radio(key="k2_nav").set_value("② Schedule").run()
+    assert not at.exception, at.exception
+    at.button(key="k2_approve").click().run()
+    at.button(key="k2_month_go").click().run()
+    assert not at.exception, at.exception
+    assert len(at.session_state["month"]["today"]) == 6

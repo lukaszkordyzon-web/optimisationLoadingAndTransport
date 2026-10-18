@@ -10,7 +10,7 @@ import yaml
 from kruszyk.config import scenario_from_dict, yaml_dump
 
 SCEN_DIR = Path(__file__).parent.parent / "scenarios"
-DEFAULT = "kruszyk_demo_zakrzowek"  # the mine opened at start
+DEFAULT = "kruszyk_base"  # the mine opened at start (with its schedule)
 # results that belong to one mine / one schedule – dropped when the mine changes
 DERIVED = ("work", "variants", "k2seg_variant", "k2_cmp", "approved", "month", "split", "site", "site_ver", "info_sel")
 
@@ -21,8 +21,11 @@ def presets() -> dict[str, Path]:
 
 def init() -> None:
     if "raw" not in st.session_state:
-        st.session_state.raw = yaml.safe_load((SCEN_DIR / f"{DEFAULT}.yaml").read_text(encoding="utf-8"))
+        plan = st.session_state.get("k2_plan")
+        load((SCEN_DIR / f"{DEFAULT}.yaml").read_text(encoding="utf-8"))
         st.session_state.ver = 0
+        if plan:  # a period set before the start (tests) wins over the saved one
+            st.session_state.k2_plan = plan
 
 
 def set_raw(raw: dict, new_mine: bool = False) -> None:
