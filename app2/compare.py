@@ -101,13 +101,21 @@ def month(appr) -> dict | None:
     res = st.session_state.get("month")
     if res and res["key"] == key:
         return res
+    # the same schedule, other settings (goal, costs, assignment): the last result stays on screen until re-run
+    old = res if res and res.get("appr_key") == appr["key"] else None
     with card("monthgo"):
-        theme.h4("Run the month")
-        theme.note("The program runs the month as baseline on the approved schedule, learns the driving signals on it "
-                   f"and runs the same month with the signals – usually 1–3 min. Learning goal: <b>{goal_label(_weight())}</b>.")
+        if old:
+            theme.h4("Settings changed – the result below is for the previous settings")
+            theme.note(f"Run the month again to learn the signals for: <b>{goal_label(_weight())}</b>, "
+                       f"{len(_parts())} of {len(COSTS)} costs, dynamic assignment {'on' if _dynamic() else 'off'}.")
+        else:
+            theme.h4("Run the month")
+            theme.note("The program runs the month as baseline on the approved schedule, learns the driving signals on it "
+                       f"and runs the same month with the signals – usually 1–3 min. Learning goal: "
+                       f"<b>{goal_label(_weight())}</b>.")
         go_ = st.button("Run the month and learn the signals", type="primary", key="k2_month_go")
     if not go_:
-        return None
+        return old
     from kruszyk.config import cycle_costs, scenario_from_dict
     import yaml
 
@@ -127,7 +135,7 @@ def month(appr) -> dict | None:
                      progress=lambda i, k: bar.progress(0.65 + 0.35 * i / k, f"Month with signals: shift {i} of {k}"))
     bar.empty()
     res = {"key": key, "today": df0, "signals": df1, "params": r.params, "setup": r.setup, "states": states,
-           "labels": labels(plan), "parts": parts, "dynamic": dyn}
+           "labels": labels(plan), "parts": parts, "dynamic": dyn, "appr_key": appr["key"]}
     st.session_state.month = res
     st.session_state.pop("split", None)
     return res
