@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -62,53 +62,53 @@
 <body>
 <div class="bar">
   <span class="clock" id="clock">06:00</span>
-  <button class="main" id="play">▶ Odtwarzaj</button>
-  <button id="reset" aria-label="Od początku zmiany">⟲</button>
-  <select id="speed" aria-label="Prędkość odtwarzania">
+  <button class="main" id="play">▶ Play</button>
+  <button id="reset" aria-label="Back to the start of the shift">⟲</button>
+  <select id="speed" aria-label="Playback speed">
     <option value="60">×60</option><option value="120">×120</option><option value="300" selected>×300</option><option value="600">×600</option>
   </select>
-  <input type="range" id="time" min="0" step="10" value="0" aria-label="Czas zmiany">
+  <input type="range" id="time" min="0" step="10" value="0" aria-label="Shift time">
 </div>
 <div class="panes">
   <section class="pane" id="L">
-    <div><span class="tag" id="L-tag"></span><span class="sub">bez sygnałów</span></div>
+    <div><span class="tag" id="L-tag"></span><span class="sub">no signals</span></div>
     <div class="kpis">
-      <div class="kpi cost"><div class="l">Koszt tony</div><div class="v" id="L-cpt">–</div></div>
-      <div class="kpi"><div class="l">Wywiezione</div><div class="v" id="L-t">0 t</div></div>
-      <div class="kpi"><div class="l">Paliwo</div><div class="v" id="L-f">0 l</div></div>
-      <div class="kpi"><div class="l">W kolejce teraz</div><div class="v" id="L-q">0</div></div>
+      <div class="kpi cost"><div class="l">Cost per tonne</div><div class="v" id="L-cpt">–</div></div>
+      <div class="kpi"><div class="l">Hauled</div><div class="v" id="L-t">0 t</div></div>
+      <div class="kpi"><div class="l">Fuel</div><div class="v" id="L-f">0 l</div></div>
+      <div class="kpi"><div class="l">In queue now</div><div class="v" id="L-q">0</div></div>
     </div>
     <div style="position:relative"><div class="map" id="L-map"></div><div class="banner" id="L-ban"></div></div>
-    <div class="msgs" id="L-msg"><div class="none">Kierowcy jadą jak dziś – bez komunikatów.</div></div>
+    <div class="msgs" id="L-msg"><div class="none">Drivers drive as today – no messages.</div></div>
   </section>
   <section class="pane rl" id="R">
-    <div><span class="tag" id="R-tag"></span><span class="sub">ten sam plan, inna jazda</span></div>
+    <div><span class="tag" id="R-tag"></span><span class="sub">same plan, different driving</span></div>
     <div class="kpis">
-      <div class="kpi cost"><div class="l">Koszt tony</div><div class="v" id="R-cpt">–</div></div>
-      <div class="kpi"><div class="l">Wywiezione</div><div class="v" id="R-t">0 t</div></div>
-      <div class="kpi"><div class="l">Paliwo</div><div class="v" id="R-f">0 l</div></div>
-      <div class="kpi"><div class="l">W kolejce teraz</div><div class="v" id="R-q">0</div></div>
+      <div class="kpi cost"><div class="l">Cost per tonne</div><div class="v" id="R-cpt">–</div></div>
+      <div class="kpi"><div class="l">Hauled</div><div class="v" id="R-t">0 t</div></div>
+      <div class="kpi"><div class="l">Fuel</div><div class="v" id="R-f">0 l</div></div>
+      <div class="kpi"><div class="l">In queue now</div><div class="v" id="R-q">0</div></div>
     </div>
     <div style="position:relative"><div class="map" id="R-map"></div><div class="banner" id="R-ban"></div></div>
     <div class="msgs" id="R-msg"></div>
   </section>
 </div>
-<div class="diff">Różnica do tej chwili <span class="n" id="d-cpt">–</span><span class="n" id="d-fuel" style="color:#C9D2DC">–</span>
+<div class="diff">Difference so far <span class="n" id="d-cpt">–</span><span class="n" id="d-fuel" style="color:#C9D2DC">–</span>
   <span class="legend" id="legend" style="margin-left:auto;color:#C9D2DC"></span></div>
 <div class="charts" id="charts">
-  <div class="top"><b id="ch-title">Ta zmiana do tej chwili</b>
-    <span class="key"><i style="background:#FF7A3D"></i>jak dziś</span><span class="key"><i style="background:#22D3C5"></i>z RL</span>
-    <label><input type="checkbox" id="ch-log"> oś Y logarytmiczna</label></div>
+  <div class="top"><b id="ch-title">This shift so far</b>
+    <span class="key"><i style="background:#FF7A3D"></i>baseline</span><span class="key"><i style="background:#22D3C5"></i>RL</span>
+    <label><input type="checkbox" id="ch-log"> log Y axis</label></div>
   <div class="grid3">
-    <div class="ch"><div class="h">Kolejki narastająco</div><div class="v" id="v-q">–</div><canvas id="c-q"></canvas></div>
-    <div class="ch"><div class="h">Koszt tony narastająco</div><div class="v" id="v-c">–</div><canvas id="c-c"></canvas></div>
-    <div class="ch"><div class="h">Produkcja narastająco</div><div class="v" id="v-t">–</div><canvas id="c-t"></canvas></div>
+    <div class="ch"><div class="h">Cumulative queueing</div><div class="v" id="v-q">–</div><canvas id="c-q"></canvas></div>
+    <div class="ch"><div class="h">Cumulative cost per tonne</div><div class="v" id="v-c">–</div><canvas id="c-c"></canvas></div>
+    <div class="ch"><div class="h">Cumulative production</div><div class="v" id="v-t">–</div><canvas id="c-t"></canvas></div>
   </div>
 </div>
 <script>
 const D = __DATA__;
 const el = id => document.getElementById(id);
-const fmt = (v, d = 0) => v === null || v === undefined ? '–' : v.toLocaleString('pl-PL', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmt = (v, d = 0) => v === null || v === undefined ? '–' : v.toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d });
 const GEO = 'https://mapy.geoportal.gov.pl/wss/service/PZGIK/';
 const WHITE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
 function baseLayers(map) {
@@ -117,7 +117,7 @@ function baseLayers(map) {
   const plan = L.tileLayer(WHITE, { maxZoom: 22 });
   const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19 });
   orto.addTo(map);
-  L.control.layers({ 'Ortofoto (Geoportal)': orto, 'Relief terenu (Geoportal)': relief, 'Plan': plan, 'Satelita Esri (zapas)': esri }).addTo(map);
+  L.control.layers({ 'Orthophoto (Geoportal)': orto, 'Terrain relief (Geoportal)': relief, 'Plan': plan, 'Esri satellite (backup)': esri }).addTo(map);
 }
 const maps = [];
 
@@ -193,30 +193,30 @@ function draw() {
     const S = M.S.series;
     el(M.key + '-q').textContent = q;
     const ban = el(M.key + '-ban'), win = w => w && t >= w[0] && t < w[1];
-    if (win(M.S.closure)) { ban.style.display = 'block'; ban.style.background = '#B3122A'; ban.textContent = 'STRZELANIE – wyrobisko zamknięte'; }
-    else if ((M.S.breaks || []).some(win)) { ban.style.display = 'block'; ban.style.background = '#8A5A00'; ban.textContent = 'Przerwa'; }
+    if (win(M.S.closure)) { ban.style.display = 'block'; ban.style.background = '#B3122A'; ban.textContent = 'BLASTING – pit closed'; }
+    else if ((M.S.breaks || []).some(win)) { ban.style.display = 'block'; ban.style.background = '#8A5A00'; ban.textContent = 'Break'; }
     else ban.style.display = 'none';
     if (S && S.t) {
       const i = Math.min(Math.floor(t / 60), S.t.length - 1);
       el(M.key + '-t').textContent = fmt(S.dumped[i]) + ' t';
       el(M.key + '-f').textContent = fmt(S.fuel[i]) + ' l';
-      el(M.key + '-cpt').textContent = S.cpt[i] && i > 30 ? fmt(S.cpt[i], 2) + ' zł/t' : '–';
+      el(M.key + '-cpt').textContent = S.cpt[i] && i > 30 ? fmt(S.cpt[i], 2) + ' PLN/t' : '–';
       vals[M.key] = { cpt: i > 30 ? S.cpt[i] : null, fuel: S.fuel[i] };
     }
   });
   if (D.right.signals && D.right.signals.length) {
     const shown = D.right.signals.filter(s => s[0] <= t).slice(-5).reverse();
     el('R-msg').innerHTML = shown.length ? shown.map(s => `<div class="m"><span class="t">${clock(s[0])}</span><b>${s[1]}</b>${s[2]}</div>`).join('')
-      : '<div class="none">Komunikaty dla kierowców pojawią się tutaj.</div>';
-  } else el('R-msg').innerHTML = '<div class="none">Brak komunikatów na tej zmianie.</div>';
+      : '<div class="none">Messages for the drivers will appear here.</div>';
+  } else el('R-msg').innerHTML = '<div class="none">No messages in this shift.</div>';
   el('clock').textContent = clock(t);
   el('time').value = t;
   if (typeof drawCharts === 'function') drawCharts();
   const a = vals.L, b = vals.R;
   if (a && b && a.cpt && b.cpt) {
     const d = b.cpt - a.cpt;
-    el('d-cpt').textContent = (d > 0 ? '+' : '') + fmt(d, 2) + ' zł/t';
-    el('d-fuel').textContent = (b.fuel - a.fuel > 0 ? '+' : '') + fmt(b.fuel - a.fuel) + ' l paliwa';
+    el('d-cpt').textContent = (d > 0 ? '+' : '') + fmt(d, 2) + ' PLN/t';
+    el('d-fuel').textContent = (b.fuel - a.fuel > 0 ? '+' : '') + fmt(b.fuel - a.fuel) + ' l fuel';
   }
 }
 
@@ -305,8 +305,8 @@ function drawChart(id, kind, tNow, unit, dig) {
 }
 function drawCharts() {
   if (!CS) { el('charts').style.display = 'none'; return; }
-  el('ch-title').textContent = CP ? CP.title : 'Ta zmiana do tej chwili';
-  drawChart('c-q', 'q', t, 'h', 1); drawChart('c-c', 'c', t, 'zł/t', 2); drawChart('c-t', 't', t, 't', 0);
+  el('ch-title').textContent = CP ? CP.title : 'This shift so far';
+  drawChart('c-q', 'q', t, 'h', 1); drawChart('c-c', 'c', t, 'PLN/t', 2); drawChart('c-t', 't', t, 't', 0);
 }
 el('ch-log').onchange = drawCharts;
 new ResizeObserver(drawCharts).observe(el('charts'));
@@ -314,13 +314,13 @@ new ResizeObserver(drawCharts).observe(el('charts'));
 function loop(ts) {
   if (playing) {
     if (last !== null) t = Math.min(D.shift_s, t + (ts - last) / 1000 * Number(el('speed').value));
-    if (t >= D.shift_s) { playing = false; el('play').textContent = '▶ Odtwarzaj'; }
+    if (t >= D.shift_s) { playing = false; el('play').textContent = '▶ Play'; }
     draw();
   }
   last = ts;
   requestAnimationFrame(loop);
 }
-el('play').onclick = () => { if (t >= D.shift_s) t = 0; playing = !playing; el('play').textContent = playing ? '⏸ Pauza' : '▶ Odtwarzaj'; };
+el('play').onclick = () => { if (t >= D.shift_s) t = 0; playing = !playing; el('play').textContent = playing ? '⏸ Pause' : '▶ Play'; };
 el('reset').onclick = () => { t = 0; maps.forEach(M => M.trucks.forEach(tr => tr.i = 0)); draw(); };
 el('time').oninput = e => { t = Number(e.target.value); maps.forEach(M => M.trucks.forEach(tr => tr.i = 0)); draw(); };
 draw();

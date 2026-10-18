@@ -27,6 +27,7 @@ WHITE_TILE = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
               "PchI7wAAAABJRU5ErkJggg==")
 MATERIALS = ["wapień", "dolomit", "piaskowiec", "granit", "bazalt", "melafir", "żwir", "piasek", "nadkład", "inny"]
 ROAD_COLORS = {"rampa": "#d500f9", "droga": "#ffffff"}  # good contrast on light quarry imagery
+ROAD_KIND_LABELS = {"droga": "road", "rampa": "ramp"}  # road kinds are data; their display labels
 PLANNED_COLOR = "#9e9e9e"
 SKETCH_COLOR = "#ffd600"
 MODES = {
@@ -136,13 +137,13 @@ def get_site(raw: dict) -> dict:
 def base_map(site: dict, height_zoom: int | None = None) -> folium.Map:
     m = folium.Map(location=site["center"], zoom_start=height_zoom or site.get("zoom", 16), tiles=None,
                    max_zoom=21, control_scale=True)
-    folium.WmsTileLayer(GEOPORTAL_ORTO, layers="Raster", fmt="image/jpeg", name="Ortofoto (Geoportal)",
+    folium.WmsTileLayer(GEOPORTAL_ORTO, layers="Raster", fmt="image/jpeg", name="Orthophoto (Geoportal)",
                         attr=GEOPORTAL_ATTR, max_zoom=21, overlay=False).add_to(m)
-    folium.WmsTileLayer(GEOPORTAL_RELIEF, layers="Raster", fmt="image/png", name="Relief terenu (Geoportal)",
+    folium.WmsTileLayer(GEOPORTAL_RELIEF, layers="Raster", fmt="image/png", name="Terrain relief (Geoportal)",
                         attr=GEOPORTAL_ATTR, max_zoom=21, overlay=False).add_to(m)
-    folium.TileLayer(WHITE_TILE, attr=" ", name="Plan (bez podkładu)", max_zoom=22).add_to(m)
-    folium.TileLayer("OpenStreetMap", name="Mapa (OSM)", max_zoom=21, max_native_zoom=19).add_to(m)
-    folium.TileLayer(ESRI, attr=ESRI_ATTR, name="Satelita Esri (zapas)", max_zoom=21, max_native_zoom=19).add_to(m)
+    folium.TileLayer(WHITE_TILE, attr=" ", name="Plan (no background)", max_zoom=22).add_to(m)
+    folium.TileLayer("OpenStreetMap", name="Map (OSM)", max_zoom=21, max_native_zoom=19).add_to(m)
+    folium.TileLayer(ESRI, attr=ESRI_ATTR, name="Esri satellite (backup)", max_zoom=21, max_native_zoom=19).add_to(m)
     return m
 
 
@@ -153,11 +154,11 @@ def draw_network(m, info: dict) -> None:
         return
     for n in info.get("junctions", []):
         folium.CircleMarker(g.nodes[n], radius=6, color="#000", weight=1, fill=True, fill_color="#fff", fill_opacity=1,
-                            tooltip=f"węzeł · rzędna {info['elev'].get(n, float('nan')):.1f} m").add_to(m)
+                            tooltip=f"junction · elevation {info['elev'].get(n, float('nan')):.1f} m").add_to(m)
     for n in info.get("dead_ends", []):
         folium.CircleMarker(g.nodes[n], radius=6, color="#000", weight=1, fill=True, fill_color="#e63946",
-                            fill_opacity=1, tooltip="ślepy koniec – niepołączona droga? (koniec ≤ 30 m od innej "
-                                                    "drogi tworzy węzeł)").add_to(m)
+                            fill_opacity=1, tooltip="dead end – unconnected road? (an end ≤ 30 m from another "
+                                                    "road forms a junction)").add_to(m)
 
 
 def _direction_arrow(m, pts: list, grade: float, tip: str) -> None:
@@ -187,10 +188,11 @@ def draw_site(m, site: dict, plans: bool = True) -> None:
         pts = [tuple(c) for c in r["coords"]]
         active = r.get("active", True)
         g = float(r.get("grade_draw_pct", 0.0))
-        slope = "płasko" if abs(g) < 0.05 else (f"w górę {g:g} %" if g > 0 else f"w dół {-g:g} %")
-        tip = (f"🛣️ {r.get('id')} · {r['name']} · {r.get('kind')} · wzdłuż strzałki: {slope} · limit {r.get('speed_limit_kmh', '?')} km/h · "
-               f"{polyline_length_m(r['coords']):.0f} m" + (" · JEDEN PAS – mijanki" if r.get("single_lane") else "")
-               + ("" if active else " · PLANOWANA (dziś nieużywana)"))
+        slope = "flat" if abs(g) < 0.05 else (f"uphill {g:g} %" if g > 0 else f"downhill {-g:g} %")
+        tip = (f"🛣️ {r.get('id')} · {r['name']} · {ROAD_KIND_LABELS.get(r.get('kind'), r.get('kind'))} · along the arrow: {slope} · "
+               f"limit {r.get('speed_limit_kmh', '?')} km/h · "
+               f"{polyline_length_m(r['coords']):.0f} m" + (" · SINGLE LANE – passing bays" if r.get("single_lane") else "")
+               + ("" if active else " · PLANNED (not in use today)"))
         folium.PolyLine(pts, color="#000000", weight=10, opacity=0.55, tooltip=tip).add_to(m)  # dark casing
         folium.PolyLine(pts, color=ROAD_COLORS.get(r.get("kind"), "#ffffff") if active else PLANNED_COLOR, weight=6,
                         dash_array=("14 6" if r.get("single_lane") else None) if active else "10 8", tooltip=tip).add_to(m)
@@ -198,63 +200,63 @@ def draw_site(m, site: dict, plans: bool = True) -> None:
     for d in site.get("dedicated", []):
         colors = {"ekipa": "#ff006e", "sztygar": "#3a86ff", "cysterna": "#8338ec"}
         folium.PolyLine([tuple(c) for c in d["coords"]], color=colors.get(d.get("for"), "#ffbe0b"), weight=4,
-                        dash_array="6 6", tooltip=f"〰️ trasa {d.get('for')} · dedykowana: {DEDICATED_FOR.get(d.get('for'), 'koparka ' + str(d.get('for')))}"
+                        dash_array="6 6", tooltip=f"〰️ route {d.get('for')} · dedicated: {DEDICATED_FOR.get(d.get('for'), 'excavator ' + str(d.get('for')))}"
                         ).add_to(m)
     for b in site.get("passing_bays", []):
-        folium.Marker((b["lat"], b["lon"]), tooltip=f"⇆ {b.get('id')} · mijanka",
+        folium.Marker((b["lat"], b["lon"]), tooltip=f"⇆ {b.get('id')} · passing bay",
                       icon=folium.DivIcon(html=f"<div style='font-size:12px;font-weight:700;color:#fff;background:#ff4d6d;"
                                                f"border:2px solid #000;border-radius:4px;padding:0 3px;white-space:nowrap'>"
                                                f"⇆ {b.get('id')}</div>")).add_to(m)
     for p in site.get("parking", []):
-        folium.Marker((p["lat"], p["lon"]), tooltip=f"🅿️ postój {p.get('excavator')} · miejsce postoju koparki",
+        folium.Marker((p["lat"], p["lon"]), tooltip=f"🅿️ parking {p.get('excavator')} · excavator parking spot",
                       icon=folium.DivIcon(html=f"<div style='font-size:13px;font-weight:700;color:#fff;"
                                                f"text-shadow:0 0 3px #000;white-space:nowrap'>🅿️ {p.get('excavator')}</div>")
                       ).add_to(m)
     for p in site.get("piles", []):
         folium.Polygon([tuple(c) for c in p["polygon"]], color="#00e5ff", fill=True, fill_opacity=0.25,
-                       tooltip=f"⛰️ {p['id']} · usyp: {p.get('material', '')} · {p.get('tonnage_t', 0):,.0f} t").add_to(m)
-        folium.Marker(centroid(p["polygon"]), tooltip=f"⛰️ {p['id']} · usyp: {p.get('material', '')}", icon=folium.DivIcon(
+                       tooltip=f"⛰️ {p['id']} · muck pile: {p.get('material', '')} · {p.get('tonnage_t', 0):,.0f} t").add_to(m)
+        folium.Marker(centroid(p["polygon"]), tooltip=f"⛰️ {p['id']} · muck pile: {p.get('material', '')}", icon=folium.DivIcon(
             html=f"<div style='color:#fff;font-weight:700;text-shadow:0 0 3px #000;white-space:nowrap'>"
                  f"{p['id']} · {p.get('material', '')}</div>")).add_to(m)
     for a in site.get("areas", []) if plans else []:
-        tip = (f"🟧 {a['id']} · obszar wydobycia · {a.get('material', '')} · zasoby {a.get('reserves_t', 0):,.0f} t · "
-               f"strzał ≤ {a.get('blast_max_t', 0):,.0f} t".replace(",", " "))
+        tip = (f"🟧 {a['id']} · mining area · {a.get('material', '')} · reserves {a.get('reserves_t', 0):,.0f} t · "
+               f"blast ≤ {a.get('blast_max_t', 0):,.0f} t".replace(",", " "))
         folium.Polygon([tuple(c) for c in a["polygon"]], color="#ff9f1c", weight=3, dash_array="4 6", fill=True,
                        fill_opacity=0.08, tooltip=tip).add_to(m)
         folium.Marker(centroid(a["polygon"]), tooltip=tip, icon=folium.DivIcon(
             html=f"<div style='color:#ff9f1c;font-weight:800;text-shadow:0 0 3px #000;white-space:nowrap'>"
                  f"🟧 {a['id']}</div>")).add_to(m)
     for p in site.get("planned_piles", []) if plans else []:
-        tip = (f"📅 {p['id']} · planowany strzał w dniu roboczym {p.get('blast_day', 1)} · {p.get('material', '')} · "
+        tip = (f"📅 {p['id']} · planned blast on working day {p.get('blast_day', 1)} · {p.get('material', '')} · "
                f"{p.get('tonnage_t', 0):,.0f} t".replace(",", " "))
         folium.Polygon([tuple(c) for c in p["polygon"]], color="#ff006e", weight=3, dash_array="8 6", fill=True,
                        fill_opacity=0.12, tooltip=tip).add_to(m)
         folium.Marker(centroid(p["polygon"]), tooltip=tip, icon=folium.DivIcon(
             html=f"<div style='color:#fff;font-weight:700;text-shadow:0 0 3px #000;white-space:nowrap'>"
-                 f"🧨 {p['id']} · dzień {p.get('blast_day', 1)}</div>")).add_to(m)
+                 f"🧨 {p['id']} · day {p.get('blast_day', 1)}</div>")).add_to(m)
     for e in site.get("excavators", []):
         dp = e.get("dig_path") or []
         if len(dp) >= 2:
-            tip = (f"⤳ urabianie {e['id']} · kierunek urabiania: start przy koparce → koniec (strzałka); "
-                   f"przestawienie co {e.get('relocate_every_t', 600):g} t, {e.get('relocate_min', 4):g} min")
+            tip = (f"⤳ digging {e['id']} · digging direction: start at the excavator → end (arrow); "
+                   f"relocation every {e.get('relocate_every_t', 600):g} t, {e.get('relocate_min', 4):g} min")
             folium.PolyLine([tuple(c) for c in dp], color="#ff9f1c", weight=5, dash_array="2 8", tooltip=tip).add_to(m)
             _direction_arrow(m, [tuple(c) for c in dp[-2:]], 0.0, tip)
     for e in site.get("excavators", []):
-        folium.Marker((e["lat"], e["lon"]), tooltip=f"⛏️ {e['id']} · koparka → {e.get('pile', '?')}",
+        folium.Marker((e["lat"], e["lon"]), tooltip=f"⛏️ {e['id']} · excavator → {e.get('pile', '?')}",
                       icon=folium.Icon(color="orange", icon="wrench", prefix="fa")).add_to(m)
     if site.get("crusher"):
         c = site["crusher"]
-        acc = ", ".join(c.get("accepts") or []) or "wszystkich usypów"
-        folium.Marker((c["lat"], c["lon"]), tooltip=f"🏭 {c.get('id', 'C-1')} · kruszarka główna · przyjmuje z: {acc}",
+        acc = ", ".join(c.get("accepts") or []) or "all muck piles"
+        folium.Marker((c["lat"], c["lon"]), tooltip=f"🏭 {c.get('id', 'C-1')} · main crusher · accepts from: {acc}",
                       icon=folium.Icon(color="red", icon="industry", prefix="fa")).add_to(m)
     for c in site.get("crushers", []):
-        acc = ", ".join(c.get("accepts") or []) or "wszystkich usypów"
-        folium.Marker((c["lat"], c["lon"]), tooltip=f"🏭 {c['id']} · kruszarka · {c.get('capacity_tph', 0):g} t/h · "
-                                                    f"przyjmuje z: {acc}",
+        acc = ", ".join(c.get("accepts") or []) or "all muck piles"
+        folium.Marker((c["lat"], c["lon"]), tooltip=f"🏭 {c['id']} · crusher · {c.get('capacity_tph', 0):g} t/h · "
+                                                    f"accepts from: {acc}",
                       icon=folium.Icon(color="darkred", icon="industry", prefix="fa")).add_to(m)
     if site.get("blast"):
         b = site["blast"]
-        folium.Marker((b["lat"], b["lon"]), tooltip="🧨 Miejsce strzelania",
+        folium.Marker((b["lat"], b["lon"]), tooltip="🧨 Blast site",
                       icon=folium.DivIcon(html="<div style='font-size:22px'>🧨</div>")).add_to(m)
 
 
@@ -293,8 +295,8 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
         site["areas"].append({**a, "polygon": poly})
         ensure_uids(site)
         n = -(-a["reserves_t"] // a["blast_max_t"])
-        return (f"✅ Obszar {a['id']}: {a['reserves_t']:,.0f} t ≈ {n:.0f} strzałów po ≤ {a['blast_max_t']:,.0f} t – "
-                "terminy ustali harmonogram").replace(",", " ")
+        return (f"✅ Area {a['id']}: {a['reserves_t']:,.0f} t ≈ {n:.0f} blasts of ≤ {a['blast_max_t']:,.0f} t – "
+                "the schedule sets the dates").replace(",", " ")
     if g["type"] == "Polygon" and (mode == "Planowany strzał (nowy usyp)"
                                    or (mode == "Usyp (materiał)" and attrs.get("status") == "planned")):
         attrs = {k: v for k, v in attrs.items() if k != "status"}
@@ -305,49 +307,49 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
             a["id"] = next(f"S-{i:02d}" for i in range(1, 1000) if f"S-{i:02d}" not in ids)
         site["planned_piles"].append({**a, "polygon": _latlon(g["coordinates"][0][:-1])})
         ensure_uids(site)
-        return (f"✅ Planowany strzał {a['id']} w dniu roboczym {a.get('blast_day', 1)} – w module „Planowanie produkcji” "
-                f"koparka bez urobku sama tu przejedzie")
+        return (f"✅ Planned blast {a['id']} on working day {a.get('blast_day', 1)} – in the “Production planning” module "
+                f"an excavator without muck moves here by itself")
     if target == "Kierunek urabiania koparki":
         ex = next((e for e in site["excavators"] if e["id"] == attrs.get("excavator")), None)
         if ex is None:
-            return "⚠️ Najpierw dodaj koparkę, potem narysuj jej kierunek urabiania"
+            return "⚠️ First add an excavator, then draw its digging direction"
         set_dig_path(ex, _latlon(g["coordinates"]), attrs)
-        return (f"✅ Kierunek urabiania koparki {ex['id']}: {polyline_length_m(ex['dig_path']):.0f} m – koparka "
-                f"startuje na początku linii i co {ex['relocate_every_t']:g} t przesuwa się dalej")
+        return (f"✅ Digging direction of excavator {ex['id']}: {polyline_length_m(ex['dig_path']):.0f} m – the excavator "
+                f"starts at the start of the line and moves on every {ex['relocate_every_t']:g} t")
     if target == "Trasa dedykowana":
         who = attrs.get("for", "sztygar")
         site.setdefault("dedicated", [])
         site["dedicated"] = [d for d in site["dedicated"] if d.get("for") != who]  # one route per role
         site["dedicated"].append({"for": who, "coords": _latlon(g["coordinates"])})
-        return f"✅ Dodano trasę dedykowaną: {DEDICATED_FOR.get(who, 'przejazd koparki ' + who)}"
+        return f"✅ Dedicated route added: {DEDICATED_FOR.get(who, 'excavator travel ' + who)}"
     if target == "Miejsce postoju koparki":
         lon, lat = g["coordinates"]
         who = attrs.get("excavator")
         if not who:
-            return "⚠️ Najpierw dodaj koparkę, potem jej miejsce postoju"
+            return "⚠️ First add an excavator, then its parking spot"
         site.setdefault("parking", [])
         site["parking"] = [p for p in site["parking"] if p.get("excavator") != who]
         site["parking"].append({"excavator": who, "lat": lat, "lon": lon})
-        return f"✅ Ustawiono miejsce postoju koparki {who} (strzelanie / tankowanie)"
+        return f"✅ Parking spot of excavator {who} set (blasting / refuelling)"
     if target == "Mijanka":
         return add_bay(site, g["coordinates"][1], g["coordinates"][0])
     if target is None:
-        return f"⚠️ Nieobsługiwany kształt: {g['type']}"
+        return f"⚠️ Unsupported shape: {g['type']}"
     a = {k: v for k, v in attrs.items() if k != "status"} if target == mode else dict(DEFAULTS.get(target, {}))
-    note = "" if target == mode else " (parametry domyślne – popraw w tabeli poniżej)"
+    note = "" if target == mode else " (default parameters – correct them in the table below)"
     if target == "Droga / rampa":
-        a.setdefault("name", f"{a['kind']} {len(site['roads']) + 1}")
+        a.setdefault("name", f"{ROAD_KIND_LABELS.get(a['kind'], a['kind'])} {len(site['roads']) + 1}")
         rid = next(f"R{i}" for i in range(1, 10_000) if f"R{i}" not in {r.get("id") for r in site["roads"]})
         site["roads"].append({"id": rid, **a, "coords": _latlon(g["coordinates"])})
         ensure_uids(site)
-        return f"✅ Dodano drogę „{a['name']}” ({polyline_length_m(site['roads'][-1]['coords']):.0f} m){note}"
+        return f"✅ Road “{a['name']}” added ({polyline_length_m(site['roads'][-1]['coords']):.0f} m){note}"
     if target == "Usyp (materiał)":
         ids = {p["id"] for p in site["piles"]}
         if a.get("id") in ids or not a.get("id"):
             a["id"] = next(f"U-{i:02d}" for i in range(1, 1000) if f"U-{i:02d}" not in ids)
         site["piles"].append({**a, "polygon": _latlon(g["coordinates"][0][:-1])})
         ensure_uids(site)
-        return f"✅ Dodano usyp {a['id']}{note}"
+        return f"✅ Muck pile {a['id']} added{note}"
     lon, lat = g["coordinates"]
     if target == "Kruszarka":
         if attrs.get("new_crusher") and site.get("crusher"):
@@ -361,20 +363,20 @@ def add_drawing(site: dict, g: dict, mode: str, attrs: dict) -> str:
                                      "kwh_per_t": attrs.get("kwh_per_t"),
                                      **{k: attrs[k] for k in ("model", "max_feed_mm", "dump_time_s") if attrs.get(k)}})
             ensure_uids(site)
-            return f"✅ Dodano kruszarkę {cid} – zbuduj trasy (zapisz kopalnię), żeby wozidła do niej jeździły"
+            return f"✅ Crusher {cid} added – build the routes (save the mine) so that trucks drive to it"
         old = site.get("crusher") or {}
         site["crusher"] = {**old, "lat": lat, "lon": lon, **({"level": attrs["level"]} if attrs.get("level") else {}),
                            **{k: attrs[k] for k in ("id", "product") if attrs.get(k) and not old.get(k)}}
-        return "✅ Ustawiono kruszarkę główną"
+        return "✅ Main crusher set"
     if target == "Miejsce strzelania":
         site["blast"] = {"lat": lat, "lon": lon}
-        return "✅ Ustawiono miejsce strzelania – godziny ustaw w sekcji „Zmiana i zdarzenia”"
+        return "✅ Blast site set – set the times in the “Shift and events” section"
     ids = {e["id"] for e in site["excavators"]}
     if a.get("id") in ids or not a.get("id"):
         a["id"] = next(f"K-{i}" for i in range(1, 1000) if f"K-{i}" not in ids)
     site["excavators"].append({**a, "lat": lat, "lon": lon})
     ensure_uids(site)
-    return f"✅ Dodano koparkę {a['id']}{note}"
+    return f"✅ Excavator {a['id']} added{note}"
 
 
 # ---------- editing existing objects (select on the map → move / redraw / delete) ----------
@@ -450,7 +452,7 @@ def sel_from_click(site: dict, tooltip: str | None, latlng: dict | None) -> str 
             if o:
                 return f"{kind}:{o['uid']}"
     if head.startswith("⤳"):
-        who = head.split("urabianie", 1)[-1].strip()
+        who = head.split("urabianie", 1)[-1].split("digging", 1)[-1].strip()
         e = next((o for o in site.get("excavators", []) if o["id"] == who), None)
         if e:
             return f"dig:{e['uid']}"
@@ -464,11 +466,11 @@ def sel_from_click(site: dict, tooltip: str | None, latlng: dict | None) -> str 
     if head.startswith("🧨") and site.get("blast"):
         return "blast:"
     if head.startswith("🅿️"):
-        who = head.split("postój", 1)[-1].strip()
+        who = head.split("postój", 1)[-1].split("parking", 1)[-1].strip()
         if any(p.get("excavator") == who for p in site.get("parking", [])):
             return f"parking:{who}"
     if head.startswith("〰️"):
-        who = head.split("trasa", 1)[-1].strip()
+        who = head.split("trasa", 1)[-1].split("route", 1)[-1].strip()
         if any(str(d.get("for")) == who for d in site.get("dedicated", [])):
             return f"dedicated:{who}"
     if not latlng or latlng.get("lat") is None:
@@ -510,44 +512,44 @@ def delete_obj(site: dict, sel: str) -> str:
     kind, ident = sel.split(":", 1)
     o = find_obj(site, sel)
     if o is None:
-        return "⚠️ Nie ma już takiego obiektu"
+        return "⚠️ This object no longer exists"
     if kind == "road":
         site["roads"] = [r for r in site["roads"] if r is not o]
-        return f"🗑️ Usunięto drogę {o.get('id')}"
+        return f"🗑️ Road {o.get('id')} deleted"
     if kind == "pile":
         site["piles"] = [p for p in site["piles"] if p is not o]
         for e in site.get("excavators", []):
             if e.get("pile") == o["id"]:
                 e["pile"] = "(najbliższy)"
-        return f"🗑️ Usunięto usyp {o['id']} (jego koparki ładują teraz z najbliższego)"
+        return f"🗑️ Muck pile {o['id']} deleted (its excavators now load from the nearest one)"
     if kind == "excavator":
         site["excavators"] = [e for e in site["excavators"] if e is not o]
         site["parking"] = [p for p in site.get("parking", []) if p.get("excavator") != o["id"]]
         site["dedicated"] = [d for d in site.get("dedicated", []) if d.get("for") != o["id"]]
-        return f"🗑️ Usunięto koparkę {o['id']} (razem z jej miejscem postoju i trasą przejazdu)"
+        return f"🗑️ Excavator {o['id']} deleted (together with its parking spot and travel route)"
     if kind in ("crusher", "blast"):
         site[kind] = None
-        return "🗑️ Usunięto " + ("kruszarkę" if kind == "crusher" else "miejsce strzelania")
+        return "🗑️ Deleted the " + ("crusher" if kind == "crusher" else "blast site")
     if kind == "bay":
         site["passing_bays"] = [b for b in site["passing_bays"] if b is not o]
-        return f"🗑️ Usunięto mijankę {o.get('id')}"
+        return f"🗑️ Passing bay {o.get('id')} deleted"
     if kind == "area":
         site["areas"] = [a for a in site["areas"] if a is not o]
-        return f"🗑️ Usunięto obszar wydobycia {o['id']}"
+        return f"🗑️ Mining area {o['id']} deleted"
     if kind == "crusher2":
         site["crushers"] = [c for c in site["crushers"] if c is not o]
-        return f"🗑️ Usunięto kruszarkę {o['id']}"
+        return f"🗑️ Crusher {o['id']} deleted"
     if kind == "planned":
         site["planned_piles"] = [p for p in site["planned_piles"] if p is not o]
-        return f"🗑️ Usunięto planowany strzał {o.get('id')}"
+        return f"🗑️ Planned blast {o.get('id')} deleted"
     if kind == "dig":
         o["_ex"].pop("dig_path", None)
-        return f"🗑️ Usunięto kierunek urabiania koparki {o['_ex']['id']} (koparka stoi w miejscu)"
+        return f"🗑️ Digging direction of excavator {o['_ex']['id']} deleted (the excavator stays in place)"
     if kind == "parking":
         site["parking"] = [p for p in site["parking"] if p is not o]
-        return f"🗑️ Usunięto miejsce postoju koparki {ident}"
+        return f"🗑️ Parking spot of excavator {ident} deleted"
     site["dedicated"] = [d for d in site["dedicated"] if d is not o]
-    return "🗑️ Usunięto trasę dedykowaną"
+    return "🗑️ Dedicated route deleted"
 
 
 def apply_edit_drawing(site: dict, sel: str, g: dict) -> str:
@@ -555,10 +557,10 @@ def apply_edit_drawing(site: dict, sel: str, g: dict) -> str:
     kind = sel.split(":", 1)[0]
     o = find_obj(site, sel)
     if o is None:
-        return "⚠️ Nie ma już takiego obiektu"
+        return "⚠️ This object no longer exists"
     if kind in POINT_KINDS:
         if g["type"] != "Point":
-            return "⚠️ Aby przesunąć obiekt, postaw znacznik (📍) w nowym miejscu"
+            return "⚠️ To move the object, place a marker (📍) in the new spot"
         if kind == "bay":  # a passing bay stays on its road
             site["passing_bays"] = [b for b in site["passing_bays"] if b is not o]
             msg = add_bay(site, g["coordinates"][1], g["coordinates"][0])
@@ -566,28 +568,28 @@ def apply_edit_drawing(site: dict, sel: str, g: dict) -> str:
                 site["passing_bays"].append(o)
                 return msg
             site["passing_bays"][-1].update({"id": o.get("id"), "uid": o.get("uid")})
-            return f"✅ Przesunięto mijankę {o.get('id')}"
+            return f"✅ Passing bay {o.get('id')} moved"
         lon, lat = g["coordinates"]
         if kind == "excavator" and len(o.get("dig_path") or []) >= 2:  # the digging line moves with it
             dlat, dlon = lat - o["lat"], lon - o["lon"]
             o["dig_path"] = [[round(a + dlat, 7), round(b + dlon, 7)] for a, b in o["dig_path"]]
         o["lon"], o["lat"] = lon, lat
-        return "✅ Przesunięto obiekt"
+        return "✅ Object moved"
     if kind == "dig":
         if g["type"] != "LineString":
-            return "⚠️ Aby przerysować kierunek urabiania, narysuj linię (/)"
+            return "⚠️ To redraw the digging direction, draw a line (/)"
         set_dig_path(o["_ex"], _latlon(g["coordinates"]))
-        return f"✅ Przerysowano kierunek urabiania koparki {o['_ex']['id']}"
+        return f"✅ Digging direction of excavator {o['_ex']['id']} redrawn"
     if kind in ("road", "dedicated"):
         if g["type"] != "LineString":
-            return "⚠️ Aby przerysować drogę / trasę, narysuj linię (/)"
+            return "⚠️ To redraw the road / route, draw a line (/)"
         o["coords"] = _latlon(g["coordinates"])
         o.pop("z", None)  # the old point elevations belong to the old line
-        return f"✅ Przerysowano ({polyline_length_m(o['coords']):.0f} m)"
+        return f"✅ Redrawn ({polyline_length_m(o['coords']):.0f} m)"
     if g["type"] != "Polygon":
-        return "⚠️ Aby przerysować usyp, narysuj wielokąt (⬠)"
+        return "⚠️ To redraw the muck pile, draw a polygon (⬠)"
     o["polygon"] = _latlon(g["coordinates"][0][:-1])
-    return f"✅ Przerysowano usyp {o['id']}"
+    return f"✅ Muck pile {o['id']} redrawn"
 
 
 def _fmt(v, unit: str = "", nd: int = 0) -> str:
@@ -621,7 +623,7 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
         z0, z1 = _node_elev(info, o["coords"][0]), _node_elev(info, o["coords"][-1])
         auto = next((x["name"] for x in site.get("levels") or [] if (o.get("name") or o.get("id")) in x.get("roads", [])), None)
         bays = [b["id"] for b in site.get("passing_bays", []) if along_m(o["coords"], (b["lat"], b["lon"]))[1] <= SNAP_M]
-        P = [("title", f"🛣️ {o.get('kind', 'droga')} {o.get('id')} – {o.get('name', '')}"),
+        P = [("title", f"🛣️ {ROAD_KIND_LABELS.get(o.get('kind', 'droga'), o.get('kind'))} {o.get('id')} – {o.get('name', '')}"),
              ("rodzaj", o.get("kind")), ("długość", _fmt(L, "m")),
              ("nachylenie wzdłuż rysowania", _fmt(o.get("grade_draw_pct"), "%", 1)),
              ("rzędna początku (1. punkt)", _fmt(z0, "m", 1)), ("rzędna końca", _fmt(z1, "m", 1)),
@@ -637,7 +639,7 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
         max_feed = float(raw.get("crusher", {}).get("max_feed_mm", 800))
         sm = psd_summary(o["psd"], max_feed) if o.get("psd") else {}
         exs = [e["id"] for e in site.get("excavators", []) if e.get("pile") == o["id"]]
-        P = [("title", f"{'🧨 planowany odstrzał' if kind == 'planned' else '⛰️ usyp'} {o['id']}"),
+        P = [("title", f"{'🧨 planned blast' if kind == 'planned' else '⛰️ muck pile'} {o['id']}"),
              ("materiał", o.get("material")), ("ilość", _fmt(o.get("tonnage_t"), "t")),
              ("poziom", (o.get("level") or "–") + (" (auto)" if o.get("level_auto") else "")),
              ("rzędna", _fmt(o.get("level_m"), "m", 1)), ("powierzchnia", _fmt(polygon_area_m2(o["polygon"]), "m²")),
@@ -658,7 +660,7 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
         lvx = (info.get("levels") or {}).get(o["id"], {})
         park = next((p for p in site.get("parking", []) if p.get("excavator") == o["id"]), None)
         spot = ", ".join(f"{k} {v:g}%" for k, v in (o.get("spotting") or {}).items()) or "stały czas"
-        P = [("title", f"⛏️ koparka {o['id']}"), ("ładuje z usypu", o.get("pile")),
+        P = [("title", f"⛏️ excavator {o['id']}"), ("ładuje z usypu", o.get("pile")),
              ("łyżka", _fmt(o.get("bucket_m3"), "m³", 1)), ("cykl łyżki", _fmt(o.get("swing_cycle_s"), "s")),
              ("rzędna (z dróg)", _fmt(lvx.get("elev_m"), "m", 1)), ("odległość od drogi", _fmt(lvx.get("dist_to_road_m"), "m")),
              ("sposób podstawiania", spot),
@@ -669,7 +671,7 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
     elif kind in ("crusher", "crusher2"):
         main = kind == "crusher"
         cr = raw.get("crusher", {}) if main else o
-        P = [("title", f"🏭 kruszarka {o.get('id', 'C-1')}{' (główna)' if main else ''}"),
+        P = [("title", f"🏭 crusher {o.get('id', 'C-1')}{' (main)' if main else ''}"),
              ("wydajność", _fmt(cr.get("capacity_tph"), "t/h")), ("kosz", _fmt(cr.get("hopper_t"), "t")),
              ("produkt", o.get("product") or "–"), ("energia", _fmt(cr.get("kwh_per_t", raw.get("crusher", {}).get("kwh_per_t")), "kWh/t", 2)),
              ("plan na zmianę", _fmt(o.get("target_t"), "t")), ("przyjmuje z", ", ".join(o.get("accepts") or []) or "wszystkich usypów"),
@@ -677,7 +679,7 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
              ("położenie", f"{o['lat']:.5f}, {o['lon']:.5f}")]
     elif kind == "area":
         n = -(-float(o.get("reserves_t") or 0) // max(float(o.get("blast_max_t") or 1), 1))
-        P = [("title", f"🟧 obszar wydobycia {o['id']}"), ("materiał", o.get("material")),
+        P = [("title", f"🟧 mining area {o['id']}"), ("materiał", o.get("material")),
              ("poziom", (o.get("level") or "–") + (" (auto)" if o.get("level_auto") else "")),
              ("rzędna", _fmt(o.get("level_m"), "m", 1)), ("zasoby", _fmt(o.get("reserves_t"), "t")),
              ("powierzchnia", _fmt(polygon_area_m2(o["polygon"]), "m²")), ("największy strzał", _fmt(o.get("blast_max_t"), "t")),
@@ -687,14 +689,14 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
              ("godziny strzału", f"ekipa {o.get('crew_arrive', '–')}, odpalenie {o.get('fire_from', '–')}–{o.get('fire_to', '–')}")]
     elif kind == "bay":
         road = next((r for r in site.get("roads", []) if along_m(r["coords"], (o["lat"], o["lon"]))[1] <= SNAP_M), None)
-        P = [("title", f"⇆ mijanka {o.get('id')}"), ("na drodze", (road or {}).get("name", "–")),
+        P = [("title", f"⇆ passing bay {o.get('id')}"), ("na drodze", (road or {}).get("name", "–")),
              ("rzędna", _fmt(_node_elev(info, (o["lat"], o["lon"])), "m", 1)), ("położenie", f"{o['lat']:.5f}, {o['lon']:.5f}")]
     elif kind == "parking":
-        P = [("title", f"🅿️ miejsce postoju koparki {o.get('excavator')}"), ("koparka", o.get("excavator")),
+        P = [("title", f"🅿️ excavator parking spot {o.get('excavator')}"), ("koparka", o.get("excavator")),
              ("położenie", f"{o['lat']:.5f}, {o['lon']:.5f}")]
     elif kind == "dig":
         e = o["_ex"]
-        P = [("title", f"⤳ kierunek urabiania {e['id']}"), ("długość", _fmt(polyline_length_m(e["dig_path"]), "m")),
+        P = [("title", f"⤳ digging direction {e['id']}"), ("długość", _fmt(polyline_length_m(e["dig_path"]), "m")),
              ("przestawienie co", _fmt(e.get("relocate_every_t", 600), "t")), ("czas przestawienia", _fmt(e.get("relocate_min", 4), "min"))]
     else:
         P = [("title", sel)] + [(k, _fmt(v)) for k, v in o.items() if not isinstance(v, (list, dict))]
@@ -703,11 +705,11 @@ def object_properties(site: dict, sel: str, raw: dict) -> list[tuple[str, str]]:
 
 # what can be edited in the panel of a clicked object: (key, label, type, options)
 #   num: (min, step) · opt: optional number · text · bool · sel: options · multi: options · time · level · psd
-_TIMES = [("crew_arrive", "przyjazd ekipy", "time", None), ("fire_from", "odpalenie od", "time", None),
-          ("fire_to", "odpalenie do", "time", None), ("evacuation_min", "ewakuacja przed [min]", "opt", (0.0, 5.0)),
-          ("crew_leave", "wyjazd ekipy", "time", None)]
-_FAIL = [("_fail_count", "awarii / miesiąc", "num", (0.0, 1.0)),
-         ("_fail_hours", "łącznie godzin awarii / miesiąc", "num", (0.0, 1.0))]
+_TIMES = [("crew_arrive", "blasting crew arrives", "time", None), ("fire_from", "firing from", "time", None),
+          ("fire_to", "firing to", "time", None), ("evacuation_min", "evacuation before [min]", "opt", (0.0, 5.0)),
+          ("crew_leave", "blasting crew leaves", "time", None)]
+_FAIL = [("_fail_count", "breakdowns / month", "num", (0.0, 1.0)),
+         ("_fail_hours", "total breakdown hours / month", "num", (0.0, 1.0))]
 RELIABILITY_KIND = {"excavator": "excavator", "crusher": "crusher", "crusher2": "crusher"}
 SITE_LIST = {"road": "roads", "pile": "piles", "planned": "planned_piles", "excavator": "excavators",
              "crusher2": "crushers", "area": "areas", "bay": "passing_bays", "parking": "parking"}
@@ -715,47 +717,47 @@ SITE_LIST = {"road": "roads", "pile": "piles", "planned": "planned_piles", "exca
 
 def _form_fields(site: dict, kind: str, o: dict) -> list[tuple]:
     pile_ids = [p["id"] for p in site.get("piles", [])] + [p["id"] for p in site.get("planned_piles", [])]
-    crusher = [("id", "nazwa", "text", None), ("model", "model (katalog)", "sel", [""] + catalog.names("crusher")),
-               ("capacity_tph", "wydajność [t/h]", "num", (50.0, 50.0)),
-               ("hopper_t", "kosz [t]", "num", (5.0, 5.0)), ("product", "co produkuje", "sel", [""] + list(PRODUCTS)),
-               ("kwh_per_t", "energia [kWh/t]", "num", (0.1, 0.1)), ("target_t", "plan na zmianę [t]", "num", (0.0, 500.0)),
-               ("accepts", "przyjmuje z (puste = wszystkie)", "multi", _pile_ids(site))]
-    main_crusher = crusher + [("elev_m", "rzędna [m] (puste = z wlotów pochylni)", "elev", None)]
+    crusher = [("id", "name", "text", None), ("model", "model (catalogue)", "sel", [""] + catalog.names("crusher")),
+               ("capacity_tph", "capacity [t/h]", "num", (50.0, 50.0)),
+               ("hopper_t", "hopper [t]", "num", (5.0, 5.0)), ("product", "what it produces", "sel", [""] + list(PRODUCTS)),
+               ("kwh_per_t", "energy [kWh/t]", "num", (0.1, 0.1)), ("target_t", "plan per shift [t]", "num", (0.0, 500.0)),
+               ("accepts", "accepts from (empty = all)", "multi", _pile_ids(site))]
+    main_crusher = crusher + [("elev_m", "elevation [m] (empty = from the ramp inlets)", "elev", None)]
     return {
-        "road": [("name", "nazwa", "text", None), ("kind", "rodzaj", "sel", ["droga", "rampa"]),
-                 ("grade_draw_pct", "nachylenie wzdłuż rysowania [%]", "num", (-30.0, 0.5)),
-                 ("speed_limit_kmh", "limit prędkości [km/h]", "num", (5.0, 5.0)),
-                 ("inlet_elev_m", "rzędna wlotu [m] (pochylnia)", "opt", (-2000.0, 1.0)),
-                 ("single_lane", "jeden pas (mijanki)", "bool", None), ("active", "w użyciu", "bool", None)],
-        "pile": [("id", "nazwa", "text", None), ("material", "materiał", "sel", MATERIALS),
-                 ("tonnage_t", "ilość [t]", "num", (0.0, 1000.0)), ("level", "poziom", "level", None),
-                 ("loose_density_t_m3", "gęstość spulchniona [t/m³]", "opt", (1.0, 0.05)),
-                 ("target_share", "udział w nadawie [%]", "opt", (0.0, 5.0)), ("psd", "uziarnienie", "psd", None)],
-        "planned": [("id", "nazwa", "text", None), ("material", "materiał", "sel", MATERIALS),
-                    ("tonnage_t", "ilość [t]", "num", (0.0, 1000.0)), ("level", "poziom", "level", None),
-                    ("blast_day", "dzień roboczy strzału", "num", (1.0, 1.0)),
-                    ("target_share", "udział w nadawie [%]", "opt", (0.0, 5.0)), ("t_per_m", "t/mb", "num", (5.0, 5.0)),
-                    ("drilled", "nawiercony", "bool", None), ("psd", "uziarnienie", "psd", None), *_TIMES],
-        "area": [("id", "nazwa", "text", None), ("material", "materiał", "sel", MATERIALS), ("level", "poziom", "level", None),
-                 ("reserves_t", "zasoby [t]", "num", (0.0, 5000.0)), ("blast_max_t", "największy strzał [t]", "num", (1000.0, 1000.0)),
-                 ("reblast_below_t", "strzelaj, gdy zostanie poniżej [t]", "num", (0.0, 1000.0)),
-                 ("min_gap_days", "odstęp między strzałami [dni rob.]", "num", (1.0, 1.0)),
-                 ("max_per_day", "strzałów na dzień", "num", (1.0, 1.0)),
-                 ("target_share", "udział w nadawie [%]", "opt", (0.0, 5.0)), ("t_per_m", "t/mb", "num", (5.0, 5.0)),
-                 ("first_drilled", "pierwszy pas nawiercony", "bool", None), *_TIMES],
-        "excavator": [("id", "nazwa", "text", None), ("pile", "ładuje z usypu", "sel", pile_ids),
-                      ("model", "model (katalog)", "sel", [""] + catalog.names("excavator")),
-                      ("bucket_m3", "łyżka [m³]", "num", (0.5, 0.5)), ("swing_cycle_s", "cykl łyżki [s]", "num", (10.0, 1.0)),
-                      ("fill_factor", "wypełnienie łyżki", "num", (0.3, 0.05)),
-                      ("spot_time_s", "podstawienie wozidła [s]", "num", (0.0, 5.0)),
-                      ("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
-                      ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0)),
-                      ("areas", "pracuje w (harmonogram; puste = wszędzie)", "multi", _pile_ids(site)), *_FAIL],
+        "road": [("name", "name", "text", None), ("kind", "kind", "sel", ["droga", "rampa"]),
+                 ("grade_draw_pct", "grade along the drawing [%]", "num", (-30.0, 0.5)),
+                 ("speed_limit_kmh", "speed limit [km/h]", "num", (5.0, 5.0)),
+                 ("inlet_elev_m", "inlet elevation [m] (ramp)", "opt", (-2000.0, 1.0)),
+                 ("single_lane", "single lane (passing bays)", "bool", None), ("active", "in use", "bool", None)],
+        "pile": [("id", "name", "text", None), ("material", "material", "sel", MATERIALS),
+                 ("tonnage_t", "amount [t]", "num", (0.0, 1000.0)), ("level", "level", "level", None),
+                 ("loose_density_t_m3", "loose density [t/m³]", "opt", (1.0, 0.05)),
+                 ("target_share", "share of the feed [%]", "opt", (0.0, 5.0)), ("psd", "fragmentation (PSD)", "psd", None)],
+        "planned": [("id", "name", "text", None), ("material", "material", "sel", MATERIALS),
+                    ("tonnage_t", "amount [t]", "num", (0.0, 1000.0)), ("level", "level", "level", None),
+                    ("blast_day", "working day of the blast", "num", (1.0, 1.0)),
+                    ("target_share", "share of the feed [%]", "opt", (0.0, 5.0)), ("t_per_m", "t/m", "num", (5.0, 5.0)),
+                    ("drilled", "drilled", "bool", None), ("psd", "fragmentation (PSD)", "psd", None), *_TIMES],
+        "area": [("id", "name", "text", None), ("material", "material", "sel", MATERIALS), ("level", "level", "level", None),
+                 ("reserves_t", "reserves [t]", "num", (0.0, 5000.0)), ("blast_max_t", "largest blast [t]", "num", (1000.0, 1000.0)),
+                 ("reblast_below_t", "blast when less than [t] is left", "num", (0.0, 1000.0)),
+                 ("min_gap_days", "gap between blasts [working days]", "num", (1.0, 1.0)),
+                 ("max_per_day", "blasts per day", "num", (1.0, 1.0)),
+                 ("target_share", "share of the feed [%]", "opt", (0.0, 5.0)), ("t_per_m", "t/m", "num", (5.0, 5.0)),
+                 ("first_drilled", "first strip drilled", "bool", None), *_TIMES],
+        "excavator": [("id", "name", "text", None), ("pile", "loads from muck pile", "sel", pile_ids),
+                      ("model", "model (catalogue)", "sel", [""] + catalog.names("excavator")),
+                      ("bucket_m3", "bucket [m³]", "num", (0.5, 0.5)), ("swing_cycle_s", "bucket cycle [s]", "num", (10.0, 1.0)),
+                      ("fill_factor", "bucket fill", "num", (0.3, 0.05)),
+                      ("spot_time_s", "truck spotting [s]", "num", (0.0, 5.0)),
+                      ("relocate_every_t", "relocation every [t]", "num", (50.0, 50.0)),
+                      ("relocate_min", "relocation [min]", "num", (0.0, 1.0)),
+                      ("areas", "may work in (schedule; empty = anywhere)", "multi", _pile_ids(site)), *_FAIL],
         "crusher": main_crusher + _FAIL, "crusher2": crusher + _FAIL,
-        "parking": [("excavator", "koparka", "sel", [e["id"] for e in site.get("excavators", [])])],
-        "bay": [("id", "nazwa", "text", None)],
-        "dig": [("relocate_every_t", "przestawienie co [t]", "num", (50.0, 50.0)),
-                ("relocate_min", "przestawienie [min]", "num", (0.0, 1.0))],
+        "parking": [("excavator", "excavator", "sel", [e["id"] for e in site.get("excavators", [])])],
+        "bay": [("id", "name", "text", None)],
+        "dig": [("relocate_every_t", "relocation every [t]", "num", (50.0, 50.0)),
+                ("relocate_min", "relocation [min]", "num", (0.0, 1.0))],
     }.get(kind, [])
 
 
@@ -807,28 +809,28 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
             elif typ == "sel":
                 options = list(opt) if v in opt or v is None else [v] + list(opt)
                 new[key] = c.selectbox(label, options, index=options.index(v) if v in options else 0, key=wk,
-                                       format_func=lambda x: x or "—")
+                                       format_func=lambda x: ROAD_KIND_LABELS.get(x, x) or "—")
             elif typ == "multi":
                 new[key] = c.multiselect(label, opt, [x for x in (v or []) if x in opt], key=wk, disabled=not opt,
-                                         placeholder="wybierz…" if opt else "brak usypów i obszarów – najpierw je narysuj")
+                                         placeholder="choose…" if opt else "no muck piles or areas – draw them first")
             elif typ == "elev":
                 from kruszyk.site import crusher_fixed
 
                 new[key] = c.number_input(label, -2000.0, 5000.0, float(v) if crusher_fixed(o) and v is not None else None,
-                                          0.5, key=wk, placeholder=f"z pochylni: {float(v or 0):.1f} m",
-                                          help="Wpisz, jeśli znasz rzędną kruszarki. Puste = liczona z rzędnych wlotów "
-                                               "pochylni i nachyleń dróg.")
+                                          0.5, key=wk, placeholder=f"from the ramp: {float(v or 0):.1f} m",
+                                          help="Enter it if you know the crusher's elevation. Empty = calculated from the "
+                                               "ramp inlet elevations and road grades.")
             elif typ == "time":
-                new[key] = c.text_input(f"{label} (GG:MM)", str(v or ""), key=wk, placeholder="jak w planie zmiany")
+                new[key] = c.text_input(f"{label} (HH:MM)", str(v or ""), key=wk, placeholder="as in the shift plan")
             elif typ == "level":
                 with c:
                     new[key] = level_select(label, site, wk, v)
             elif typ == "psd":
-                names = list(PRESETS) + (["własna"] if v and preset_of(v) not in PRESETS else [])
+                names = list(PRESETS) + (["custom"] if v and preset_of(v) not in PRESETS else [])
                 now = preset_of(v) if v else DEFAULT_PRESET
                 new[key] = c.selectbox(label, names, index=names.index(now) if now in names else 0, key=wk,
-                                       help="własną krzywą wpiszesz w tabeli uziarnienia (sekcja 3)")
-        ok = st.form_submit_button("💾 Zastosuj zmiany", type="primary")
+                                       help="enter a custom curve in the fragmentation (PSD) table (section 3)")
+        ok = st.form_submit_button("💾 Apply changes", type="primary")
     if not ok:
         return
     fails = (new.pop("_fail_count", None), new.pop("_fail_hours", None))
@@ -874,7 +876,7 @@ def object_editor(site: dict, sel: str, raw: dict) -> None:
         else:
             o[key] = val
     st.session_state.obj_ver += 1
-    st.session_state.map_flash = "✅ Zmieniono parametry – zapisz kopalnię, żeby weszły do obliczeń."
+    st.session_state.map_flash = "✅ Parameters changed – save the mine to include them in the calculations."
     st.rerun()
 
 
@@ -892,16 +894,17 @@ def road_points_editor(o: dict, net: dict) -> None:
     ch = chainage(coords)
     given = road_z(o) is not None
     z = road_z(o) or [_node_elev(net, p) for p in coords]
-    st.markdown("**📈 Punkty drogi – rzędne i profil podłużny**")
-    st.caption(("✍️ Rzędne punktów wpisane – każdy odcinek ma nachylenie z różnicy rzędnych. " if given else
-                "Teraz: jedno nachylenie na całej drodze, rzędne niżej są z niego wyliczone. Popraw rzędne punktów "
-                "załamania i zapisz – każdy odcinek dostanie własne nachylenie. ")
-               + "Punkt 1 = początek rysowania (strzałka na mapie).")
+    st.markdown("**📈 Road points – elevations and longitudinal profile**")
+    st.caption(("✍️ Point elevations entered – every stretch has the grade from the elevation difference. " if given else
+                "Now: one grade along the whole road, the elevations below are calculated from it. Correct the "
+                "elevations of the bend points and save – every stretch gets its own grade. ")
+               + "Point 1 = start of the drawing (arrow on the map).")
     df = pd.DataFrame({"punkt": range(1, len(coords) + 1), "odległość [m]": [round(c) for c in ch],
-                       "rzędna [m]": [None if v is None else round(float(v), 2) for v in z]})
+                       "rzędna [m]": [None if v is None else round(float(v), 2) for v in z]})  # column ids (data)
     ed = st.data_editor(df, key=f"rz_{o['uid']}_{st.session_state.obj_ver}", hide_index=True, width="stretch",
                         disabled=["punkt", "odległość [m]"], num_rows="fixed",
-                        column_config={"rzędna [m]": st.column_config.NumberColumn(format="%.2f", step=0.1)})
+                        column_config={"punkt": "point", "odległość [m]": "distance [m]",
+                                       "rzędna [m]": st.column_config.NumberColumn("elevation [m]", format="%.2f", step=0.1)})
     zz = [None if pd.isna(v) else float(v) for v in ed["rzędna [m]"]]
     if all(v is not None for v in zz) and len(zz) >= 2:
         grades = [100 * (zz[i] - zz[i - 1]) / (ch[i] - ch[i - 1]) if ch[i] > ch[i - 1] else 0.0
@@ -916,28 +919,28 @@ def road_points_editor(o: dict, net: dict) -> None:
                                showarrow=False, yshift=12, font=dict(color="#c8102e" if steep else "#2f4156"))
         fig.add_scatter(x=ch, y=zz, mode="markers+text", text=[str(i + 1) for i in range(len(zz))],
                         textposition="bottom center", marker=dict(size=8, color="#2f4156"), showlegend=False,
-                        hovertemplate="punkt %{text}: %{x:.0f} m, rzędna %{y:.1f} m<extra></extra>")
-        fig.update_layout(height=260, margin=dict(t=10, b=30, l=10, r=10), xaxis_title="odległość od początku [m]",
-                          yaxis_title="rzędna [m]")
+                        hovertemplate="point %{text}: %{x:.0f} m, elevation %{y:.1f} m<extra></extra>")
+        fig.update_layout(height=260, margin=dict(t=10, b=30, l=10, r=10), xaxis_title="distance from the start [m]",
+                          yaxis_title="elevation [m]")
         st.plotly_chart(fig, width="stretch")
         if any(abs(g) > MAX_RAMP_PCT for g in grades):
-            st.caption(f"🔴 Odcinki ponad {MAX_RAMP_PCT:g} % – sprawdź, czy wozidła tam wjadą z ładunkiem.")
+            st.caption(f"🔴 Stretches over {MAX_RAMP_PCT:g} % – check that loaded trucks can climb them.")
     c1, c2 = st.columns([1, 1])
-    if c1.button("💾 Zapisz rzędne punktów", key=f"rz_save_{o['uid']}", type="primary",
+    if c1.button("💾 Save point elevations", key=f"rz_save_{o['uid']}", type="primary",
                  disabled=any(v is None for v in zz)):
         set_road_z(o, zz)
         st.session_state.obj_ver += 1
-        st.session_state.map_flash = (f"✅ Zapisano rzędne {len(zz)} punktów drogi „{o.get('name') or o.get('id')}” – "
-                                      "zapisz kopalnię, żeby weszły do obliczeń.")
+        st.session_state.map_flash = (f"✅ Elevations of {len(zz)} points of road “{o.get('name') or o.get('id')}” saved – "
+                                      "save the mine to include them in the calculations.")
         st.rerun()
-    if given and c2.button("↺ Jedno nachylenie na całej drodze", key=f"rz_clear_{o['uid']}",
-                           help="usuwa rzędne punktów; zostaje średnie nachylenie drogi"):
+    if given and c2.button("↺ One grade along the whole road", key=f"rz_clear_{o['uid']}",
+                           help="removes the point elevations; the road's mean grade stays"):
         set_road_z(o, None)
         st.session_state.obj_ver += 1
         st.rerun()
     if any(v is None for v in zz):
-        st.caption("Uzupełnij rzędne wszystkich punktów (brak rzędnej = sieć dróg nie ma jeszcze punktu "
-                   "odniesienia: wpisz rzędną kruszarki albo wlotu pochylni).")
+        st.caption("Fill in the elevations of all points (no elevation = the road network has no reference point "
+                   "yet: enter the elevation of the crusher or of a ramp inlet).")
 
 
 def _bends_text(coords: list) -> str:
@@ -1165,17 +1168,17 @@ def add_bay(site: dict, lat: float, lon: float) -> str:
     """Passing bay: snapped onto the nearest road; that road becomes single-lane."""
     roads = [r for r in site.get("roads", []) if len(r.get("coords", [])) >= 2]
     if not roads:
-        return "⚠️ Najpierw narysuj drogę – mijankę stawia się na drodze"
+        return "⚠️ First draw a road – a passing bay is placed on a road"
     best = min(((along_m(r["coords"], (lat, lon)), r) for r in roads), key=lambda x: x[0][1])
     (a, d), road = best
     if d > SNAP_M:
-        return f"⚠️ Mijanka musi stać na drodze (najbliższa droga jest {d:.0f} m dalej)"
+        return f"⚠️ A passing bay must stand on a road (the nearest road is {d:.0f} m away)"
     plat, plon = point_along(road["coords"], a)
     site.setdefault("passing_bays", []).append({"lat": round(plat, 7), "lon": round(plon, 7)})
     ensure_uids(site)
-    note = "" if road.get("single_lane") else " – droga oznaczona jako jednopasmowa (ruch wahadłowy)"
+    note = "" if road.get("single_lane") else " – road marked as single lane (alternating traffic)"
     road["single_lane"] = True
-    return f"✅ Dodano mijankę {site['passing_bays'][-1]['id']} na drodze „{road.get('name', road.get('id'))}”{note}"
+    return f"✅ Passing bay {site['passing_bays'][-1]['id']} added on road “{road.get('name', road.get('id'))}”{note}"
 
 
 def editing_map(site: dict) -> folium.Map:

@@ -18,15 +18,15 @@ STATE_CODES = ["jazda_pusty", "przejazd_miedzy_usypami", "jazda_pelny", "kolejka
                "start", "przerwa", "postoj_strzelanie", "koniec_zmiany", "tankowanie", "postoj_koparki",
                "wyjazd_z_frontu", "mijanka", "inne_przestoje", "parking", "cel_osiagniety"]
 STATE_LABELS = {
-    "jazda_pusty": "jedzie pusty", "przejazd_miedzy_usypami": "jedzie na 2. usyp", "jazda_pelny": "jedzie pełny",
-    "kolejka_koparka": "czeka pod koparką", "podstawienie": "podstawia się", "zaladunek": "ładowany",
-    "kolejka_kruszarka": "czeka pod kruszarką", "wyladunek": "wyładunek", "wyladunek_halda": "wyładunek na hałdę",
-    "awaria": "awaria", "postoj_brak_urobku": "postój – brak urobku", "start": "rozruch / przed startem",
-    "przerwa": "przerwa", "postoj_strzelanie": "czeka – strzelanie", "koniec_zmiany": "koniec zmiany",
-    "tankowanie": "tankowanie", "postoj_koparki": "czeka – koparka stoi",
-    "wyjazd_z_frontu": "manewruje / wyjeżdża z frontu", "mijanka": "czeka na mijance",
-    "inne_przestoje": "inne przestoje (z kalibracji)", "parking": "parking – silnik wyłączony (RL)",
-    "cel_osiagniety": "cel zmiany osiągnięty – koniec wożenia",
+    "jazda_pusty": "driving empty", "przejazd_miedzy_usypami": "driving to 2nd pile", "jazda_pelny": "driving loaded",
+    "kolejka_koparka": "queue at excavator", "podstawienie": "spotting", "zaladunek": "loading",
+    "kolejka_kruszarka": "queue at crusher", "wyladunek": "dumping", "wyladunek_halda": "dumping on stockpile",
+    "awaria": "breakdown", "postoj_brak_urobku": "idle – no material", "start": "start-up / before start",
+    "przerwa": "break", "postoj_strzelanie": "waiting – blasting", "koniec_zmiany": "end of shift",
+    "tankowanie": "refuelling", "postoj_koparki": "waiting – excavator stopped",
+    "wyjazd_z_frontu": "manoeuvring / leaving the face", "mijanka": "waiting at passing bay",
+    "inne_przestoje": "other delays (from calibration)", "parking": "parked – engine off (RL)",
+    "cel_osiagniety": "shift target reached – hauling ended",
 }
 STATE_COLORS = {
     "jazda_pusty": "#8ecae6", "przejazd_miedzy_usypami": "#b5838d", "jazda_pelny": "#219ebc",
@@ -191,25 +191,26 @@ def excavator_advice(res) -> dict[str, list[str]]:
             t = m * 60.0
             w = next((r for a, b, r in down if a <= t < b), None)
             if w:
-                lines.append({"przerwa": "⏸ przerwa", "strzelanie": "🔴 STRZELANIE – zjazd z frontu",
-                              "tankowanie": "⛽ tankowanie z cysterny"}.get(w, w))
+                lines.append({"przerwa": "⏸ break", "strzelanie": "🔴 BLASTING – leave the face",
+                              "tankowanie": "⛽ refuelling from the tanker",
+                              "awaria": "breakdown", "przejazd": "moving", "przestawienie": "repositioning"}.get(w, w))
                 continue
             cur = next((x for x in loading if x[0] <= t < x[1]), None)
             if cur is not None:
-                lines.append(f"🟢 {'ładuje' if cur[3] == 'zaladunek' else 'podstawia się'} {cur[2]}")
+                lines.append(f"🟢 {'loading' if cur[3] == 'zaladunek' else 'spotting'} {cur[2]}")
                 continue
             while j < len(spots) and spots[j][0] <= t:
                 j += 1
             if j >= len(spots):
-                lines.append("brak wozideł w drodze – przegarnij front")
+                lines.append("no trucks on the way – clean up the face")
                 continue
             eta, truck = spots[j][0] - t, spots[j][1]
             if eta <= one_pass:
-                lines.append(f"{truck} za {_mmss(eta)} → łyżka pełna, czekaj")
+                lines.append(f"{truck} in {_mmss(eta)} → bucket full, wait")
             elif eta <= one_pass + 90:
-                lines.append(f"{truck} za {_mmss(eta)} → nabierz łyżkę")
+                lines.append(f"{truck} in {_mmss(eta)} → fill the bucket")
             else:
-                lines.append(f"{truck} za {_mmss(eta)} → przegarnij front / przygotuj urobek")
+                lines.append(f"{truck} in {_mmss(eta)} → clean up the face / prepare material")
         out[e.id] = lines
     return out
 
@@ -224,9 +225,9 @@ def driver_signals(res) -> list[list]:
             v = 3.6 * float(g["length_m"].sum()) / max(float(g["duration_s"].sum()), 1.0)
             ex = g["excavator"].iloc[0]
             if leg == "pusty":
-                text = f"zwolnij do {v:.0f} km/h – pod {ex} będziesz, gdy się zwolni"
+                text = f"slow down to {v:.0f} km/h – you reach {ex} when it is free"
             elif leg == "pelny":
-                text = f"zwolnij do {v:.0f} km/h – kosz kruszarki pełny"
+                text = f"slow down to {v:.0f} km/h – crusher hopper full"
             else:
                 continue
             out.append([round(float(g["start_s"].min()), 1), truck, text])
@@ -234,7 +235,7 @@ def driver_signals(res) -> list[list]:
     if len(st_):
         for row in st_[st_["state"] == "parking"].itertuples():
             out.append([round(float(row.start_s), 1), row.truck,
-                        "stań na postoju i wyłącz silnik – pod kruszarką kolejka; wezwę, gdy zwolni się miejsce"])
+                        "park and switch off the engine – queue at the crusher; you will be called when there is room"])
     return sorted(out)
 
 
@@ -251,7 +252,7 @@ def _side(res, label: str = "") -> dict:
     }
 
 
-def split_html(left, right, left_label: str = "Jak dziś", right_label: str = "Z sygnałami RL", curves: dict | None = None,
+def split_html(left, right, left_label: str = "Baseline", right_label: str = "With RL signals", curves: dict | None = None,
                prior: str = "null") -> str:
     """Two maps side by side, one clock: the same shift driven today (left) and with the signals (right).
     `curves`: the shift's cumulative tonnes / cost / queueing for the live charts under the maps; `prior`: the
@@ -272,7 +273,7 @@ def split_html(left, right, left_label: str = "Jak dziś", right_label: str = "Z
             .replace("__PRIOR__", prior))
 
 
-def animation_payload(res, baseline=None, label: str = "", baseline_label: str = "naturalny") -> str:
+def animation_payload(res, baseline=None, label: str = "", baseline_label: str = "baseline") -> str:
     sc = res.scenario
     payload = {
         "shift_s": sc.shift_hours * 3600,
@@ -296,7 +297,7 @@ def animation_payload(res, baseline=None, label: str = "", baseline_label: str =
     return json.dumps(payload, separators=(",", ":"))
 
 
-def animation_html(res, baseline=None, label: str = "", baseline_label: str = "naturalny") -> str:
+def animation_html(res, baseline=None, label: str = "", baseline_label: str = "baseline") -> str:
     from pathlib import Path
 
     here = Path(__file__).parent

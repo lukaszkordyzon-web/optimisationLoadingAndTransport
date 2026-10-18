@@ -267,7 +267,7 @@ class RoadGraph:
         """Node for an outside point (excavator, crusher): closest network point, split if needed.
         Returns (node, distance from p to the network)."""
         if not self.edges:
-            raise ValueError("Na mapie nie ma dróg")
+            raise ValueError("There are no roads on the map")
         edge, q, t, d = self._nearest_edge(p)
         if t <= 0.0 or t >= 1.0 or haversine_m(q, self.nodes[edge[0] if t <= 0.5 else edge[1]]) < 3:
             return (edge[0] if t <= 0.5 else edge[1]), d
@@ -330,8 +330,8 @@ class RoadGraph:
             p = tuple(road["coords"][0])
             n = min(range(len(self.nodes)), key=lambda i: haversine_m(self.nodes[i], p), default=None)
             if n is not None:
-                kind = "rzędne punktów, początek" if pts else "rzędna wlotu" if not self.is_flat(ri) else "wpisana rzędna"
-                out.append((n, float(z), f"„{self.road_name(ri)}” ({kind} {float(z):.0f} m)"))
+                kind = "point elevations, start" if pts else "inlet elevation" if not self.is_flat(ri) else "typed elevation"
+                out.append((n, float(z), f"“{self.road_name(ri)}” ({kind} {float(z):.0f} m)"))
         return out
 
     FLAT_COST = 1000.0  # heights travel along ramps first; a flat road only passes on the height where it meets one
@@ -345,9 +345,9 @@ class RoadGraph:
         if anchors is None:
             src_anchors = self._anchors()
         else:
-            src_anchors = [(n, z, f"punkt o rzędnej {z:.0f} m") for n, z in anchors]
+            src_anchors = [(n, z, f"a point at {z:.0f} m") for n, z in anchors]
         if root_fixed or not src_anchors:  # the crusher's height counts only if set (or nothing else is known)
-            src_anchors = [(root, root_elev, f"kruszarki (rzędna {root_elev:.0f} m)")] + src_anchors
+            src_anchors = [(root, root_elev, f"the crusher ({root_elev:.0f} m)")] + src_anchors
         adj = self.adj()
         elev, dist, src, pq = {}, {}, {}, []
         for n, z, label in src_anchors:
@@ -375,18 +375,18 @@ class RoadGraph:
                     name, z = self.road_name(ri), f"{elev[a]:.0f} / {elev[b]:.0f} m"
                     if src[a] != src[b]:  # two typed heights (or the crusher) disagree along the grades
                         warnings.append(
-                            f"Droga „{name}”: wysokości się nie zgadzają – z {src[a]} wychodzi tu {elev[a]:.0f} m, "
-                            f"a z {src[b]} {elev[b]:.0f} m. Popraw nachylenie pochylni albo wpisaną rzędną (drodze "
-                            "płaskiej rzędnej zwykle nie wpisuj – bierze ją ze styku z pochylnią).")
+                            f"Road “{name}”: the heights do not agree – from {src[a]} it is {elev[a]:.0f} m here, "
+                            f"from {src[b]} {elev[b]:.0f} m. Correct the ramp grade or the typed elevation (a flat "
+                            "road usually needs no elevation – it takes the one where it meets a ramp).")
                     elif g == 0:
                         warnings.append(
-                            f"Droga „{name}”: płaska, a łączy dwa miejsca na różnych wysokościach ({z}, obie z "
-                            f"{src[a]}) – albo ma nachylenie (wpisz je), albo jej koniec dotknął innej drogi "
-                            "(odsuń go na mapie).")
+                            f"Road “{name}”: flat, but it joins two places at different heights ({z}, both from "
+                            f"{src[a]}) – either it has a grade (type it in) or its end touched another road "
+                            "(move it away on the map).")
                     else:
                         warnings.append(
-                            f"Droga „{name}”: jej nachylenie nie zgadza się z rzędnymi ({z}, z {src[a]}) – "
-                            "sprawdź nachylenia pochylni na tej trasie.")
+                            f"Road “{name}”: its grade does not agree with the elevations ({z}, from {src[a]}) – "
+                            "check the ramp grades on this route.")
         return elev, sorted(set(warnings))
 
 
@@ -590,12 +590,12 @@ def analyze_site(site: dict) -> dict:
     roads = site.get("roads", [])
     out = {"graph": None, "elev": {}, "warnings": [], "levels": {}, "junctions": [], "dead_ends": []}
     if not roads:
-        out["warnings"].append("Na mapie nie ma dróg")
+        out["warnings"].append("There are no roads on the map")
         return out
     g = RoadGraph(roads)
     out["graph"] = g
     if not site.get("crusher"):
-        out["warnings"].append("Na mapie nie ma kruszarki")
+        out["warnings"].append("There is no crusher on the map")
         return out
     c = site["crusher"]
     c_node, _ = g.attach((c["lat"], c["lon"]))
@@ -616,14 +616,14 @@ def analyze_site(site: dict) -> dict:
     unreachable = {g.roads[ri].get("name") or g.roads[ri].get("id")
                    for (a, b), (w, ri) in g.edges.items() if a not in elev}
     for name in sorted(unreachable):
-        out["warnings"].append(f"Droga „{name}” nie ma połączenia z kruszarką")
+        out["warnings"].append(f"Road “{name}” has no connection to the crusher")
     for e in site.get("excavators", []):
         n, d = g.attach((e["lat"], e["lon"]))
         out["levels"][e["id"]] = {"elev_m": round(elev[n], 1) if n in elev else None, "dist_to_road_m": round(d)}
         if n not in elev:
-            out["warnings"].append(f"Koparka {e['id']}: brak dojazdu do kruszarki")
+            out["warnings"].append(f"Excavator {e['id']}: no road to the crusher")
         elif d > 150:
-            out["warnings"].append(f"Koparka {e['id']} stoi {d:.0f} m od najbliższej drogi")
+            out["warnings"].append(f"Excavator {e['id']} is {d:.0f} m from the nearest road")
     return out
 
 
@@ -632,9 +632,9 @@ def build_route(site: dict, start: tuple[float, float], route_id: str, end=None,
     normalize_roads(site)
     roads = site.get("roads", [])
     if not roads:
-        raise ValueError("Na mapie nie ma dróg")
+        raise ValueError("There are no roads on the map")
     if not site.get("crusher"):
-        raise ValueError("Na mapie nie ma kruszarki")
+        raise ValueError("There is no crusher on the map")
     c = site["crusher"]
     g = RoadGraph(roads, bays=site.get("passing_bays"))
     c_node, _ = g.attach((c["lat"], c["lon"]))
@@ -645,8 +645,8 @@ def build_route(site: dict, start: tuple[float, float], route_id: str, end=None,
     elev, _ = g.elevations(c_node, float(c.get("elev_m", 0.0)), root_fixed=crusher_fixed(c))
     r = path_between(g, start, target, elev, end_name=end_name)
     if r is None:
-        raise ValueError(f"{route_id}: brak połączenia drogowego – połącz drogi (koniec drogi ≤ {SNAP_M:.0f} m "
-                         "od innej drogi tworzy węzeł)")
+        raise ValueError(f"{route_id}: no road connection – join the roads (a road end within {SNAP_M:.0f} m "
+                         "of another road makes a junction)")
     return r
 
 
@@ -702,9 +702,9 @@ def site_to_scenario(site: dict, raw: dict) -> dict:
     piles = site.get("piles", []) or area_start_piles(site)  # no piles drawn: what lies in the areas
     excavators = site.get("excavators", [])
     if not piles:
-        raise ValueError("Na mapie nie ma obszarów wydobycia ani usypów")
+        raise ValueError("There are no mining areas or muck piles on the map")
     if not excavators:
-        raise ValueError("Na mapie nie ma koparek")
+        raise ValueError("There are no excavators on the map")
     new = dict(raw)
     new["blasts"] = []
     for p in piles:

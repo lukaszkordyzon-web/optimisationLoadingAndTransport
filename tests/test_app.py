@@ -259,7 +259,7 @@ def test_clicked_object_can_be_edited():
     assert not at.exception, at.exception
     at.number_input(key=f"of_pile:{pile['uid']}_tonnage_t").set_value(12345.0)
     at.text_input(key=f"of_pile:{pile['uid']}_id").set_value("U-99")
-    next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
+    next(b for b in at.button if "Apply changes" in b.label).click().run()
     assert not at.exception, at.exception
     edited = next(p for p in at.session_state["site"]["piles"] if p["uid"] == pile["uid"])
     assert edited["tonnage_t"] == 12345.0 and edited["id"] == "U-99"
@@ -270,7 +270,7 @@ def test_clicked_object_can_be_edited():
     at.session_state["info_sel"] = f"road:{road['uid']}"
     at.run()
     at.checkbox(key=f"of_road:{road['uid']}_single_lane").set_value(not one_lane)
-    next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
+    next(b for b in at.button if "Apply changes" in b.label).click().run()
     assert not at.exception, at.exception
     assert next(r for r in at.session_state["site"]["roads"] if r["uid"] == road["uid"])["single_lane"] != one_lane
 
@@ -289,7 +289,7 @@ def test_every_kind_of_object_opens_its_form():
         at.session_state["info_sel"] = sel
         at.run()
         assert not at.exception, (sel, at.exception)
-        assert any("Zastosuj zmiany" in b.label for b in at.button), sel
+        assert any("Apply changes" in b.label for b in at.button), sel
 
 
 def test_breakdowns_set_on_the_clicked_machine():
@@ -300,7 +300,7 @@ def test_breakdowns_set_on_the_clicked_machine():
     at.run()
     at.number_input(key=f"of_{sel}__fail_count").set_value(7.0)
     at.number_input(key=f"of_{sel}__fail_hours").set_value(21.0)
-    next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
+    next(b for b in at.button if "Apply changes" in b.label).click().run()
     assert not at.exception, at.exception
     assert at.session_state["raw"]["reliability"]["machines"][ex["id"]] == {"count": 7.0, "hours": 21.0}
 
@@ -400,7 +400,7 @@ def test_crusher_elevation_is_set_in_its_form():
     at.session_state["info_sel"] = "crusher:main"
     at.run()
     at.number_input(key="of_crusher:main_elev_m").set_value(512.0)
-    next(b for b in at.button if "Zastosuj zmiany" in b.label).click().run()
+    next(b for b in at.button if "Apply changes" in b.label).click().run()
     assert not at.exception, at.exception
     c = at.session_state["site"]["crusher"]
     assert c["elev_m"] == 512.0 and c["elev_set"]
@@ -412,7 +412,7 @@ def test_road_point_elevations_are_edited_and_saved():
     at.session_state["info_sel"] = f"road:{road['uid']}"
     at.run()
     assert not at.exception, at.exception
-    assert any("Punkty drogi" in m.value for m in at.markdown)
+    assert any("Road points" in m.value for m in at.markdown)
     ver = at.session_state["obj_ver"]
     at.session_state[f"rz_{road['uid']}_{ver}"] = {"edited_rows": {0: {"rzędna [m]": 520.0}}, "added_rows": [],
                                                    "deleted_rows": []}

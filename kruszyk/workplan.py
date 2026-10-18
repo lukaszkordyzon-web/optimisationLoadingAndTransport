@@ -317,7 +317,7 @@ def scenario_raw(raw: dict, work: dict, grid: dict[str, list[str]], cap_t: float
         a["start_t"] = ENDLESS_T if not work.get("drill", True) else float(work["start"].get(a["id"], 0.0))
     piles = area_start_piles(site, cap_t)
     if not piles:
-        raise ValueError("Na mapie nie ma obszarów wydobycia")
+        raise ValueError("There are no extraction areas on the map")
     site["piles"], site["planned_piles"] = piles, []
     poly = {p["id"]: p["polygon"] for p in piles}
     for e in site.get("excavators", []):

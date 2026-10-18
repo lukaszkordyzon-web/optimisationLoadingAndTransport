@@ -12,36 +12,37 @@ from kruszyk.psd import DEFAULT_PRESET, PRESETS
 
 from . import state, theme
 
-ADD = {  # what the planner adds -> (mode of the map module, drawing tool)
-    "Droga / rampa": ("Droga / rampa", "linia"),
-    "Mijanka": ("Mijanka", "znacznik na drodze"),
-    "Obszar wydobycia": ("Obszar wydobycia (strzały automatycznie)", "wielokąt"),
-    "Koparka": ("Koparka", "znacznik"),
-    "Kruszarka": ("Kruszarka", "znacznik"),
+ADD = {  # what the planner adds -> (mode of the map module (data, kept in Polish), drawing tool)
+    "Road / ramp": ("Droga / rampa", "line"),
+    "Passing bay": ("Mijanka", "marker on a road"),
+    "Mining area": ("Obszar wydobycia (strzały automatycznie)", "polygon"),
+    "Excavator": ("Koparka", "marker"),
+    "Crusher": ("Kruszarka", "marker"),
 }
-DIRS = {"⬇ w dół": -1, "⬆ pod górę": 1, "➡ płasko": 0}
+DIRS = {"⬇ downhill": -1, "⬆ uphill": 1, "➡ flat": 0}
+KIND_LABELS = {"droga": "road", "rampa": "ramp"}  # road kinds are data
 
 
 def _attrs(kind: str, site: dict) -> dict:
     """The few settings of the object being added (the rest: defaults, editable after a click on it)."""
     from app_map import MATERIALS
 
-    if kind == "Droga / rampa":
-        r = st.selectbox("Rodzaj", ["droga", "rampa"], key="k2_add_kind")
-        d = st.radio("Rysuję…", list(DIRS), index=0 if r == "rampa" else 2, horizontal=True, key="k2seg_dir")
-        g = 0.0 if DIRS[d] == 0 else st.number_input("Nachylenie [%]", 0.5, 25.0, 9.0 if r == "rampa" else 2.0, 0.5,
+    if kind == "Road / ramp":
+        r = st.selectbox("Kind", ["droga", "rampa"], key="k2_add_kind", format_func=KIND_LABELS.get)
+        d = st.radio("Drawing…", list(DIRS), index=0 if r == "rampa" else 2, horizontal=True, key="k2seg_dir")
+        g = 0.0 if DIRS[d] == 0 else st.number_input("Grade [%]", 0.5, 25.0, 9.0 if r == "rampa" else 2.0, 0.5,
                                                        key="k2_add_grade")
-        one = st.checkbox("Jeden pas (mijanki)", r == "rampa", key="k2_add_one")
-        return {"kind": r, "name": f"{r} {len(site['roads']) + 1}", "grade_draw_pct": DIRS[d] * g + 0.0,
+        one = st.checkbox("Single lane (passing bays)", r == "rampa", key="k2_add_one")
+        return {"kind": r, "name": f"{KIND_LABELS[r]} {len(site['roads']) + 1}", "grade_draw_pct": DIRS[d] * g + 0.0,
                 "speed_limit_kmh": 25.0 if r == "rampa" else 40.0, "single_lane": one}
-    if kind == "Obszar wydobycia":
-        size = st.number_input("Wielkość odstrzału [t]", 1000.0, 100_000.0, 12_000.0, 1000.0, key="k2_add_bt")
-        tpm = st.number_input("t/mb", 5.0, 200.0, 30.0, 1.0, key="k2_add_tpm")
-        mat = st.selectbox("Materiał", MATERIALS, key="k2_add_amat")
+    if kind == "Mining area":
+        size = st.number_input("Blast size [t]", 1000.0, 100_000.0, 12_000.0, 1000.0, key="k2_add_bt")
+        tpm = st.number_input("t/m", 5.0, 200.0, 30.0, 1.0, key="k2_add_tpm")
+        mat = st.selectbox("Material", MATERIALS, key="k2_add_amat")
         return {"material": mat, "blast_max_t": size, "t_per_m": tpm, "bench_m": 15.0, "solid_density_t_m3": 2.65,
                 "first_drilled": False, "reblast_below_t": 0.0, "min_gap_days": 1, "max_per_day": 1,
                 "psd": PRESETS[DEFAULT_PRESET], "loose_density_t_m3": 1.7}
-    if kind == "Koparka":
+    if kind == "Excavator":
         model = st.selectbox("Model", catalog.names("excavator"), key="k2_add_ex")
         return {"pile": "(najbliższy)", "bucket_m3": 5.0, "swing_cycle_s": 30.0, **catalog.params("excavator", model),
                 "model": model}
@@ -59,18 +60,18 @@ def map_screen() -> None:
     st.session_state.setdefault("map_key", 0)
     left, mid, right = st.columns([1.05, 3.4, 1.75])
     with left, theme.card("map_add"):
-        theme.h4("Dodaj")
-        kind = st.radio("Co dodajesz", list(ADD), key="k2_add", label_visibility="collapsed")
+        theme.h4("Add")
+        kind = st.radio("What you add", list(ADD), key="k2_add", label_visibility="collapsed")
         attrs = _attrs(kind, site)
-        theme.note(f"Na mapie: narzędzie <b>{ADD[kind][1]}</b>. Punkty przyczepiają się do dróg i obiektów.")
+        theme.note(f"On the map: the <b>{ADD[kind][1]}</b> tool. Points snap to roads and objects.")
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        theme.h4("Maszyny")
+        theme.h4("Machines")
         n_tr = sum(int(t.get("count", 1)) for t in raw.get("trucks", []))
-        st.markdown(f"<div class='k2-note'>Wozidła <b>{n_tr}</b> · koparki <b>{len(site.get('excavators', []))}</b> · "
-                    f"kruszarki <b>{1 + len(site.get('crushers', []))}</b></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='k2-note'>Trucks <b>{n_tr}</b> · excavators <b>{len(site.get('excavators', []))}</b> · "
+                    f"crushers <b>{1 + len(site.get('crushers', []))}</b></div>", unsafe_allow_html=True)
 
     with mid:
-        objects = folium.FeatureGroup(name="Obiekty")
+        objects = folium.FeatureGroup(name="Objects")
         sel = st.session_state.get("info_sel")
         if sel and find_obj(site, sel) is not None:
             from app_map import highlight
@@ -85,12 +86,12 @@ def map_screen() -> None:
         c = st.columns([3, 1.3])
         for w in info.get("warnings", [])[:3]:
             c[0].warning(w)
-        if c[1].button("💾 Zapisz kopalnię", type="primary", key="k2_map_save", width="stretch"):
+        if c[1].button("💾 Save mine", type="primary", key="k2_map_save", width="stretch"):
             try:
                 new = site_to_scenario(copy.deepcopy(site), copy.deepcopy(raw))
                 state.set_raw(new)
                 st.session_state.pop("approved", None)
-                st.session_state.k2_map_msg = "✅ Kopalnia zapisana – trasy przeliczone."
+                st.session_state.k2_map_msg = "✅ Mine saved – routes recalculated."
                 st.rerun()
             except ValueError as e:
                 c[0].error(str(e))
@@ -112,7 +113,7 @@ def map_screen() -> None:
         g = fresh[-1]["geometry"]
         arm = st.session_state.pop("k2_arm", None)
         msg = apply_edit_drawing(site, arm, g) if arm else add_drawing(site, g, ADD[kind][0], attrs)
-        st.session_state.k2_map_msg = msg + (" Zapisz kopalnię, żeby weszło do obliczeń." if msg.startswith("✅") else "")
+        st.session_state.k2_map_msg = msg + (" Save the mine to include it in the calculations." if msg.startswith("✅") else "")
         st.session_state.obj_ver = st.session_state.get("obj_ver", 0) + 1
         st.rerun()
 
@@ -123,18 +124,18 @@ def map_screen() -> None:
         sel = st.session_state.get("info_sel")
         o = find_obj(site, sel) if sel else None
         if o is None:
-            theme.h4("Zaznaczony obiekt")
-            theme.note("Kliknij drogę, usyp, koparkę albo kruszarkę na mapie.")
+            theme.h4("Selected object")
+            theme.note("Click a road, muck pile, excavator or crusher on the map.")
             return
         props = object_properties(site, sel, raw)
         theme.h4(props[0][1])
         c = st.columns(2)
-        if c[0].button("✏️ Przerysuj", key="k2_arm_btn", width="stretch",
-                       help="narysuj obiekt na nowo albo postaw znacznik w nowym miejscu – zastąpi stary"):
+        if c[0].button("✏️ Redraw", key="k2_arm_btn", width="stretch",
+                       help="draw the object again or place a marker in a new spot – it replaces the old one"):
             st.session_state.k2_arm = sel
-            st.session_state.k2_map_msg = "Narysuj obiekt na nowo na mapie."
+            st.session_state.k2_map_msg = "Draw the object again on the map."
             st.rerun()
-        if c[1].button("🗑️ Usuń", key="k2_del_btn", width="stretch"):
+        if c[1].button("🗑️ Delete", key="k2_del_btn", width="stretch"):
             st.session_state.k2_map_msg = delete_obj(site, sel)
             st.session_state.pop("info_sel", None)
             st.session_state.obj_ver = st.session_state.get("obj_ver", 0) + 1

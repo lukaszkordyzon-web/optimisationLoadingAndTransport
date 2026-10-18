@@ -221,29 +221,29 @@ def reliability_editor(raw: dict, sc, key: str) -> None:
 
 
 def _reliability_editor(raw: dict, sc, key: str) -> None:
-    st.markdown("#### 🔧 Awaryjność urządzeń")
-    st.caption("Dla każdego urządzenia: **ile awarii w miesiącu** i **ile godzin łącznie** trwały – średnio z ostatnich "
-               "3–6 miesięcy, z dziennika napraw. Tylko postoje dłuższe niż ok. 15 min, **bez przeglądów planowych** "
-               "(krótsze postoje są w kalibracji). Czas jednej naprawy jest losowany – zwykle krótki, czasem dłuższy "
-               "niż zmiana; wtedy awaria przechodzi na kolejne zmiany.")
+    st.markdown("#### 🔧 Machine breakdowns")
+    st.caption("For every machine: **breakdowns per month** and **total hours** they lasted – the average of the last "
+               "3–6 months from the repair log. Only stops longer than about 15 min, **no planned services** "
+               "(shorter stops are in the calibration). The length of one repair is random – usually short, sometimes "
+               "longer than a shift; then the breakdown carries over to the next shifts.")
     rel = sc.reliability
     stored = (raw.get("reliability") or {}).get("machines") or {}
     from kruszyk.config import truck_units
 
     # (key, kind, name, where its value comes from when it has none of its own)
-    rows = [(c.id, "crusher", f"Kruszarka {c.id}", c.id) for c in sc.crushers]
-    rows += [(e.id, "excavator", f"Koparka {e.id}", e.id) for e in sc.excavators]
-    rows += [(tid, "truck", f"Wozidło {tid} · {f.model}", tid if tid in stored else f"truck:{f.model}")
+    rows = [(c.id, "crusher", f"Crusher {c.id}", c.id) for c in sc.crushers]
+    rows += [(e.id, "excavator", f"Excavator {e.id}", e.id) for e in sc.excavators]
+    rows += [(tid, "truck", f"Truck {tid} · {f.model}", tid if tid in stored else f"truck:{f.model}")
              for tid, f in truck_units(sc.trucks)]
     rigs = [r for r in raw.get("drills") or [] if r.get("id")]
-    rows += [(r["id"], "drill", f"Wiertnica {r['id']}", r["id"] if r["id"] in stored else "drill") for r in rigs] \
-        or [("drill", "drill", "Wiertnica (każda)", "drill")]
+    rows += [(r["id"], "drill", f"Drill rig {r['id']}", r["id"] if r["id"] in stored else "drill") for r in rigs] \
+        or [("drill", "drill", "Drill rig (each)", "drill")]
     c = st.columns([1, 1, 2])
-    enabled = c[0].toggle("Uwzględniaj awarie", rel.enabled, key=f"{key}_on")
-    ref = c[1].number_input("Zmian na dobę w tym okresie", 1.0, 3.0, float(rel.ref_shifts_per_day), 1.0,
+    enabled = c[0].toggle("Include breakdowns", rel.enabled, key=f"{key}_on")
+    ref = c[1].number_input("Shifts per day in that period", 1.0, 3.0, float(rel.ref_shifts_per_day), 1.0,
                             key=f"{key}_ref", format="%.0f",
-                            help="przy ilu zmianach na dobę pracowały maszyny w miesiącach, z których są dane – "
-                                 "program przelicza awarie na godziny pracy, więc więcej zmian = więcej awarii")
+                            help="how many shifts per day the machines worked in the months the data come from – "
+                                 "breakdowns are converted to working hours, so more shifts = more breakdowns")
     sig = repr(sorted(stored.items())) + repr([r[0] for r in rows]) + str(st.session_state.get("ver", 0))
     ed_key = f"{key}_tab_{abs(hash(sig)) % 10**8}"
     if f"{ed_key}__base" not in st.session_state:
@@ -252,9 +252,9 @@ def _reliability_editor(raw: dict, sc, key: str) -> None:
             for k_, kind, name, src in rows])
     df = st.data_editor(st.session_state[f"{ed_key}__base"], key=ed_key, hide_index=True, width="stretch",
                         disabled=["klucz", "urzadzenie"], column_order=["urzadzenie", "awarii", "godzin"],
-                        column_config={"urzadzenie": "urządzenie",
-                                       "awarii": st.column_config.NumberColumn("awarii / miesiąc", min_value=0.0, step=1.0),
-                                       "godzin": st.column_config.NumberColumn("łącznie [h / miesiąc]", min_value=0.0,
+                        column_config={"urzadzenie": "machine",
+                                       "awarii": st.column_config.NumberColumn("breakdowns / month", min_value=0.0, step=1.0),
+                                       "godzin": st.column_config.NumberColumn("total [h / month]", min_value=0.0,
                                                                                step=1.0)})
     machines, assumed, lines = dict(stored), [], []  # machines not listed here (e.g. rigs) keep their data
     probe = Reliability(enabled=True, ref_shifts_per_day=ref, ref_days_per_month=rel.ref_days_per_month)
@@ -268,11 +268,11 @@ def _reliability_editor(raw: dict, sc, key: str) -> None:
         probe.machines[k_] = {"count": n, "hours": h}
         mtbf, mttr = probe.rates(k_, kind, sc.shift_hours)
         if mtbf < float("inf"):
-            lines.append(f"{name}: naprawa średnio **{mttr:.1f} h**, awaria co ok. **{mtbf / sc.shift_hours:.0f} zmian** "
-                         "pracy")
+            lines.append(f"{name}: repair on average **{mttr:.1f} h**, a breakdown about every **{mtbf / sc.shift_hours:.0f} "
+                         "working shifts**")
     raw["reliability"] = {"enabled": bool(enabled), "ref_shifts_per_day": float(ref),
                           "ref_days_per_month": float(rel.ref_days_per_month), "machines": machines}
-    with st.expander("Co to znaczy dla modelu"):
-        st.markdown("  \n".join(lines) or "brak awarii")
+    with st.expander("What this means for the model"):
+        st.markdown("  \n".join(lines) or "no breakdowns")
     if assumed:
-        st.caption("Założenia (wartości domyślne, do poprawienia): " + ", ".join(assumed) + ".")
+        st.caption("Assumptions (default values, to be corrected): " + ", ".join(assumed) + ".")

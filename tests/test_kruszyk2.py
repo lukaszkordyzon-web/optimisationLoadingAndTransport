@@ -16,24 +16,24 @@ def test_whole_flow_on_the_start_mine():
                                    "real_t": 0.0}
     at.run()
     assert not at.exception, at.exception
-    at.radio(key="k2_mine_tab").set_value("Maszyny").run()
+    at.radio(key="k2_mine_tab").set_value("Machines").run()
     assert not at.exception, at.exception
-    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.radio(key="k2_nav").set_value("② Schedule").run()
     assert not at.exception, at.exception
     work = at.session_state["work"]
     assert set(work["ex"]) == {"K-1", "K-2"} and all(len(c) == 6 for c in work["ex"].values())
     assert set(work["dr"]) == {"W-1", "W-2"}
     assert len(work["tr"]) == 6 and all(x in ("K-1", "K-2") for c in work["tr"].values() for x in c)
     at.button(key="k2_approve").click().run()
-    assert at.session_state["k2_nav"] == "③ Symulacja"
+    assert at.session_state["k2_nav"] == "③ Simulation"
     at.button(key="k2_month_go").click().run()
     assert not at.exception, at.exception
     m = at.session_state["month"]
     assert len(m["today"]) == len(m["signals"]) == 6
     assert list(m["today"]["koparki_na"]) == list(m["signals"]["koparki_na"])  # the same frozen schedule
-    at.radio(key="k2_nav").set_value("④ Wynik").run()
+    at.radio(key="k2_nav").set_value("④ Result").run()
     assert not at.exception, at.exception
-    assert any("Koszt tony" in x.label for x in at.metric)
+    assert any("Cost per tonne" in x.label for x in at.metric)
 
 
 def test_schedule_editing_sets_area_tonnes_and_trucks():
@@ -41,7 +41,7 @@ def test_schedule_editing_sets_area_tonnes_and_trucks():
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 3, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
-    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.radio(key="k2_nav").set_value("② Schedule").run()
     at.selectbox(key="k2_e_ex").set_value("K-2").run()
     at.selectbox(key="k2_e_from").set_value(2).run()
     at.selectbox(key="k2_e_area").set_value("O1").run()
@@ -50,7 +50,7 @@ def test_schedule_editing_sets_area_tonnes_and_trucks():
     assert not at.exception, at.exception
     assert at.session_state["work"]["ex"]["K-2"][2:] == [{"a": "O1", "t": 1200.0}] * 4
     at.multiselect(key="k2_t_ids").set_value(["WZ-01", "WZ-02"]).run()
-    at.selectbox(key="k2_t_ex").set_value("nie jeździ").run()
+    at.selectbox(key="k2_t_ex").set_value("idle").run()
     at.button(key="k2_t_set").click().run()
     assert not at.exception, at.exception
     assert at.session_state["work"]["tr"]["WZ-01"] == [""] * 6
@@ -67,13 +67,13 @@ def test_a_copy_of_the_schedule_is_compared_with_the_base():
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
-    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.radio(key="k2_nav").set_value("② Schedule").run()
     at.button(key="k2_var_copy").click().run()
     assert not at.exception, at.exception
     assert list(at.session_state["variants"]) == ["A", "B"] and at.session_state["k2seg_variant"] == "B"
     assert at.session_state["variants"]["B"] == at.session_state["variants"]["A"]
     at.multiselect(key="k2_t_ids").set_value(["WZ-01", "WZ-02"]).run()
-    at.selectbox(key="k2_t_ex").set_value("nie jeździ").run()
+    at.selectbox(key="k2_t_ex").set_value("idle").run()
     at.button(key="k2_t_set").click().run()  # B: two trucks fewer
     assert at.session_state["variants"]["B"]["tr"]["WZ-01"] == [""] * 4
     assert at.session_state["variants"]["A"]["tr"]["WZ-01"] != [""] * 4  # the base stays as it was
@@ -88,7 +88,7 @@ def test_full_output_variant():
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
-    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.radio(key="k2_nav").set_value("② Schedule").run()
     at.button(key="k2_var_copy").click().run()
     at.toggle(key="k2_open_B").set_value(True).run()
     assert at.session_state["variants"]["B"]["mode"] == "min"
@@ -106,7 +106,7 @@ def test_a_variant_with_other_machines():
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 2, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
-    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.radio(key="k2_nav").set_value("② Schedule").run()
     at.button(key="k2_var_copy").click().run()
     trucks = copy.deepcopy(at.session_state["raw"]["trucks"])[:4]  # B: two trucks fewer, the rest a bigger model
     for t in trucks:
@@ -124,7 +124,7 @@ def test_a_variant_with_other_machines():
 def test_machines_screen_has_models_for_every_machine():
     at = AppTest.from_file(APP, default_timeout=600)
     at.run()
-    at.radio(key="k2_mine_tab").set_value("Maszyny").run()
+    at.radio(key="k2_mine_tab").set_value("Machines").run()
     assert not at.exception, at.exception
     cols = [list(d.value.columns) for d in at.dataframe] if hasattr(at, "dataframe") else []
     assert at.session_state["raw"]["excavators"]
@@ -237,7 +237,7 @@ def test_simulation_period_charts_dynamic_assignment_and_cost_ticks():
     at.session_state["k2_plan"] = {"start": "2026-11-02", "days": 3, "shifts": 2, "sat": False, "hol": "", "fire": 1,
                                    "real_t": 0.0}
     at.run()
-    at.radio(key="k2_nav").set_value("② Harmonogram").run()
+    at.radio(key="k2_nav").set_value("② Schedule").run()
     at.button(key="k2_approve").click().run()
     assert not at.exception, at.exception
     at.toggle(key="k2_dyn").set_value(True)
@@ -248,11 +248,11 @@ def test_simulation_period_charts_dynamic_assignment_and_cost_ticks():
     assert m["dynamic"] and "kruszarka" not in m["parts"]
     at.selectbox(key="k2_shift_i").set_value(3).run()
     assert not at.exception, at.exception
-    for period in ("Doba", "Kilka dni", "Tydzień", "Miesiąc"):
+    for period in ("Day", "Several days", "Week", "Month"):
         at.session_state["k2_period"] = period
         at.run()
         assert not at.exception, (period, at.exception)
-    at.radio(key="k2_nav").set_value("④ Wynik").run()
+    at.radio(key="k2_nav").set_value("④ Result").run()
     assert not at.exception, at.exception
     page = " ".join(x.value for x in at.markdown)
-    assert "Koszt całkowity – wszystkie składniki" in page and "Kruszarka – stały" not in page
+    assert "Total cost – all items" in page and "Crusher – fixed" not in page

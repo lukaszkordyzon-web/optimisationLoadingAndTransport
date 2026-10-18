@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -51,18 +51,20 @@
 <body>
 <div class="wrap"><table id="grid"></table></div>
 <div class="legend">
-  <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>zlecenie wiertnicy / koparka: obszar i tys. t</span>
-  <span><i style="background:repeating-linear-gradient(135deg,#fff 0 4px,#E0B990 4px 6px);border:1px solid #E0B990"></i>co wiertnica wierci danego dnia i ile zostaje na kolejne dni</span>
-  <span><i style="background:#DCE8F7;border:1px solid #A9C1E2"></i>wozidło: do której koparki</span>
-  <span><i style="background:#1B2733"></i>strzał: wielkość i godzina – kliknij, żeby przesunąć</span>
-  <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>urobek odstrzelony leży</span>
-  <span><i style="background:#fff;border:2px solid #B3122A"></i>coś się nie zgadza – najedź, żeby zobaczyć</span>
+  <span><i style="background:#FBE3CC;border:1px solid #E0B990"></i>drill rig order / excavator: area and thousand t</span>
+  <span><i style="background:repeating-linear-gradient(135deg,#fff 0 4px,#E0B990 4px 6px);border:1px solid #E0B990"></i>what the drill rig drills that day and how much is left for the next days</span>
+  <span><i style="background:#DCE8F7;border:1px solid #A9C1E2"></i>truck: to which excavator</span>
+  <span><i style="background:#1B2733"></i>blast: size and time – click to move it</span>
+  <span><i style="background:#E3F1E6;border:1px solid #9CC7A6"></i>blasted muck lies ready</span>
+  <span><i style="background:#fff;border:2px solid #B3122A"></i>something does not add up – hover to see</span>
 </div>
-<div class="hint">Kliknij komórkę wiertnicy, koparki albo wozidła – albo przeciągnij po kilku dniach (wozidła: także po kilku wierszach) – wybierz z listy i kliknij „Zastosuj” (albo Enter). Każde zlecenie wiercenia to jeden strzał – po odwierceniu.</div>
+<div class="hint">Click a drill rig, excavator or truck cell – or drag across several days (trucks: also across several rows) – pick from the list and click “Apply” (or press Enter). Every drilling order is one blast – after it is drilled.</div>
 <div id="pop"></div>
 <script>
 const send = (type, extra) => window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*');
 let D = null, sel = null, anchor = null, dragging = false;
+// protocol values sent back to Python (must equal STAND / OFF / NO_ORDER in plan.py; Python may pass them in the data)
+const STAND = () => (D && D.v_stand) || 'postój', OFF = () => (D && D.v_off) || 'nie jeździ', NO_ORDER = () => (D && D.v_no_order) || 'bez zlecenia';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pop = document.getElementById('pop');
 const height = () => send('streamlit:setFrameHeight', { height: document.body.scrollHeight + (pop.style.display === 'block' ? 470 : 8) });
@@ -122,12 +124,12 @@ function emit(v) { send('streamlit:setComponentValue', { value: Object.assign(v,
 
 let choice = null;  // the area / excavator picked in the open list
 function scopeHtml() {
-  return '<div class="lbl">Zastosuj do</div>' +
-    '<label class="sc"><input type="radio" name="sc" value="sel" checked> zaznaczonych</label>' +
-    '<label class="sc"><input type="radio" name="sc" value="all"> wszystkich dni</label>' +
-    '<label class="sc"><input type="radio" name="sc" value="around"> zaznaczonych oraz kolejnych ' +
-    '<input id="fwd" class="sm" type="number" min="0" value="5"> dni i poprzednich <input id="back" class="sm" type="number" min="0" value="0"> dni</label>' +
-    '<div class="row"><button class="ok" id="apply">Zastosuj</button></div>';
+  return '<div class="lbl">Apply to</div>' +
+    '<label class="sc"><input type="radio" name="sc" value="sel" checked> the selected</label>' +
+    '<label class="sc"><input type="radio" name="sc" value="all"> all days</label>' +
+    '<label class="sc"><input type="radio" name="sc" value="around"> the selected and the next ' +
+    '<input id="fwd" class="sm" type="number" min="0" value="5"> days and the previous <input id="back" class="sm" type="number" min="0" value="0"> days</label>' +
+    '<div class="row"><button class="ok" id="apply">Apply</button></div>';
 }
 function scope() {
   const v = (pop.querySelector('input[name="sc"]:checked') || {}).value || 'sel';
@@ -141,16 +143,16 @@ function pick(btn, attr) {
 function showPop(td) {
   if (!sel || !td) return;
   const [s0, s1] = shifts();
-  const unit = D.day ? 'na dzień' : 'na zmianę';
-  let h = '<button class="x" aria-label="Zamknij" onclick="hidePop()">×</button>';
+  const unit = D.day ? 'per day' : 'per shift';
+  let h = '<button class="x" aria-label="Close" onclick="hidePop()">×</button>';
   let apply;
   if (sel.kind === 'fire') {
     const row = rowsSel()[0], c = row.cells[sel.a], b = D.blasts[c.p] || {};
-    h += `<div class="t">Strzał ${esc(c.p)}</div><div class="s">${esc(Math.round(b.t))} t · ${esc(b.m)} mb · odwiercone ${esc(b.done)} · urobek od ${esc(b.avail)}${b.delay ? ' · przesunięty o ' + b.delay + ' zm.' : ''}</div>`;
-    h += '<button class="o" data-d="1"><b>o zmianę później</b><span>+1 zmiana</span></button>';
-    if (D.spd > 1) h += `<button class="o" data-d="${D.spd}"><b>o dzień później</b><span>+${D.spd} zmiany</span></button>`;
-    if (b.delay) h += '<button class="o" data-d="-1"><b>o zmianę wcześniej</b><span>−1 zmiana</span></button>';
-    if (b.delay) h += '<button class="o stand" data-d="reset"><b>jak program</b><span>zaraz po odwierceniu</span></button>';
+    h += `<div class="t">Blast ${esc(c.p)}</div><div class="s">${esc(Math.round(b.t))} t · ${esc(b.m)} m · drilled ${esc(b.done)} · muck from ${esc(b.avail)}${b.delay ? ' · moved by ' + b.delay + ' shift(s)' : ''}</div>`;
+    h += '<button class="o" data-d="1"><b>one shift later</b><span>+1 shift</span></button>';
+    if (D.spd > 1) h += `<button class="o" data-d="${D.spd}"><b>one day later</b><span>+${D.spd} shifts</span></button>`;
+    if (b.delay) h += '<button class="o" data-d="-1"><b>one shift earlier</b><span>−1 shift</span></button>';
+    if (b.delay) h += '<button class="o stand" data-d="reset"><b>as the program sets</b><span>right after drilling</span></button>';
     pop.innerHTML = h;
     pop.style.display = 'block';
     const r = td.getBoundingClientRect();
@@ -167,19 +169,19 @@ function showPop(td) {
     const cur = row.cells[Math.min(sel.a, sel.b)].v || { a: '', t: 0 };
     const perUnit = D.day ? D.spd : 1;
     const areas = D.areas.filter(a => ex.allowed.includes(a.id));
-    choice = cur.a || (areas[0] || {}).id || 'postój';
+    choice = cur.a || (areas[0] || {}).id || STAND();
     const rate = isRig ? ((ex.rates || {})[choice] || 0) : ex.rate;
     const t0 = cur.t ? cur.t * perUnit : Math.round((rate || 1000) * (isRig ? 1 : 0.9) / 100) * 100 * perUnit;
     h += `<div class="t">${esc(row.id || row.name)}</div><div class="s">${esc(range())}</div>`;
-    h += `<div class="lbl">${isRig ? 'Zlecenie: ile ton odwiercić' + (D.day ? ' (od tego dnia)' : '') : 'Ile ton ' + unit}</div><div class="row"><input id="tin" type="number" min="0" step="100" value="${Math.round(isRig ? (cur.t || rate * perUnit) : t0)}">`;
-    h += `<span>t</span>${!isRig && ex.rate ? `<span style="color:#4A5562">(ładuje ok. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
-    h += `<div class="lbl">${isRig ? 'Gdzie wierci' : 'Skąd ładuje'}</div>`;
+    h += `<div class="lbl">${isRig ? 'Order: how many tonnes to drill' + (D.day ? ' (from this day)' : '') : 'Tonnes ' + unit}</div><div class="row"><input id="tin" type="number" min="0" step="100" value="${Math.round(isRig ? (cur.t || rate * perUnit) : t0)}">`;
+    h += `<span>t</span>${!isRig && ex.rate ? `<span style="color:#4A5562">(loads approx. ${Math.round(ex.rate * perUnit)} t ${unit})</span>` : ''}</div>`;
+    h += `<div class="lbl">${isRig ? 'Where it drills' : 'Where it loads from'}</div>`;
     areas.forEach(a => {
-      const info = isRig ? `wierci ok. ${String(Math.round(((ex.rates || {})[a.id] || 0) * D.spd / 100) / 10).replace('.', ',')} tys. t na dzień` : a.info;
+      const info = isRig ? `drills approx. ${(Math.round(((ex.rates || {})[a.id] || 0) * D.spd / 100) / 10).toLocaleString('en-GB')} thousand t per day` : a.info;
       h += `<button class="o ${a.id === choice ? 'cur' : ''}" data-a="${esc(a.id)}" style="background:${a.bg}"><b>${esc(a.id)}</b><span>${esc(info)}</span></button>`;
     });
-    h += `<button class="o stand ${choice === 'postój' ? 'cur' : ''}" data-a="postój"><b>postój</b><span>${isRig ? 'wiertnica stoi (serwis, brak operatora)' : 'koparka nie pracuje'}</span></button>`;
-    if (isRig) h += `<button class="o stand" data-a="bez zlecenia"><b>bez zlecenia</b><span>wierci dalej to, co ma, albo czeka</span></button>`;
+    h += `<button class="o stand ${choice === STAND() ? 'cur' : ''}" data-a="${esc(STAND())}"><b>idle</b><span>${isRig ? 'drill rig stands (service, no operator)' : 'excavator does not work'}</span></button>`;
+    if (isRig) h += `<button class="o stand" data-a="${esc(NO_ORDER())}"><b>no order</b><span>keeps drilling what it has, or waits</span></button>`;
     apply = () => {
       const v = Math.max(0, +document.getElementById('tin').value || 0);
       emit(Object.assign({ kind: sel.kind, ex: row.id || row.name, a: s0, b: s1, area: choice, t: D.day && !isRig ? v / D.spd : v }, scope()));
@@ -187,10 +189,10 @@ function showPop(td) {
   } else {
     const rows = rowsSel();
     const cur = (rows[0].cells[Math.min(sel.a, sel.b)].text || '').split('/')[0];
-    choice = D.exs.some(x => x.id === cur) ? cur : 'nie jeździ';
-    h += `<div class="t">${esc(rows.map(r => r.name).join(', '))}</div><div class="s">${esc(range())} · jeździ do:</div>`;
-    D.exs.forEach(x => { h += `<button class="o ${x.id === choice ? 'cur' : ''}" data-x="${esc(x.id)}" style="background:${x.bg}"><b>${esc(x.id)}</b><span>wozi z tej koparki</span></button>`; });
-    h += `<button class="o stand ${choice === 'nie jeździ' ? 'cur' : ''}" data-x="nie jeździ"><b>nie jeździ</b><span>postój, serwis, brak kierowcy</span></button>`;
+    choice = D.exs.some(x => x.id === cur) ? cur : OFF();
+    h += `<div class="t">${esc(rows.map(r => r.name).join(', '))}</div><div class="s">${esc(range())} · drives to:</div>`;
+    D.exs.forEach(x => { h += `<button class="o ${x.id === choice ? 'cur' : ''}" data-x="${esc(x.id)}" style="background:${x.bg}"><b>${esc(x.id)}</b><span>hauls from this excavator</span></button>`; });
+    h += `<button class="o stand ${choice === OFF() ? 'cur' : ''}" data-x="${esc(OFF())}"><b>not driving</b><span>idle, service, no driver</span></button>`;
     const ids = rows.map(r => r.name);
     apply = () => emit(Object.assign({ kind: 'tr', ids, a: s0, b: s1, ex: choice }, scope()));
   }

@@ -203,7 +203,7 @@ def test_ramp_inlet_sets_heights_and_flat_roads_become_levels():
     assert names[u03["level"]] == bottom  # the pile next to the bottom road is on the bottom level
     assert not analyze_site(site)["warnings"]  # the crusher follows the ramp inlet
     site["crusher"].update(elev_m=0.0, elev_set=True)  # typed in by hand: 0 m does not fit an inlet at 100 m
-    assert any("nie zgadza" in w or "różnych wysokościach" in w for w in analyze_site(site)["warnings"])
+    assert any("do not agree" in w or "different heights" in w for w in analyze_site(site)["warnings"])
 
 
 def test_bends_slow_the_trucks_down():

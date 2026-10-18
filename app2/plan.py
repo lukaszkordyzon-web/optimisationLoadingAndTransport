@@ -25,16 +25,20 @@ from .theme import card
 
 grid_component = components.declare_component("k2_grid", path=str(Path(__file__).parent / "grid_component"))
 
-WD = ["pn", "wt", "śr", "cz", "pt", "so", "nd"]
+WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 ROMAN = {1: "I", 2: "II", 3: "III"}
-FIRE = {"1 zmiana – urobek od następnej zmiany": 1, "między zmianami – urobek od razu": 0, "2 zmiany": 2}
+FIRE = {"1 shift – blasted rock from the next shift": 1, "between shifts – blasted rock at once": 0, "2 shifts": 2}
 AREA_COLORS = [("#FBE3CC", "#8A4B12"), ("#E7DDF5", "#5A3A8C"), ("#D6EFEA", "#11655A"), ("#F6D9E4", "#8A2650"),
                ("#FFF0B8", "#6E5600"), ("#DDF0D5", "#2F5E1E")]
 EX_COLORS = [("#DCE8F7", "#1D4E89"), ("#FCE1D8", "#8A2E12"), ("#E4E9F2", "#2B3F66"), ("#E3F1E6", "#1E5A2C"),
              ("#F3E8D2", "#6B4A12")]
-STAND = "postój"
-OFF = "nie jeździ"
-NO_ORDER = "bez zlecenia"
+STAND = "standby"
+OFF = "idle"
+NO_ORDER = "no order"
+# the same choices as older versions of the grid component send them
+STAND_ALL = {STAND, "postój"}
+OFF_ALL = {OFF, "nie jeździ"}
+NO_ORDER_ALL = {NO_ORDER, "bez zlecenia"}
 
 
 # ------------------------------------------------------------------ period
@@ -139,7 +143,7 @@ def _work(sc, raw: dict, n: int, cap: float, rigs: list, fire: int) -> tuple[dic
 
 # ------------------------------------------------------------------ variants of the schedule
 def _variant_name(name: str, first: str) -> str:
-    return f"{name} (bazowy)" if name == first else name
+    return f"{name} (base)" if name == first else name
 
 
 def _copy_variant() -> None:
@@ -162,20 +166,20 @@ def _variant_machines(raw: dict, w: dict, act: str) -> None:
     """Other trucks / excavator models in this variant only (the mine in ① Kopalnia stays as it is)."""
     vr = variant_raw(raw, w)
     ver = st.session_state.get("k2_vm_ver", 0)
-    theme.note("Zmieniasz tylko ten wariant: model, liczbę wozideł (dodaj / usuń wiersz) i parametry koparek. Nowe wozidło "
-               "stoi, dopóki w harmonogramie nie przydzielisz go do koparki.")
+    theme.note("You change this variant only: the model, the number of trucks (add / delete a row) and the excavator "
+               "parameters. A new truck stands until you assign it to an excavator in the schedule.")
     trucks = truck_editor(vr.get("trucks", []), f"k2_vm_tr_{act}_{ver}")
     area_ids = [x["id"] for x in (raw.get("site") or {}).get("areas", []) if x.get("id")]
     exs = excavator_editor(vr.get("excavators", []), f"k2_vm_ex_{act}_{ver}", area_ids, map_models(vr))
     c = st.columns(2)
     picked = model_changed(trucks) | model_changed(exs)  # a model picked: its parameters go in at once
-    if picked or c[0].button("Zastosuj w wariancie", type="primary", key=f"k2_vm_set_{act}", width="stretch"):
+    if picked or c[0].button("Apply in variant", type="primary", key=f"k2_vm_set_{act}", width="stretch"):
         w["machines"] = {"trucks": trucks, "excavators": [{k: e[k] for k in ("id", "bucket_m3", "swing_cycle_s",
                                                                          "fill_factor", "spot_time_s", "model")
                                                           if k in e} for e in exs]}
         st.session_state.k2_vm_ver = ver + 1
         st.rerun()
-    if c[1].button("Maszyny jak w kopalni", key=f"k2_vm_reset_{act}", width="stretch", disabled=not w.get("machines")):
+    if c[1].button("Machines as in the mine", key=f"k2_vm_reset_{act}", width="stretch", disabled=not w.get("machines")):
         w.pop("machines", None)
         st.session_state.k2_vm_ver = ver + 1
         st.rerun()
@@ -186,21 +190,21 @@ def _diff(a: dict, b: dict, lab: list) -> list[str]:
     out = []
     for ar in sorted(set(a["start"]) | set(b["start"])):
         if float(a["start"].get(ar, 0)) != float(b["start"].get(ar, 0)):
-            out.append(f"{ar}: na start {_num(b['start'].get(ar, 0))} t zamiast {_num(a['start'].get(ar, 0))} t")
+            out.append(f"{ar}: {_num(b['start'].get(ar, 0))} t at start instead of {_num(a['start'].get(ar, 0))} t")
     for part in ("dr", "ex", "tr"):
         for k in sorted(set(a.get(part) or {}) | set(b.get(part) or {})):
             ca, cb = (a.get(part) or {}).get(k) or [], (b.get(part) or {}).get(k) or []
             diff = [i for i in range(min(len(ca), len(cb))) if ca[i] != cb[i]]
             if diff:
-                out.append(f"{k}: inaczej na {len(diff)} zm. (od {lab[diff[0]]})")
+                out.append(f"{k}: different on {len(diff)} shifts (from {lab[diff[0]]})")
     if a.get("fire") != b.get("fire"):
-        out.append("inne przesunięcia strzałów")
+        out.append("other blast shifts")
     if a.get("roads") != b.get("roads"):
-        out.append("inne drogi: " + ", ".join(sorted((b.get("roads") or {}))) if b.get("roads") else "drogi jak na mapie")
+        out.append("other roads: " + ", ".join(sorted((b.get("roads") or {}))) if b.get("roads") else "roads as on the map")
     if a.get("machines") != b.get("machines"):
         mb = (b.get("machines") or {}).get("trucks")
-        out.append("inne maszyny" + (f" ({len(mb)} wozideł)" if mb is not None else ""))
-    return out or ["bez zmian"]
+        out.append("other machines" + (f" ({len(mb)} trucks)" if mb is not None else ""))
+    return out or ["no changes"]
 
 
 def _month_today(raw: dict, sc, work: dict, p: dict, rigs: list, cap: float) -> dict:
@@ -228,13 +232,13 @@ def _month_today(raw: dict, sc, work: dict, p: dict, rigs: list, cap: float) -> 
 def _limits(r: dict) -> str:
     """What stops a variant loading more (with the plan's tonnes as a minimum)."""
     if r["no_material"] >= 0.15 * r["shifts"]:
-        return (f"urobek – koparkom kończył się odstrzelony urobek na {r['no_material']} zmianach; wiercenie nie "
-                "nadąża za większym wydobyciem")
+        return (f"blasted rock – the excavators ran out of blasted rock on {r['no_material']} shifts; drilling does not "
+                "keep up with the higher output")
     if r["crusher_use"] >= 0.85:
-        return f"kruszarka – wykorzystana w {100 * r['crusher_use']:.0f} %"
+        return f"crusher – {100 * r['crusher_use']:.0f} % utilised"
     if r["ex_h"] and r["ex_wait_h"] >= 0.25 * r["ex_h"]:
-        return f"wozidła – koparki czekały na wozidła {r['ex_wait_h']:,.0f} h".replace(",", " ")
-    return "koparki – pracują na pełnych możliwościach"
+        return f"trucks – the excavators waited {r['ex_wait_h']:,.0f} h for trucks".replace(",", " ")
+    return "excavators – working at full capacity"
 
 
 def _variants_card(raw, p, rigs, cap, lab) -> None:
@@ -245,52 +249,52 @@ def _variants_card(raw, p, rigs, cap, lab) -> None:
     first = names[0]
     with card("variants"):
         c = st.columns([0.9, 3.2, 1.0, 1.0, 1.8], vertical_alignment="center")
-        c[0].markdown('<div class="k2-h4" style="margin:0">Warianty</div>', unsafe_allow_html=True)
+        c[0].markdown('<div class="k2-h4" style="margin:0">Variants</div>', unsafe_allow_html=True)
         with c[1]:
-            st.radio("Wariant", names, horizontal=True, key="k2seg_variant", label_visibility="collapsed",
+            st.radio("Variant", names, horizontal=True, key="k2seg_variant", label_visibility="collapsed",
                      format_func=lambda x: _variant_name(x, first))
-        c[2].button("⧉ Kopia", key="k2_var_copy", on_click=_copy_variant, width="stretch",
-                    help="Nowy wariant – dokładna kopia tego, który widzisz; zmieniasz w nim, co chcesz.")
-        c[3].button("Usuń", key="k2_var_drop", on_click=_drop_variant, width="stretch", disabled=len(names) < 2)
-        go_ = c[4].button("Porównaj warianty", type="primary", key="k2_var_cmp", width="stretch",
+        c[2].button("⧉ Copy", key="k2_var_copy", on_click=_copy_variant, width="stretch",
+                    help="A new variant – an exact copy of the one you see; change in it whatever you want.")
+        c[3].button("Delete", key="k2_var_drop", on_click=_drop_variant, width="stretch", disabled=len(names) < 2)
+        go_ = c[4].button("Compare variants", type="primary", key="k2_var_cmp", width="stretch",
                           disabled=len(names) < 2,
-                          help="Każdy wariant liczony jak dziś – ten sam miesiąc, pogoda i awarie; różni się tylko plan.")
+                          help="Every variant run as Baseline – the same month, weather and breakdowns; only the plan differs.")
         act = st.session_state.get("k2seg_variant") or first
         w = vs[act]
         t1, t2 = st.columns(2)
-        drill = t1.toggle(f"Planuj wiercenie w wariancie {act}", value=w.get("drill", True), key=f"k2_drill_{act}",
-                          help="Wyłączone: urobek jest dostępny cały czas – bez wiertnic, strzałów i braków urobku. "
-                               "Liczy się tylko układ koparka – wozidło – kruszarka (np. do sprawdzenia, ile da on "
-                               "przy pełnej wydajności).")
+        drill = t1.toggle(f"Plan drilling in variant {act}", value=w.get("drill", True), key=f"k2_drill_{act}",
+                          help="Off: blasted rock is available all the time – no drill rigs, blasts or rock shortages. "
+                               "Only the excavator – truck – crusher system counts (e.g. to check what it gives "
+                               "at full capacity).")
         if drill != w.get("drill", True):
             w["drill"] = drill
             st.rerun()
-        open_ = t2.toggle(f"Pełna wydajność w wariancie {act} – koparki nie stają po zrobieniu planu",
+        open_ = t2.toggle(f"Full capacity in variant {act} – excavators do not stop once the plan is done",
                           value=w.get("mode") == "min", key=f"k2_open_{act}",
-                          help="Wyłączone: koparka robi tony z harmonogramu i staje. Włączone: po zrobieniu planu ładuje "
-                               "dalej, dopóki ma odstrzelony urobek, wozidła i czas – porównanie pokaże, ile da kopalnia, "
-                               "co ją ogranicza i ile kosztuje dodatkowa tona.")
+                          help="Off: an excavator loads the tonnes in the schedule and stops. On: once the plan is done it keeps "
+                               "loading as long as it has blasted rock, trucks and time – the comparison shows what the mine "
+                               "can give, what limits it and what an extra tonne costs.")
         if open_ != (w.get("mode") == "min"):
             w["mode"] = "min" if open_ else "limit"
             st.rerun()
-        with st.expander(f"Maszyny w wariancie {act}" + (" · zmienione" if w.get("machines") else " · jak w kopalni")):
+        with st.expander(f"Machines in variant {act}" + (" · changed" if w.get("machines") else " · as in the mine")):
             _variant_machines(raw, w, act)
-        with st.expander(f"Drogi w wariancie {act}" + (" · zmienione" if w.get("roads") else " · jak na mapie")):
-            theme.note("Przepustowość pochylni: jeden pas = wozidła czekają na mijankach (pod górę ma pierwszeństwo), "
-                       "dwa pasy = mijają się wszędzie. „w użyciu” wyłączone = sprawdzasz objazd. Zmienia tylko ten wariant.")
+        with st.expander(f"Roads in variant {act}" + (" · changed" if w.get("roads") else " · as on the map")):
+            theme.note("Ramp capacity: single lane = trucks wait at passing bays (uphill has priority), "
+                       "two lanes = they pass anywhere. “in use” off = you test a detour. Changes this variant only.")
             roads = road_editor(raw, w.get("roads") or {}, f"k2_vroads_{act}_{st.session_state.get('k2_vm_ver', 0)}")
             if roads != (w.get("roads") or {}):
                 w["roads"] = roads
                 st.rerun()
-        theme.note("Harmonogram poniżej to wybrany wariant. „Kopia” tworzy nowy z tym samym planem – zmieniasz w nim "
-                   "wiercenie, koparki albo wozidła i porównujesz. Potem wybrany wariant zatwierdzasz do porównania z RL.")
+        theme.note("The schedule below is the selected variant. “Copy” creates a new one with the same plan – change the "
+                   "drilling, excavators or trucks in it and compare. Then approve the chosen variant for the comparison with RL.")
         cache = st.session_state.setdefault("k2_cmp", {})
         sig = {k: hashlib.md5(repr((state.raw_yaml(), w, p)).encode()).hexdigest() for k, w in vs.items()}
         if go_:
-            bar = st.progress(0.0, "Liczę warianty…")
+            bar = st.progress(0.0, "Running variants…")
             for j, (k, w) in enumerate(vs.items()):
                 if cache.get(k, {}).get("sig") != sig[k]:
-                    bar.progress(j / len(vs), f"Wariant {k}: miesiąc jak dziś…")
+                    bar.progress(j / len(vs), f"Variant {k}: Baseline month…")
                     vr = variant_raw(raw, w)
                     cache[k] = {"sig": sig[k], **_month_today(vr, scenario_from_dict(copy.deepcopy(vr)), w, p, rigs, cap)}
             bar.empty()
@@ -300,15 +304,15 @@ def _variants_card(raw, p, rigs, cap, lab) -> None:
             rows = []
             for k in done:
                 r = cache[k]
-                label = _variant_name(k, first) + (" · pełna wydajność" if r.get("mode") == "min" else "")
+                label = _variant_name(k, first) + (" · full capacity" if r.get("mode") == "min" else "")
                 dz, dc = r["zl_t"] - base["zl_t"], r["cost"] - base["cost"]
                 rows.append([label, _num(r["plan_t"]), _num(r["t"]), f"{r['zl_t']:.2f}",
                              "–" if k == first else f"{dz:+.2f}", _num(r["cost"]),
                              "–" if k == first else f"{dc:+,.0f}".replace(",", " "), _num(r["fuel"]), _num(r["queue"]),
                              str(r["issues"])])
-            st.markdown(theme.table([("Wariant", ""), ("Plan [t]", "n"), ("Wywiezione [t]", "n"), ("zł/t", "n"),
-                                     ("zł/t vs A", "n"), ("Koszt [zł]", "n"), ("Koszt vs A [zł]", "n"),
-                                     ("Paliwo [l]", "n"), ("Kolejki [h]", "n"), ("Do poprawy", "n")], rows,
+            st.markdown(theme.table([("Variant", ""), ("Plan [t]", "n"), ("Hauled [t]", "n"), ("PLN/t", "n"),
+                                     ("PLN/t vs A", "n"), ("Cost [PLN]", "n"), ("Cost vs A [PLN]", "n"),
+                                     ("Fuel [l]", "n"), ("Queues [h]", "n"), ("To fix", "n")], rows,
                                     numeric=set(range(1, 10)), sans={0}), unsafe_allow_html=True)
             for k in done:
                 r = cache[k]
@@ -317,14 +321,14 @@ def _variants_card(raw, p, rigs, cap, lab) -> None:
                     lines.append(" · ".join(_diff(vs[first], vs[k], lab)))
                 if r.get("mode") == "min":
                     over = r["t"] - r["plan_t"]
-                    lines.append(f"ponad plan <b>{over:+,.0f} t</b>".replace(",", " ") + f" · ogranicza: {_limits(r)}")
+                    lines.append(f"above plan <b>{over:+,.0f} t</b>".replace(",", " ") + f" · limited by: {_limits(r)}")
                 if k != first and r["t"] - base["t"] > 100:
                     extra = (r["cost"] - base["cost"]) / (r["t"] - base["t"])
-                    lines.append(f"dodatkowa tona kosztuje <b>{extra:.2f} zł</b> (średnio {r['zl_t']:.2f} zł/t)")
+                    lines.append(f"an extra tonne costs <b>{extra:.2f} PLN</b> (average {r['zl_t']:.2f} PLN/t)")
                 if lines:
                     theme.note(f"<b>{k}:</b> " + " · ".join(lines))
         elif cache and not go_:
-            theme.note("Zmieniłeś coś od ostatniego porównania – kliknij „Porównaj warianty”, żeby policzyć od nowa.")
+            theme.note("You have changed something since the last comparison – click “Compare variants” to run it again.")
 
 
 # ------------------------------------------------------------------ screen
@@ -339,31 +343,31 @@ def step_plan() -> None:
     p = plan_settings()
     head = st.columns([4, 1.6], vertical_alignment="bottom")
     with head[0]:
-        theme.header("Harmonogram miesiąca", "Ustawiasz pracę: wiertnica i koparka – obszar i tony, wozidło – do której koparki. "
-                                             "Wiercenie dni, strzały i usypy program liczy sam.")
+        theme.header("Monthly schedule", "You set the work: drill rig and excavator – area and tonnes, truck – to which excavator. "
+                                             "The program works out the drilling days, blasts and muck piles itself.")
     if not sc.excavators or not sc.areas:
-        st.info("Najpierw narysuj kopalnię w kroku **① Kopalnia**: drogi, kruszarkę, koparki i obszary wydobycia.")
+        st.info("First draw the mine in step **① Mine**: roads, crusher, excavators and extraction areas.")
         return
     cap = sc.blasting.max_blast_t()
 
     # ---------------------------------------------------------------- period
     with card("period"):
         c = st.columns([0.7, 1.3, 0.7, 0.9, 1.0, 1.1, 1.1, 1.4], vertical_alignment="bottom")
-        c[0].markdown('<div class="k2-h4" style="padding-bottom:10px">Okres</div>', unsafe_allow_html=True)
+        c[0].markdown('<div class="k2-h4" style="padding-bottom:10px">Period</div>', unsafe_allow_html=True)
         p["start"] = c[1].date_input("Start", dt.date.fromisoformat(p["start"]), format="DD.MM.YYYY", key="k2_start").isoformat()
-        p["days"] = c[2].number_input("Liczba dni", 1, 92, int(p["days"]), key="k2_days")
-        p["shifts"] = c[3].selectbox("Zmian na dobę", [1, 2, 3], index=int(p["shifts"]) - 1, key="k2_shifts")
-        p["sat"] = c[4].checkbox("Soboty robocze", bool(p["sat"]), key="k2_sat")
-        p["hol"] = c[5].text_input("Dni wolne", p["hol"], key="k2_hol", placeholder="11.11, 24.12")
-        p["real_t"] = c[6].number_input("Realnie na zmianę [t]", 0.0, 50_000.0, float(p["real_t"]), 100.0, format="%.0f",
-                                        key="k2_real", help="Ile ton robicie realnie na zmianę – program sprawdzi, czy "
-                                                            "model daje tyle samo.")
+        p["days"] = c[2].number_input("Days", 1, 92, int(p["days"]), key="k2_days")
+        p["shifts"] = c[3].selectbox("Shifts per day", [1, 2, 3], index=int(p["shifts"]) - 1, key="k2_shifts")
+        p["sat"] = c[4].checkbox("Working Saturdays", bool(p["sat"]), key="k2_sat")
+        p["hol"] = c[5].text_input("Days off", p["hol"], key="k2_hol", placeholder="11.11, 24.12")
+        p["real_t"] = c[6].number_input("Real per shift [t]", 0.0, 50_000.0, float(p["real_t"]), 100.0, format="%.0f",
+                                        key="k2_real", help="How many tonnes you really produce per shift – the program checks whether "
+                                                            "the model gives the same.")
         real_slot = c[7].empty()
         g = st.columns([0.7, 1.3, 5.6], vertical_alignment="bottom")
-        g[0].markdown('<div class="k2-h4" style="padding-bottom:10px">Cel</div>', unsafe_allow_html=True)
-        p["target_t"] = g[1].number_input("Cel na miesiąc [t]", 0.0, 10_000_000.0, float(p["target_t"]), 5000.0,
+        g[0].markdown('<div class="k2-h4" style="padding-bottom:10px">Target</div>', unsafe_allow_html=True)
+        p["target_t"] = g[1].number_input("Monthly target [t]", 0.0, 10_000_000.0, float(p["target_t"]), 5000.0,
                                           format="%.0f", key="k2_target",
-                                          help="Ile ton nadawy ma przejść w okresie (0 = bez celu).")
+                                          help="How many tonnes of crusher feed should go through in the period (0 = no target).")
         target_slot = g[2].empty()
     msg = st.session_state.pop("k2_fit_msg", None)
     if msg:
@@ -373,7 +377,7 @@ def step_plan() -> None:
     n = len(shifts)
     lab = labels(plan)
     if n == 0:
-        st.warning("W tym okresie nie ma zmian roboczych.")
+        st.warning("There are no working shifts in this period.")
         return
     rigs = [r for r in (raw.get("drills") or []) if r.get("in_work", True)]
     work, rates = _work(sc, raw, n, cap, rigs, int(p["fire"]))
@@ -382,31 +386,31 @@ def step_plan() -> None:
         if p["real_t"] and model_t:
             diff = 100 * (model_t / p["real_t"] - 1)
             if abs(diff) <= 5:
-                st.markdown(theme.chip("model zgodny"), unsafe_allow_html=True)
+                st.markdown(theme.chip("model matches"), unsafe_allow_html=True)
             else:
                 st.markdown(theme.chip(f"model {model_t:,.0f} t ({diff:+.0f} %)".replace(",", " "), ok=False),
                             unsafe_allow_html=True)
-                if st.button("Dopasuj model", key="k2_fit"):
+                if st.button("Fit model", key="k2_fit"):
                     _fit_model(base, sc, p["real_t"])
         elif model_t:
-            theme.note(f"model: ok. {model_t:,.0f} t/zmianę".replace(",", " "))
+            theme.note(f"model: approx. {model_t:,.0f} t/shift".replace(",", " "))
 
     # ---------------------------------------------------------------- areas, drilling
     c1, c2 = st.columns([3, 1.25])
     with c1, card("areas"):
-        theme.h4("Obszary", "ile urobku leży na start, wielkość odstrzału, zasoby")
+        theme.h4("Areas", "blasted rock lying at start, blast size, reserves")
         _areas_editor(base, sc, rigs, int(p["fire"]), work)
     with c2, card("drill"):
-        theme.h4("Wiercenie i strzelanie")
-        theme.note((" · ".join(f"{r['id']}: <b>{float(r.get('m_per_shift') or 250):.0f} mb/zm.</b>, "
+        theme.h4("Drilling and blasting")
+        theme.note((" · ".join(f"{r['id']}: <b>{float(r.get('m_per_shift') or 250):.0f} m/shift</b>, "
                               f"{float(r.get('speed_kmh') or 2.0):.1f} km/h" for r in rigs)
-                    + " (z Maszyn)") if rigs else "Brak wiertnic w pracy – dodaj je w Maszynach.")
+                    + " (from Machines)") if rigs else "No drill rigs in work – add them in Machines.")
         names = list(FIRE)
         cur = next((k for k, x in FIRE.items() if x == int(p["fire"])), names[0])
-        p["fire"] = FIRE[st.selectbox("Urobek dostępny", names, index=names.index(cur), key="k2_fire")]
+        p["fire"] = FIRE[st.selectbox("Blasted rock available", names, index=names.index(cur), key="k2_fire")]
         _blast_hours(base)
-        theme.note("W dniu strzału wozidła i koparki schodzą z wyrobiska na czas ewakuacji i strzału; przejazd koparki "
-                   "na nowy usyp jest wliczony.")
+        theme.note("On a blast day trucks and excavators leave the pit for the evacuation and the blast; the "
+                   "excavator's move to the new muck pile is included.")
 
     _variants_card(base, p, rigs, cap, lab)
 
@@ -416,20 +420,20 @@ def step_plan() -> None:
     target = float(p["target_t"] or 0)
     if target:
         pct = 100 * total / target
-        target_slot.markdown(theme.chip(f"plan: {total:,.0f} t · {pct:.0f} % celu".replace(",", " "), ok=pct >= 100),
+        target_slot.markdown(theme.chip(f"plan: {total:,.0f} t · {pct:.0f} % of target".replace(",", " "), ok=pct >= 100),
                              unsafe_allow_html=True)
     else:
         target_slot.markdown(f'<div class="k2-note" style="padding-bottom:10px">plan: <b>{total:,.0f} t</b> '
-                             "(suma ton koparek)</div>".replace(",", " "), unsafe_allow_html=True)
+                             "(sum of excavator tonnes)</div>".replace(",", " "), unsafe_allow_html=True)
 
     main, side = st.columns([3.2, 1])
     with main, card("grid"):
         h = st.columns([2.2, 1.4, 1.6], vertical_alignment="center")
-        h[0].markdown('<div class="k2-h4">Harmonogram</div>', unsafe_allow_html=True)
+        h[0].markdown('<div class="k2-h4">Schedule</div>', unsafe_allow_html=True)
         with h[1]:
-            day_view = st.radio("Dokładność", ["Dzień", "Zmiana"], horizontal=True, key="k2seg_view",
-                                label_visibility="collapsed") == "Dzień"
-        if h[2].button("↺ Ułóż propozycję od nowa", key="k2_repropose", width="stretch"):
+            day_view = st.radio("Resolution", ["Day", "Shift"], horizontal=True, key="k2seg_view",
+                                label_visibility="collapsed") == "Day"
+        if h[2].button("↺ Rebuild the proposal", key="k2_repropose", width="stretch"):
             st.session_state.variants[st.session_state.get("k2seg_variant") or "A"] = None
             st.session_state.pop("work", None)
             st.rerun()
@@ -450,17 +454,17 @@ def step_plan() -> None:
                     else:
                         _set_ex(val["ex"], a, b, val["area"], float(val.get("t") or 0))
             st.rerun()
-        with st.expander("Edycja zakresem (bez myszy)"):
+        with st.expander("Edit by range (without the mouse)"):
             _editor(work, sc, lab, n)
     with side, card("issues"):
         short = target - total if target else 0.0
         issues = ev["issues"]
-        theme.h4(f"Do poprawy · {len(issues) + (1 if short > 0 else 0)}")
+        theme.h4(f"To fix · {len(issues) + (1 if short > 0 else 0)}")
         if short > 0:
-            st.markdown(f'<div class="k2-issue"><b>Plan nie zrobi celu – brakuje {short:,.0f} t</b><br>'
-                        "Dołóż ton koparkom, zmianę na dobę albo soboty.</div>".replace(",", " "), unsafe_allow_html=True)
+            st.markdown(f'<div class="k2-issue"><b>The plan misses the target – {short:,.0f} t short</b><br>'
+                        "Add tonnes to the excavators, a shift per day or Saturdays.</div>".replace(",", " "), unsafe_allow_html=True)
         if not issues and short <= 0:
-            theme.note("Wszystko się zgadza: urobek jest odstrzelony na czas, każda koparka z tonami ma wozidła.")
+            theme.note("Everything adds up: the rock is blasted in time, every excavator with tonnes has trucks.")
         for j, it in enumerate(issues):
             _issue(it, work, lab, n, j, ev)
 
@@ -468,31 +472,31 @@ def step_plan() -> None:
     appr = st.session_state.get("approved")
     with head[1]:
         if appr and appr["key"] == sig:
-            st.markdown(theme.chip("Harmonogram zatwierdzony"), unsafe_allow_html=True)
-        if st.button("Zatwierdź i porównaj z RL →", type="primary", key="k2_approve", width="stretch"):
+            st.markdown(theme.chip("Schedule approved"), unsafe_allow_html=True)
+        if st.button("Approve and compare with RL →", type="primary", key="k2_approve", width="stretch"):
             try:
                 sim_raw = workplan.scenario_raw(raw, work, ev["grid"], cap)
             except ValueError as e:
-                st.error(f"Nie da się policzyć tego planu: {e}")
+                st.error(f"This plan cannot be run: {e}")
                 return
             st.session_state.approved = {"key": sig, "frozen": workplan.frozen(work, ev, n), "plan": dict(p),
                                          "work": copy.deepcopy(work), "raw": yaml_dump(sim_raw), "planned_t": total,
                                          "variant": st.session_state.get("k2seg_variant") or "A"}
             st.session_state.pop("month", None)
-            st.session_state.nav_next = "③ Symulacja"
+            st.session_state.nav_next = "③ Simulation"
             st.rerun()
 
 
 def _fit_model(raw: dict, sc, real_t: float) -> None:
     from kruszyk.calibrate import calibrate
 
-    with st.spinner("Dopasowuję model do realnej produkcji…"):
+    with st.spinner("Fitting the model to real production…"):
         fitted, _, after = calibrate(sc, {"tonnes_t": real_t, "trucks": sc.truck_count})
     new = copy.deepcopy(raw)
     new["calibration"] = dataclasses.asdict(fitted.calibration)
     state.set_raw(new)
-    st.session_state.k2_fit_msg = (f"Model dopasowany: {after['tonnes_t']:,.0f} t na zmianę "
-                                   f"(przestoje {fitted.calibration.delay_min_per_trip:.1f} min na kurs).").replace(",", " ")
+    st.session_state.k2_fit_msg = (f"Model fitted: {after['tonnes_t']:,.0f} t per shift "
+                                   f"(delays {fitted.calibration.delay_min_per_trip:.1f} min per trip).").replace(",", " ")
     st.rerun()
 
 
@@ -513,25 +517,25 @@ def _blast_hours(raw: dict) -> None:
     v = st.session_state.get("ver", 0)
     f0, f1 = mins(tm("fire_from", "11:00")), mins(tm("fire_to", "11:20"))
     c = st.columns(2)
-    fire = c[0].time_input("Strzał o", tm("fire_from", "11:00"), key=f"k2_bl_ff_{v}", step=dt.timedelta(minutes=5))
-    dur = int(c[1].number_input("Strzał trwa [min]", 5, 240, max(5, f1 - f0) if f1 > f0 else 20, 5,
+    fire = c[0].time_input("Blast at", tm("fire_from", "11:00"), key=f"k2_bl_ff_{v}", step=dt.timedelta(minutes=5))
+    dur = int(c[1].number_input("Blast lasts [min]", 5, 240, max(5, f1 - f0) if f1 > f0 else 20, 5,
                                 key=f"k2_bl_dur_{v}"))
-    crew_a = c[0].time_input("Ekipa przyjeżdża", tm("crew_arrive", "09:00"), key=f"k2_bl_ca_{v}",
+    crew_a = c[0].time_input("Crew arrives", tm("crew_arrive", "09:00"), key=f"k2_bl_ca_{v}",
                              step=dt.timedelta(minutes=15))
-    crew_l = c[1].time_input("Ekipa odjeżdża", tm("crew_leave", "11:40"), key=f"k2_bl_cl_{v}",
+    crew_l = c[1].time_input("Crew leaves", tm("crew_leave", "11:40"), key=f"k2_bl_cl_{v}",
                              step=dt.timedelta(minutes=15))
-    evac = float(c[0].number_input("Ewakuacja przed strzałem [min]", 0.0, 120.0, float(bl.get("evacuation_min") or 10.0),
+    evac = float(c[0].number_input("Evacuation before blast [min]", 0.0, 120.0, float(bl.get("evacuation_min") or 10.0),
                                    5.0, format="%.0f", key=f"k2_bl_ev_{v}"))
     end = mins(fire) + dur
     new = {"fire_from": fire.strftime("%H:%M"), "fire_to": f"{end // 60 % 24:02d}:{end % 60:02d}",
            "crew_arrive": crew_a.strftime("%H:%M"), "crew_leave": crew_l.strftime("%H:%M"), "evacuation_min": evac}
-    c[1].markdown(f'<div class="k2-note" style="padding-top:30px">strzał <b>{new["fire_from"]}–{new["fire_to"]}</b>, '
-                  f'wyrobisko zamknięte od {(mins(fire) - int(evac)) // 60:02d}:{(mins(fire) - int(evac)) % 60:02d}</div>',
+    c[1].markdown(f'<div class="k2-note" style="padding-top:30px">blast <b>{new["fire_from"]}–{new["fire_to"]}</b>, '
+                  f'pit closed from {(mins(fire) - int(evac)) // 60:02d}:{(mins(fire) - int(evac)) % 60:02d}</div>',
                   unsafe_allow_html=True)
     if mins(crew_a) > mins(fire) - evac:
-        st.warning("Ekipa przyjeżdża po rozpoczęciu ewakuacji – ustaw wcześniejszy przyjazd.")
+        st.warning("The crew arrives after the evacuation starts – set an earlier arrival.")
     if mins(crew_l) < end:
-        st.warning("Ekipa odjeżdża przed końcem strzału – ustaw późniejszy odjazd.")
+        st.warning("The crew leaves before the blast ends – set a later departure.")
     if any(str(bl.get(k)) != str(x) for k, x in new.items() if k != "evacuation_min") or \
             float(bl.get("evacuation_min") or 10.0) != evac:
         r = copy.deepcopy(raw)
@@ -551,19 +555,19 @@ def _areas_editor(raw: dict, sc, rigs: list, fire: int, work: dict) -> None:
     ver = f"{st.session_state.get('ver', 0)}_{st.session_state.get('k2_area_ver', 0)}"
     ed = st.data_editor(pd.DataFrame(rows), key=f"k2_areas_{ver}", hide_index=True, width="stretch",
                         disabled=["obszar", "poziom", "mb10", "wiert"],
-                        column_config={"obszar": "obszar", "poziom": st.column_config.NumberColumn("poziom [m]", format="%.0f"),
-                                       "start_t": st.column_config.NumberColumn("leży na start [t]", min_value=0.0,
+                        column_config={"obszar": "area", "poziom": st.column_config.NumberColumn("level [m]", format="%.0f"),
+                                       "start_t": st.column_config.NumberColumn("lying at start [t]", min_value=0.0,
                                                                                 step=1000.0, format="%.0f"),
-                                       "tpm": st.column_config.NumberColumn("t/mb", min_value=5.0),
-                                       "zasoby_t": st.column_config.NumberColumn("zasoby [t]", min_value=0.0, step=5000.0,
+                                       "tpm": st.column_config.NumberColumn("t/m", min_value=5.0),
+                                       "zasoby_t": st.column_config.NumberColumn("reserves [t]", min_value=0.0, step=5000.0,
                                                                                  format="%.0f"),
-                                       "mb10": "mb na 10 tys. t",
+                                       "mb10": "m per 10 kt",
                                        "wiert": st.column_config.TextColumn(
-                                           "wiertnica na zmianę", help="Ile ton wiertnica odwierci w tym obszarze przez "
-                                                                       "całą zmianę (mb/zm. × t/mb).")})
-    theme.note("Na start leży usyp <b>/1</b> (np. O1/1). Każde zlecenie wiercenia to jeden strzał tej wielkości – po "
-               "odwierceniu; każdy strzał to następny usyp: O1/2, O1/3 …"
-               + (f" · limit MW: największy strzał {cap:,.0f} t".replace(",", " ") if cap < float("inf") else ""))
+                                           "drill rig per shift", help="How many tonnes a drill rig drills in this area in "
+                                                                       "a whole shift (m/shift × t/m).")})
+    theme.note("At start muck pile <b>/1</b> lies there (e.g. O1/1). Every drilling order is one blast of that size – once "
+               "drilled; every blast is the next muck pile: O1/2, O1/3 …"
+               + (f" · explosives limit: largest blast {cap:,.0f} t".replace(",", " ") if cap < float("inf") else ""))
     started = False
     for _, r in ed.iterrows():
         if float(r["start_t"] or 0) != float(work["start"].get(r["obszar"], 0.0)):
@@ -598,7 +602,7 @@ def _kt(x: float) -> str:
 
 
 def _tt(x: float) -> str:
-    return f"{_kt(x)} tys. t"
+    return f"{_kt(x)} kt"
 
 
 def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd) -> dict:
@@ -636,12 +640,12 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             per = round(tot / len(g)) if g else 0
             vals = {"a": areas[0] if areas else "", "t": per}
             if not areas:
-                out.append(cell(STAND, "#F3F4F6", "#5B6573", f"{key}: postój" + (f" – {why}" if why else ""),
+                out.append(cell(STAND, "#F3F4F6", "#5B6573", f"{key}: standby" + (f" – {why}" if why else ""),
                                 red=bool(why), v=vals))
                 continue
             bg, fg = acol.get(areas[-1], ("#FFFFFF", "#1B2733"))
             out.append(cell(f"{'/'.join(areas)}: {_tt(tot)}", bg, fg, f"{key}: {'/'.join(areas)} – {_num(tot)} t "
-                            f"({_num(per)} t na zmianę)" + (f" – {why}" if why else ""), red=bool(why), v=vals))
+                            f"({_num(per)} t per shift)" + (f" – {why}" if why else ""), red=bool(why), v=vals))
         return out
 
     trucks_on = [{x: sum(1 for cells in work["tr"].values() if cells[i] == x) for x in ex_ids} for i in range(n)]
@@ -652,11 +656,11 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             if not t:
                 return ""
             if t - ev["quota"][x][i] > 1:
-                return f"w {a} brakuje odstrzelonego urobku: dostanie {_num(ev['quota'][x][i])} t"
+                return f"not enough blasted rock in {a}: it gets {_num(ev['quota'][x][i])} t"
             if rates.get(x) and t > 1.1 * rates[x]:
-                return f"więcej niż ładuje (ok. {_num(rates[x])} t na zmianę)"
+                return f"more than it loads (approx. {_num(rates[x])} t per shift)"
             if not trucks_on[i][x]:
-                return "nie jeździ do niej żadne wozidło"
+                return "no truck drives to it"
             return ""
         return f
 
@@ -670,25 +674,25 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
             if orders:
                 bg, fg = acol.get(orders[-1][0], ("#FFFFFF", "#1B2733"))
                 orders_row.append(cell("\n".join(f"{a}: {_tt(t)}" for a, t in orders), bg, fg,
-                                       f"{rid}: zlecenie " + ", ".join(f"{a} {_num(t)} t" for a, t in orders), bold=True,
+                                       f"{rid}: order " + ", ".join(f"{a} {_num(t)} t" for a, t in orders), bold=True,
                                        v=vals))
             elif any(rr[i]["stop"] for i in g):
-                orders_row.append(cell(STAND, "#F3F4F6", "#5B6573", f"{rid}: postój", v=vals))
+                orders_row.append(cell(STAND, "#F3F4F6", "#5B6573", f"{rid}: standby", v=vals))
             else:
-                orders_row.append(cell("", "#FFFFFF", "#8A93A0", f"{rid}: bez nowego zlecenia", v=vals))
+                orders_row.append(cell("", "#FFFFFF", "#8A93A0", f"{rid}: no new order", v=vals))
             drill: dict[str, float] = {}
             for i in g:
                 for a, d in rr[i]["drill"]:
                     drill[a] = drill.get(a, 0.0) + d
             drive = sum(rr[i]["drive_h"] for i in g)
             wait = rr[g[-1]]["waiting"]
-            title = (f"{rid} wierci: " + (", ".join(f"{a} {_num(d)} t" for a, d in drill.items()) if drill else "nic")
-                     + (f" · przejazd {drive * 60:.0f} min" if drive else "")
-                     + (f" · zostaje na kolejne dni {_num(wait)} t" if wait > 1 else ""))
+            title = (f"{rid} drills: " + (", ".join(f"{a} {_num(d)} t" for a, d in drill.items()) if drill else "nothing")
+                     + (f" · drive {drive * 60:.0f} min" if drive else "")
+                     + (f" · {_num(wait)} t left for the next days" if wait > 1 else ""))
             if drill:
                 a = next(iter(drill))
                 bg, fg = acol.get(a, ("#FFFFFF", "#1B2733"))
-                text = "\n".join(f"{a}: {_tt(d)}" for a, d in drill.items()) + (f"\nzostaje {_tt(wait)}" if wait > 1 else "")
+                text = "\n".join(f"{a}: {_tt(d)}" for a, d in drill.items()) + (f"\nleft {_tt(wait)}" if wait > 1 else "")
                 drill_row.append(cell(text, "#FFFFFF", fg, title, bd=bg))
             else:
                 drill_row.append(cell("–", "#FFFFFF", "#8A93A0", title))
@@ -697,15 +701,15 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
     rows = []
     drilling = work.get("drill", True)
     if not drilling:
-        rows.append({"kind": "group", "name": "WIERCENIE NIE PLANOWANE – urobek dostępny cały czas"})
+        rows.append({"kind": "group", "name": "DRILLING NOT PLANNED – blasted rock available all the time"})
     else:
-        rows.append({"kind": "group", "name": "WIERTNICE – zlecenia ustawiasz Ty, wiercenie liczy program"})
+        rows.append({"kind": "group", "name": "DRILL RIGS – you set the orders, the program works out the drilling"})
     for r in rigs if drilling else []:
         orders_row, drill_row = rig_rows(r["id"])
-        rows.append({"kind": "dr", "name": f"{r['id']} · zlecenia", "id": r["id"], "cells": orders_row})
-        rows.append({"kind": "drx", "name": "↳ wierci", "cells": drill_row})
+        rows.append({"kind": "dr", "name": f"{r['id']} · orders", "id": r["id"], "cells": orders_row})
+        rows.append({"kind": "drx", "name": "↳ drills", "cells": drill_row})
     if drilling:
-        rows.append({"kind": "group", "name": "STRZAŁY – zlecenie = strzał, po odwierceniu · kliknij, żeby przesunąć"})
+        rows.append({"kind": "group", "name": "BLASTS – order = blast, once drilled · click to move"})
         bl = sc.blasting
         fire_at = f"{bl.fire_from}–{bl.fire_to}"
         for a_id in area_ids:
@@ -714,64 +718,64 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
                 fired = [(p, b) for p, b in blasts.items() if b["area"] == a_id and any(x in g for x in b["fire"] or [b["avail"] - 1])]
                 if fired:
                     p, b = fired[0]
-                    moved = f" (przesunięty o {b['delay']} zm.)" if b["delay"] else ""
-                    txt = "\n".join(f"strzał {_tt(c['t'])}" for _, c in fired) + f"\n{fire_at}"
+                    moved = f" (moved by {b['delay']} shifts)" if b["delay"] else ""
+                    txt = "\n".join(f"blast {_tt(c['t'])}" for _, c in fired) + f"\n{fire_at}"
                     out.append(cell(txt, "#1B2733", "#FFFFFF",
-                                    "\n".join(f"strzał {q} (usyp {q}): {_num(c['t'])} t · {c['m']} mb" for q, c in fired)
-                                    + f" · {fire_at}{moved} – urobek od {lab[min(b['avail'], n - 1)]}", bold=True, p=p))
+                                    "\n".join(f"blast {q} (muck pile {q}): {_num(c['t'])} t · {c['m']} m" for q, c in fired)
+                                    + f" · {fire_at}{moved} – blasted rock from {lab[min(b['avail'], n - 1)]}", bold=True, p=p))
                 else:
                     out.append(cell("", "#FFFFFF", "#FFFFFF"))
             rows.append({"kind": "fire", "name": a_id, "cells": out})
-        rows.append({"kind": "group", "name": "URABEK ODSTRZELONY W OBSZARACH"})
+        rows.append({"kind": "group", "name": "BLASTED ROCK IN THE AREAS"})
         for a_id in area_ids:
             out = []
             for g in groups:
                 lft = ev["area_left"][a_id][g[0]]
                 miss = sum(ev["short"][a_id][i] for i in g)
                 if miss > 1:
-                    out.append(cell(f"brak {_tt(miss)}", "#FDE2E2", "#8C0E20", f"{a_id}: koparkom zabraknie {_num(miss)} t",
+                    out.append(cell(f"short {_tt(miss)}", "#FDE2E2", "#8C0E20", f"{a_id}: the excavators will be {_num(miss)} t short",
                                     red=True))
                 else:
                     out.append(cell(_tt(lft) if lft > 1 else "–", "#E3F1E6" if lft > 1 else "#FFFFFF",
-                                    "#1E5A2C" if lft > 1 else "#8A93A0", f"{a_id}: leży ok. {_num(lft)} t"))
+                                    "#1E5A2C" if lft > 1 else "#8A93A0", f"{a_id}: approx. {_num(lft)} t lying"))
             rows.append({"kind": "pile", "name": a_id, "cells": out})
-    rows.append({"kind": "group", "name": "KOPARKI – obszar i tony · ustawiasz Ty"})
+    rows.append({"kind": "group", "name": "EXCAVATORS – area and tonnes · set by you"})
     for x in ex_ids:
         rows.append({"kind": "ex", "name": x, "cells": work_row(x, "ex", ex_why(x))})
-    rows.append({"kind": "group", "name": "WOZIDŁA – do której koparki · ustawiasz Ty"})
+    rows.append({"kind": "group", "name": "TRUCKS – to which excavator · set by you"})
     for tid, cells in work["tr"].items():
         out = []
         for g in groups:
             xs = list(dict.fromkeys(cells[i] for i in g))
             idle = [cells[i] for i in g if cells[i] and workplan.cell(work, cells[i], i)[1] <= 0]
             if xs == [""]:
-                out.append(cell("—", "#F3F4F6", "#8A93A0", f"{tid}: nie jeździ"))
+                out.append(cell("—", "#F3F4F6", "#8A93A0", f"{tid}: idle"))
                 continue
             bg, fg = ecol.get(next(x for x in xs if x), ("#FFFFFF", "#1B2733"))
             text = "/".join(x or "—" for x in xs)
-            out.append(cell(text, bg, fg, f"{tid}: jeździ do {text}" + (f" – {idle[0]} stoi" if idle else ""),
+            out.append(cell(text, bg, fg, f"{tid}: drives to {text}" + (f" – {idle[0]} is standing" if idle else ""),
                             red=bool(idle)))
         rows.append({"kind": "tr", "name": tid, "cells": out})
     for x in ex_ids:
         out = []
         for g in groups:
             k = trucks_on[g[0]][x]
-            out.append(cell(str(k) if k else "–", "#FFFFFF", "#3A4452" if k else "#8A93A0", f"do {x}: {k} wozideł"))
-        rows.append({"kind": "sum", "name": f"wozideł do {x}", "cells": out})
+            out.append(cell(str(k) if k else "–", "#FFFFFF", "#3A4452" if k else "#8A93A0", f"to {x}: {k} trucks"))
+        rows.append({"kind": "sum", "name": f"trucks to {x}", "cells": out})
     planned = ev["planned"]
-    rows.append({"kind": "group", "name": "PLAN NARASTAJĄCO" + (f" · cel {_tt(target)}" if target else "")})
+    rows.append({"kind": "group", "name": "CUMULATIVE PLAN" + (f" · target {_tt(target)}" if target else "")})
     out, acc = [], 0.0
     for g in groups:
         acc += sum(planned[i] for i in g)
         due = target * (g[-1] + 1) / n if target else 0.0
         ok = not target or acc >= due * 0.98
         out.append(cell(f"{acc / 1000:.1f}".replace(".", ","), "#E3F1E6" if ok else "#FFF0B8", "#1E5A2C" if ok else "#6E5600",
-                        f"do końca: {_num(acc)} t" + (f" · w tempie celu powinno być {_num(due)} t" if target else ""),
+                        f"to date: {_num(acc)} t" + (f" · on target pace it should be {_num(due)} t" if target else ""),
                         bold=True))
-    rows.append({"kind": "sum", "name": "wywiezione [tys. t]", "cells": out})
+    rows.append({"kind": "sum", "name": "hauled [kt]", "cells": out})
     areas = []
     for a in sc.areas:
-        info = f"leży na start {_tt(ev['area_left'][a['id']][0])}"
+        info = f"lying at start {_tt(ev['area_left'][a['id']][0])}"
         areas.append({"id": a["id"], "info": info, "bg": acol[a["id"]][0], "fg": acol[a["id"]][1]})
     exs = [{"id": e.id, "allowed": [a for a in area_ids if e.may_work(a)] or area_ids, "rate": round(rates.get(e.id, 0.0)),
             "bg": ecol[e.id][0], "fg": ecol[e.id][1]} for e in sc.excavators if e.id in ecol]
@@ -780,7 +784,8 @@ def _grid_payload(work, ev, rigs, shifts, lab, day_view, sc, rates, target, spd)
     blasts_ = {p: {"t": b["t"], "m": b["m"], "delay": b["delay"], "avail": lab[min(b["avail"], n - 1)],
                    "done": lab[min(b["done"], n - 1)]} for p, b in blasts.items()}
     return {"day": day_view, "spd": spd, "heads": heads, "groups": groups, "labels": lab, "off": [False] * len(heads),
-            "rows": rows, "areas": areas, "exs": exs, "rigs": rigs_, "blasts": blasts_}
+            "rows": rows, "areas": areas, "exs": exs, "rigs": rigs_, "blasts": blasts_,
+            "v_stand": STAND, "v_off": OFF, "v_no_order": NO_ORDER}  # the values the grid sends back
 
 
 # ------------------------------------------------------------------ editing
@@ -806,14 +811,14 @@ def _set_ex(key: str, a: int, b: int, area: str, t_shift: float, part: str = "ex
             continue
         if part == "dr":
             first = days is None or i == a or days[i] != days[i - 1]
-            if area == STAND:
+            if area in STAND_ALL:
                 w[part][key][i] = {"a": "", "t": 0.0, "stop": True}
-            elif area == NO_ORDER or not first:
+            elif area in NO_ORDER_ALL or not first:
                 w[part][key][i] = {"a": "", "t": 0.0}
             else:
                 w[part][key][i] = {"a": area, "t": t_shift}
         else:
-            w[part][key][i] = {"a": area if area != STAND else "", "t": t_shift if area and area != STAND else 0.0}
+            w[part][key][i] = {"a": area if area not in STAND_ALL else "", "t": t_shift if area and area not in STAND_ALL else 0.0}
 
 
 def _set_trucks(ids: list[str], a: int, b: int, ex: str) -> None:
@@ -821,7 +826,7 @@ def _set_trucks(ids: list[str], a: int, b: int, ex: str) -> None:
     for tid in ids:
         for i in range(a, b + 1):
             if tid in w["tr"] and i < len(w["tr"][tid]):
-                w["tr"][tid][i] = "" if ex == OFF else ex
+                w["tr"][tid][i] = "" if ex in OFF_ALL else ex
 
 
 def _move_fire(pile: str, delta) -> None:
@@ -836,31 +841,31 @@ def _move_fire(pile: str, delta) -> None:
 
 def _editor(work, sc, lab, n) -> None:
     areas = [a_["id"] for a_ in sc.areas]
-    for title, part, pre in (("Wiertnica", "dr", "k2_d"), ("Koparka", "ex", "k2_e")):
+    for title, part, pre in (("Drill rig", "dr", "k2_d"), ("Excavator", "ex", "k2_e")):
         if not work.get(part):
             continue
         theme.h4(title)
         c = st.columns([1, 1.4, 1.4, 1.2, 1.2, 1])
         key = c[0].selectbox(title, list(work[part]), key=f"{pre}_ex")
-        a = c[1].selectbox("Od zmiany", range(n), format_func=lambda i: lab[i], key=f"{pre}_from")
-        b = c[2].selectbox("Do zmiany", range(n), index=n - 1, format_func=lambda i: lab[i], key=f"{pre}_to")
-        area = c[3].selectbox("Obszar", areas + [STAND] + ([NO_ORDER] if part == "dr" else []), key=f"{pre}_area")
-        t = c[4].number_input("Ton do odwiercenia" if part == "dr" else "Ton na zmianę", 0.0, 200_000.0, 1000.0, 100.0,
+        a = c[1].selectbox("From shift", range(n), format_func=lambda i: lab[i], key=f"{pre}_from")
+        b = c[2].selectbox("To shift", range(n), index=n - 1, format_func=lambda i: lab[i], key=f"{pre}_to")
+        area = c[3].selectbox("Area", areas + [STAND] + ([NO_ORDER] if part == "dr" else []), key=f"{pre}_area")
+        t = c[4].number_input("Tonnes to drill" if part == "dr" else "Tonnes per shift", 0.0, 200_000.0, 1000.0, 100.0,
                               format="%.0f", key=f"{pre}_t")
         with c[5]:
             st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
-            if st.button("Ustaw", type="primary", key=f"{pre}_set", width="stretch"):
+            if st.button("Set", type="primary", key=f"{pre}_set", width="stretch"):
                 _set_ex(key, min(a, b), max(a, b), area, t, part, [0] * n if part == "dr" else None)
                 st.rerun()
-    theme.h4("Wozidła")
+    theme.h4("Trucks")
     c = st.columns([2.2, 1.4, 1.4, 1.2, 1])
-    ids = c[0].multiselect("Wozidła", list(work["tr"]), key="k2_t_ids")
-    a = c[1].selectbox("Od zmiany", range(n), format_func=lambda i: lab[i], key="k2_t_from")
-    b = c[2].selectbox("Do zmiany", range(n), index=n - 1, format_func=lambda i: lab[i], key="k2_t_to")
-    x = c[3].selectbox("Jeździ do", list(work["ex"]) + [OFF], key="k2_t_ex")
+    ids = c[0].multiselect("Trucks", list(work["tr"]), key="k2_t_ids")
+    a = c[1].selectbox("From shift", range(n), format_func=lambda i: lab[i], key="k2_t_from")
+    b = c[2].selectbox("To shift", range(n), index=n - 1, format_func=lambda i: lab[i], key="k2_t_to")
+    x = c[3].selectbox("Drives to", list(work["ex"]) + [OFF], key="k2_t_ex")
     with c[4]:
         st.markdown("<div style='height:1.7rem'></div>", unsafe_allow_html=True)
-        if st.button("Ustaw", type="primary", key="k2_t_set", width="stretch", disabled=not ids):
+        if st.button("Set", type="primary", key="k2_t_set", width="stretch", disabled=not ids):
             _set_trucks(ids, min(a, b), max(a, b), x)
             st.rerun()
 
@@ -868,44 +873,44 @@ def _editor(work, sc, lab, n) -> None:
 def _issue(it, work, lab, n, j, ev) -> None:
     k, i = it["kind"], it["shift"]
     k_ = it.get("shifts", 1)
-    many = f" ({k_} {'zmiany' if k_ % 10 in (2, 3, 4) and k_ % 100 not in (12, 13, 14) else 'zmian'})" if k_ > 1 else ""
+    many = f" ({k_} shifts)" if k_ > 1 else ""
     if k == workplan.SHORT:
         a = it["area"]
         drill = [r for r, cells in work.get("dr", {}).items() if any(workplan.cell(work, r, s, "dr")[0] == a for s in range(n))]
-        st.markdown(f'<div class="k2-issue"><b>{it["ex"]} od {lab[i]}: w {a} zabraknie {_num(it["t"])} t urobku{many}</b>'
-                    f"<br>Koparki mają więcej ton, niż jest odstrzelone. Dołóż wiercenia w {a} wcześniej"
-                    + (f" ({', '.join(drill)} wierci tam później)" if drill else "") + " albo zmniejsz tony koparek.</div>",
+        st.markdown(f'<div class="k2-issue"><b>{it["ex"]} from {lab[i]}: {a} will be {_num(it["t"])} t of blasted rock short{many}</b>'
+                    f"<br>The excavators have more tonnes than is blasted. Add drilling in {a} earlier"
+                    + (f" ({', '.join(drill)} drills there later)" if drill else "") + " or reduce the excavator tonnes.</div>",
                     unsafe_allow_html=True)
     elif k == workplan.EXHAUSTED:
-        st.markdown(f'<div class="k2-issue"><b>Obszar {it["area"]}: od {lab[i]} wiercenie przekracza zasoby</b><br>'
-                    "Zwiększ zasoby w tabeli obszarów albo przenieś wiertnicę.</div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="k2-issue"><b>Area {it["area"]}: from {lab[i]} drilling exceeds the reserves</b><br>'
+                    "Increase the reserves in the areas table or move the drill rig.</div>", unsafe_allow_html=True)
     elif k == workplan.TOO_BIG:
-        st.markdown(f'<div class="k2-issue"><b>{it["rig"]} · {lab[i]}: strzał {_num(it["t"])} t w {it["area"]}</b><br>'
-                    f"Limit materiału wybuchowego pozwala na ok. {_num(it['cap'])} t w jednym strzale – podziel "
-                    "zlecenie na dwa.</div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="k2-issue"><b>{it["rig"]} · {lab[i]}: blast {_num(it["t"])} t in {it["area"]}</b><br>'
+                    f"The explosives limit allows approx. {_num(it['cap'])} t in one blast – split "
+                    "the order in two.</div>", unsafe_allow_html=True)
     elif k == workplan.UNFINISHED:
-        st.markdown(f'<div class="k2-issue w"><b>{it["rig"]}: {_num(it["t"])} t w {it["area"]} nie zostanie odwierconych '
-                    "do końca okresu</b><br>Zleceń jest więcej, niż wiertnica zdąży – przesuń część na drugą wiertnicę "
-                    "albo zmniejsz zlecenia.</div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="k2-issue w"><b>{it["rig"]}: {_num(it["t"])} t in {it["area"]} will not be drilled '
+                    "by the end of the period</b><br>There are more orders than the drill rig can manage – move some to another drill rig "
+                    "or reduce the orders.</div>", unsafe_allow_html=True)
     elif k == workplan.OVER:
         ex = it["ex"]
         r = max(100.0, round(it["rate"], -2))
-        st.markdown(f'<div class="k2-issue w"><b>{ex}: {_num(it["t"])} t na zmianę{many}</b><br>Realnie ładuje ok. '
-                    f'{_num(it["rate"])} t – reszta planu nie zostanie wywieziona.</div>', unsafe_allow_html=True)
-        if st.button(f"Ustaw {ex} na {_num(r)} t", key=f"k2_fix_{j}", width="stretch"):
+        st.markdown(f'<div class="k2-issue w"><b>{ex}: {_num(it["t"])} t per shift{many}</b><br>It really loads approx. '
+                    f'{_num(it["rate"])} t – the rest of the plan will not be hauled.</div>', unsafe_allow_html=True)
+        if st.button(f"Set {ex} to {_num(r)} t", key=f"k2_fix_{j}", width="stretch"):
             for s in range(n):
                 c = work["ex"][ex][s]
                 if c.get("a") and float(c.get("t") or 0) > 1.1 * it["rate"]:
                     c["t"] = r
             st.rerun()
     elif k == workplan.NO_TRUCKS:
-        st.markdown(f'<div class="k2-issue"><b>{it["ex"]} od {lab[i]}: brak wozideł{many}</b><br>Koparka ma tony, ale nie '
-                    "jeździ do niej żadne wozidło.</div>", unsafe_allow_html=True)
+        st.markdown(f'<div class="k2-issue"><b>{it["ex"]} from {lab[i]}: no trucks{many}</b><br>The excavator has tonnes, but no truck '
+                    "drives to it.</div>", unsafe_allow_html=True)
     elif k == workplan.IDLE_TRUCK:
         ex = it["ex"]
-        st.markdown(f'<div class="k2-issue w"><b>{it["truck"]} od {lab[i]} jeździ do {ex}, a {ex} stoi{many}</b><br>'
-                    "Wozidło nie ma skąd ładować.</div>", unsafe_allow_html=True)
-        if st.button(f"{it['truck']}: nie jeździ, gdy {ex} stoi", key=f"k2_fix_{j}", width="stretch"):
+        st.markdown(f'<div class="k2-issue w"><b>{it["truck"]} from {lab[i]} drives to {ex}, but {ex} is standing{many}</b><br>'
+                    "The truck has nowhere to load from.</div>", unsafe_allow_html=True)
+        if st.button(f"{it['truck']}: idle while {ex} is standing", key=f"k2_fix_{j}", width="stretch"):
             cells = work["tr"][it["truck"]]
             for s in range(n):
                 if cells[s] == ex and workplan.cell(work, ex, s)[1] <= 0:

@@ -22,7 +22,7 @@ from .config import Scenario, _routes
 from .sim import simulate
 from .site import BLAST_TIMES, _crusher_routes, area_layout, build_route, centroid, loading_point, poly_distance_m
 
-WEEKDAYS = ["pon", "wt", "śr", "czw", "pt", "sob", "nd"]
+WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 @dataclass
@@ -162,9 +162,9 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
     warnings: list[str] = []
     for p in planned.values():
         if float(p.get("tonnage_t") or 0) > cap_t + 1:
-            warnings.append(f"Strzał {p['id']}: {float(p['tonnage_t']):,.0f} t wymaga ok. "
-                            f"{float(p['tonnage_t']) * sc.blasting.powder_factor_kg_t:,.0f} kg MW – więcej niż limit "
-                            f"{sc.blasting.max_explosive_kg:,.0f} kg na strzał; podziel go.".replace(",", " "))
+            warnings.append(f"Blast {p['id']}: {float(p['tonnage_t']):,.0f} t needs approx. "
+                            f"{float(p['tonnage_t']) * sc.blasting.powder_factor_kg_t:,.0f} kg of explosives – more than the limit of "
+                            f"{sc.blasting.max_explosive_kg:,.0f} kg per blast; split it.".replace(",", " "))
     waits: dict[str, str] = {}  # blast -> why it is held back by the bench order (latest reason)
     # drilling jobs: blast id -> metres to drill / drilled; rigs move between them
     rig_cfg = [dict(r) for r in plan.rigs] or [{"id": f"W-{i + 1}", "m_per_shift": plan.drill_m_per_shift,
@@ -285,7 +285,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
             try:
                 sc.routes[f"P-{pid}"] = _routes({"r": build_route(sc.site, load_at, f"P-{pid}")})["r"]
             except ValueError:
-                warnings.append(f"Strzał {pid}: brak dojazdu drogą – doprowadź drogę do obszaru {a['id']}")
+                warnings.append(f"Blast {pid}: no road access – extend a road to area {a['id']}")
                 return
             raw_routes: dict = {}
             croutes = _crusher_routes(sc.site, load_at, f"P-{pid}", raw_routes)
@@ -318,7 +318,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                     continue
                 ar = next((x for x in areas if pid.startswith(f"{x['cfg']['id']}/")), None)
                 if ar is None or pid != f"{ar['cfg']['id']}/{ar['next'] + 1}" or not ar["strips"]:
-                    warnings.append(f"Strzał {pid}: poza kolejnością pasów obszaru – pominięty")
+                    warnings.append(f"Blast {pid}: out of the area's strip order – skipped")
                     continue
                 fired.add(pid)
                 self_blast(ar, ar["cfg"], (frozen.get("blast_t") or {}).get(pid))
@@ -332,7 +332,7 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                     continue
                 if not ready(pid):
                     if int(p.get("blast_day") or 1) == wd:
-                        warnings.append(f"Strzał {pid}: w dniu {wd} otwór niegotowy (wiercenie) – strzał przesunięty")
+                        warnings.append(f"Blast {pid}: on working day {wd} the holes are not ready (drilling) – blast postponed")
                     continue
                 fired.add(pid)
                 left[pid] += float(p["tonnage_t"])
@@ -362,8 +362,8 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
                     if not blocker:
                         waits.pop(pid, None)
                     if blocker:
-                        waits[pid] = (f"{day.strftime('%d.%m')}: strzał {pid} czeka na wyprzedzenie frontu – najpierw "
-                                      f"{blocker} na wyższym poziomie (min. {plan.lead_m:.0f} m)")
+                        waits[pid] = (f"{day.strftime('%d.%m')}: blast {pid} waits for the face lead – first "
+                                      f"{blocker} on the upper bench (min. {plan.lead_m:.0f} m)")
                         break
                     taker = next((x for x in waiting if by_id[x].may_work(a["id"])), None)
                     if taker:
@@ -507,12 +507,12 @@ def run_period(sc: Scenario, plan: PeriodPlan, seed: int = 0, progress=None, kpi
         for e in k["excavators"]:
             if v.excavator(e["excavator"]).quota_t is not None:  # stops when it has loaded its tonnes
                 if v.excavator(e["excavator"]).quota_t > 0 and v.blast(ex_pile[e["excavator"]]).tonnage_t <= 1:
-                    idle_empty.append(f"{e['excavator']} (od rana)")
+                    idle_empty.append(f"{e['excavator']} (from the start)")
                 continue
             if v.blast(ex_pile[e["excavator"]]).tonnage_t <= 1:
-                idle_empty.append(f"{e['excavator']} (od rana)")
+                idle_empty.append(f"{e['excavator']} (from the start)")
             elif e.get("blast_done_at_h") is not None and e["blast_done_at_h"] < sc.shift_hours - 0.5:
-                idle_empty.append(f"{e['excavator']} (od {e['blast_done_at_h']:.1f} h)")
+                idle_empty.append(f"{e['excavator']} (from {e['blast_done_at_h']:.1f} h)")
         rows.append({
             "data": day, "dzien": WEEKDAYS[day.weekday()], "dzien_roboczy": wd, "zmiana": shift_no,
             "start": v.shift_plan.start_time, "deszcz": bool(k["rain"]),
@@ -595,9 +595,9 @@ def summary(df: pd.DataFrame, plan: PeriodPlan, crushers: list | None = None) ->
 
 # ---------------------------------------------------------------- main goal of the period: choose the plan
 GOALS = {
-    "cheapest": "💰 Najtańsza tona (najniższy koszt zł/t)",
-    "max": "🏭 Największa produkcja (najwięcej ton)",
-    "deadline": "🎯 X ton do dnia – najtaniej",
+    "cheapest": "💰 Cheapest tonne (lowest cost PLN/t)",
+    "max": "🏭 Largest production (most tonnes)",
+    "deadline": "🎯 X tonnes by a date – cheapest",
 }
 
 

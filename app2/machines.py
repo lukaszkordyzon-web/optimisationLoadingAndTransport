@@ -9,7 +9,7 @@ import streamlit as st
 
 from kruszyk import catalog
 
-OWN = "(własny)"
+OWN = "(custom)"
 
 
 def _num(v, default=0.0) -> float:
@@ -36,9 +36,9 @@ def _apply_model(kind: str, obj: dict, old_model: str, new_model: str) -> dict:
     return obj
 
 
-TRUCK_COLS = {"id": "ID", "model": "model", "ladownosc_t": "ładowność [t]", "masa_t": "masa pusta [t]",
-              "moc_kw": "moc [kW]", "vmax_kmh": "v max [km/h]", "pal_pelny": "paliwo pełny [l/h]",
-              "pal_pusty": "paliwo pusty [l/h]", "pal_jalowy": "paliwo jałowy [l/h]", "bak_l": "bak [l]"}
+TRUCK_COLS = {"id": "ID", "model": "model", "ladownosc_t": "payload [t]", "masa_t": "empty mass [t]",
+              "moc_kw": "power [kW]", "vmax_kmh": "v max [km/h]", "pal_pelny": "fuel loaded [l/h]",
+              "pal_pusty": "fuel empty [l/h]", "pal_jalowy": "fuel idle [l/h]", "bak_l": "tank [l]"}
 TRUCK_KEYS = {"ladownosc_t": ("payload_t", 36), "masa_t": ("empty_mass_t", 30), "moc_kw": ("power_kw", 350),
               "vmax_kmh": ("max_speed_kmh", 45), "pal_pelny": ("fuel_lph_loaded", 45),
               "pal_pusty": ("fuel_lph_empty", 25), "pal_jalowy": ("fuel_lph_idle", 8), "bak_l": ("tank_l", 600)}
@@ -73,9 +73,9 @@ def truck_editor(trucks: list[dict], key: str) -> list[dict]:
     return out
 
 
-EX_COLS = {"id": "ID", "model": "model", "lyzka_m3": "łyżka [m³]", "cykl_s": "cykl łyżki [s]",
-           "wypelnienie": "wypełnienie łyżki", "podstawienie_s": "podstawienie wozidła [s]",
-           "obszary": "może pracować w (puste = wszędzie)"}
+EX_COLS = {"id": "ID", "model": "model", "lyzka_m3": "bucket [m³]", "cykl_s": "bucket cycle [s]",
+           "wypelnienie": "bucket fill", "podstawienie_s": "truck spotting [s]",
+           "obszary": "may work in (empty = anywhere)"}
 EX_KEYS = {"lyzka_m3": ("bucket_m3", 4.0), "cykl_s": ("swing_cycle_s", 30.0), "wypelnienie": ("fill_factor", 0.9),
            "podstawienie_s": ("spot_time_s", 40.0)}
 
@@ -92,7 +92,7 @@ def excavator_editor(exs: list[dict], key: str, area_ids: list[str], models: dic
     cfg["id"] = st.column_config.TextColumn("ID")
     cfg["model"] = st.column_config.SelectboxColumn(
         "model", options=_models("excavator", [str(x) for x in df["model"]]), width="large")
-    cfg["obszary"] = st.column_config.TextColumn(EX_COLS["obszary"], help="Np. O1, O2 – obszary z mapy.")
+    cfg["obszary"] = st.column_config.TextColumn(EX_COLS["obszary"], help="E.g. O1, O2 – areas from the map.")
     ed = st.data_editor(df, key=key, hide_index=True, width="stretch", disabled=["id"], column_config=cfg)
     out = []
     for e, (_, r) in zip(exs, ed.iterrows()):
@@ -108,8 +108,8 @@ def crusher_editor(crushers: list[dict], key: str) -> list[dict]:
     df = pd.DataFrame([{"id": c.get("id"), "model": c.get("model") or OWN, "wydajnosc": c.get("capacity_tph"),
                         "kosz": c.get("hopper_t"), "nadawa_mm": c.get("max_feed_mm", 900.0),
                         "wyladunek_s": c.get("dump_time_s", 60.0), "kwh_t": c.get("kwh_per_t", 1.1)} for c in crushers])
-    cfg = {"id": "ID", "wydajnosc": "wydajność [t/h]", "kosz": "kosz [t]", "nadawa_mm": "max nadawa [mm]",
-           "wyladunek_s": "wyładunek [s]", "kwh_t": "energia [kWh/t]",
+    cfg = {"id": "ID", "wydajnosc": "capacity [t/h]", "kosz": "hopper [t]", "nadawa_mm": "max feed [mm]",
+           "wyladunek_s": "dump time [s]", "kwh_t": "energy [kWh/t]",
            "model": st.column_config.SelectboxColumn("model", options=_models("crusher", [str(x) for x in df["model"]]),
                                                      width="large")}
     ed = st.data_editor(df, key=key, hide_index=True, width="stretch", disabled=["id"], column_config=cfg)
@@ -148,6 +148,7 @@ def sync_site(raw: dict) -> None:
 
 
 ROAD_KEYS = ("single_lane", "speed_limit_kmh", "active")
+ROAD_KIND_LABELS = {"droga": "road", "rampa": "ramp"}  # road kinds are data; shown in English
 
 
 def road_editor(raw: dict, changes: dict, key: str) -> dict:
@@ -157,18 +158,18 @@ def road_editor(raw: dict, changes: dict, key: str) -> dict:
     rows = []
     for r in roads:
         ch = changes.get(r["id"], {})
-        rows.append({"id": r["id"], "nazwa": r.get("name", r["id"]), "rodzaj": r.get("kind", "droga"),
+        rows.append({"id": r["id"], "nazwa": r.get("name", r["id"]), "rodzaj": ROAD_KIND_LABELS.get(r.get("kind", "droga"), r.get("kind", "")),
                      "jeden_pas": bool(ch.get("single_lane", r.get("single_lane", False))),
                      "vmax": float(ch.get("speed_limit_kmh", r.get("speed_limit_kmh", 40.0))),
                      "aktywna": bool(ch.get("active", r.get("active", True)))})
     ed = st.data_editor(pd.DataFrame(rows, columns=["id", "nazwa", "rodzaj", "jeden_pas", "vmax", "aktywna"]), key=key,
                         hide_index=True, width="stretch", disabled=["id", "nazwa", "rodzaj"],
-                        column_config={"id": "ID", "nazwa": "droga", "rodzaj": "rodzaj",
+                        column_config={"id": "ID", "nazwa": "road", "rodzaj": "kind",
                                        "jeden_pas": st.column_config.CheckboxColumn(
-                                           "jeden pas (mijanki)", help="Odznacz = dwa pasy: wozidła mijają się w "
-                                                                       "każdym miejscu, nikt nie czeka na mijance."),
-                                       "vmax": st.column_config.NumberColumn("prędkość max [km/h]", min_value=5.0),
-                                       "aktywna": st.column_config.CheckboxColumn("w użyciu")})
+                                           "single lane (passing bays)", help="Untick = two lanes: trucks pass each other "
+                                                                       "anywhere, nobody waits at a passing bay."),
+                                       "vmax": st.column_config.NumberColumn("max speed [km/h]", min_value=5.0),
+                                       "aktywna": st.column_config.CheckboxColumn("in use")})
     out = {}
     for r, (_, e) in zip(roads, ed.iterrows()):
         want = {"single_lane": bool(e["jeden_pas"]), "speed_limit_kmh": _num(e["vmax"], 40.0),

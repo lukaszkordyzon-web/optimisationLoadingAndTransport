@@ -63,7 +63,7 @@ def test_route_from_map():
 def test_disconnected_roads_are_reported():
     site = demo_site()
     site["roads"][1]["coords"][0] = [50.003, 20.03]  # ramp far away from the haul road
-    with pytest.raises(ValueError, match="brak połączenia"):
+    with pytest.raises(ValueError, match="no road connection"):
         build_route(site, (49.9943, 20.014), "T")
 
 
@@ -94,7 +94,7 @@ def test_drawing_type_follows_shape():
     line = {"type": "LineString", "coordinates": [[20, 50], [20.01, 50]]}
     poly = {"type": "Polygon", "coordinates": [[[20, 50], [20.001, 50], [20.001, 50.001], [20, 50]]]}
     point = {"type": "Point", "coordinates": [20, 50]}
-    assert "drogę" in add_drawing(s, line, "Usyp (materiał)", {"id": "U-01"})  # shape wins over selection
+    assert "Road" in add_drawing(s, line, "Usyp (materiał)", {"id": "U-01"})  # shape wins over selection
     add_drawing(s, poly, "Usyp (materiał)", {"id": "U-01", "material": "wapień"})
     add_drawing(s, poly, "Usyp (materiał)", {"id": "U-01", "material": "wapień"})  # duplicate id renamed
     add_drawing(s, point, "Koparka", {"id": "K-1", "pile": "U-01"})
