@@ -73,7 +73,7 @@
 </div>
 <div class="panes">
   <section class="pane" id="L">
-    <div><span class="tag" id="L-tag"></span><span class="sub">no signals</span></div>
+    <div><span class="tag" id="L-tag"></span></div>
     <div class="kpis">
       <div class="kpi cost"><div class="l">Cost per tonne</div><div class="v" id="L-cpt">–</div></div>
       <div class="kpi"><div class="l">Hauled</div><div class="v" id="L-t">0 t</div></div>
@@ -81,10 +81,10 @@
       <div class="kpi"><div class="l">In queue now</div><div class="v" id="L-q">0</div></div>
     </div>
     <div style="position:relative"><div class="map" id="L-map"></div><div class="banner" id="L-ban"></div></div>
-    <div class="msgs" id="L-msg"><div class="none">Drivers drive as today – no messages.</div></div>
+    <div class="msgs" id="L-msg"></div>
   </section>
   <section class="pane rl" id="R">
-    <div><span class="tag" id="R-tag"></span><span class="sub">same plan, different driving</span></div>
+    <div><span class="tag" id="R-tag"></span></div>
     <div class="kpis">
       <div class="kpi cost"><div class="l">Cost per tonne</div><div class="v" id="R-cpt">–</div></div>
       <div class="kpi"><div class="l">Hauled</div><div class="v" id="R-t">0 t</div></div>
@@ -209,8 +209,8 @@ function draw() {
   if (D.right.signals && D.right.signals.length) {
     const shown = D.right.signals.filter(s => s[0] <= t).slice(-5).reverse();
     el('R-msg').innerHTML = shown.length ? shown.map(s => `<div class="m"><span class="t">${clock(s[0])}</span><b>${s[1]}</b>${s[2]}</div>`).join('')
-      : '<div class="none">Messages for the drivers will appear here.</div>';
-  } else el('R-msg').innerHTML = '<div class="none">No messages in this shift.</div>';
+      : '';
+  } else el('R-msg').innerHTML = '';
   el('clock').textContent = clock(t);
   el('time').value = t;
   if (typeof drawCharts === 'function') drawCharts();

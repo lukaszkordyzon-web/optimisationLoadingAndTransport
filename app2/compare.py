@@ -181,7 +181,7 @@ def _split(state_yaml: str, params: tuple, seed: int, dynamic: bool = False, par
     pack = lambda c: {k: [round(float(v), 3) for v in c[col]] for k, col in  # noqa: E731
                       (("s", "t_s"), ("t", "t"), ("cost", "cost"), ("q", "q"))}
     curves = {"shift_s": sc.shift_hours * 3600, "min_t": 150.0, "L": pack(ca), "R": pack(cb)}
-    return split_html(a, b, "Baseline", "With RL signals", curves, prior="__PRIOR__")
+    return split_html(a, b, "Baseline", "RL", curves, prior="__PRIOR__")
 
 
 PERIODS = ["Shift", "Day", "Several days", "Week", "Month"]
@@ -244,7 +244,7 @@ def _shift_step(n: int, d: int) -> None:
 def step_simulation() -> None:
     head = st.columns([4, 1.4], vertical_alignment="bottom")
     with head[0]:
-        theme.header("Simulation: baseline and with RL signals", "The same shift of the month side by side – the same plan, "
+        theme.header("Simulation: baseline vs RL", "The same shift of the month side by side – the same plan, "
                                                              "weather and breakdowns. Only the way of driving changes.")
     appr = _approved()
     if not appr:
@@ -294,7 +294,7 @@ def step_result() -> None:
                    "weather and breakdowns. "
                    + ("With RL the trucks are assigned to excavators dynamically – driving and assignment change."
                       if res.get("dynamic") else "The trucks drive to the same excavators – only the way of driving changes."))
-        theme.header("The same month: baseline and with RL signals", sub)
+        theme.header("The same month: baseline vs RL", sub)
     appr = _approved()
     if not appr:
         _runs_card(None, None)

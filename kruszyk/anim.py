@@ -252,7 +252,7 @@ def _side(res, label: str = "") -> dict:
     }
 
 
-def split_html(left, right, left_label: str = "Baseline", right_label: str = "With RL signals", curves: dict | None = None,
+def split_html(left, right, left_label: str = "Baseline", right_label: str = "RL", curves: dict | None = None,
                prior: str = "null") -> str:
     """Two maps side by side, one clock: the same shift driven today (left) and with the signals (right).
     `curves`: the shift's cumulative tonnes / cost / queueing for the live charts under the maps; `prior`: the
